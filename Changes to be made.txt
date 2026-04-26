@@ -1,0 +1,19 @@
+Patient Registration Tab:
+Education
+Marital Status
+Occupation 
+Caste
+
+Consultation History:
+
+In point Add Elergy Urine Stool Perspiration
+
+Dropdown and Entry by Dictation
+Past History(surgery/medication)
+Family History
+
+Patient  Name Phone  Address Sticker Print
+
+Letter Pad with letter format for travelling etc
+
+Patient Bill send

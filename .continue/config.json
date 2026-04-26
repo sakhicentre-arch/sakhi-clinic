@@ -1,0 +1,10 @@
+{
+  "models": [
+    {
+      "title": "Deepseek 6.7B",
+      "provider": "ollama",
+      "model": "deepseek-coder:6.7b"
+    }
+  ],
+  "defaultModel": "Deepseek 6.7B"
+}

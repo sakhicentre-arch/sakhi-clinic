@@ -1,0 +1,48 @@
+/* ================= PRINT LAYOUT FIX ================= */
+
+.print-area {
+  width: 100%;
+  max-width: 700px;
+  margin: auto;
+  padding: 30px;
+  font-family: Arial, sans-serif;
+  box-sizing: border-box;
+}
+
+/* TABLE FIX */
+.print-area table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.print-area th,
+.print-area td {
+  border: 1px solid black;
+  padding: 6px;
+  text-align: left;
+  font-size: 14px;
+}
+
+/* PRINT SETTINGS */
+@media print {
+  @page {
+    size: A4;
+    margin: 15mm;  /* ✅ IMPORTANT */
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+
+  .print-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+}

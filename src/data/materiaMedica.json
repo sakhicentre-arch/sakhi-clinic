@@ -1,0 +1,47 @@
+[
+  {
+    "name": "Belladonna",
+    "symptoms": ["high fever", "sudden onset", "throbbing headache", "red face"],
+    "mind": ["irritability", "delirium"],
+    "keynotes": ["sudden symptoms", "heat", "pulsation"],
+    "essence": "The state of intense congestion and violent onset. Characterized by redness, bellicose heat, and throbbing pains that appear and disappear suddenly.",
+    "type": "acute",
+    "category": "physical"
+  },
+  {
+    "name": "Aconite",
+    "symptoms": ["fear", "sudden fever", "restlessness"],
+    "mind": ["anxiety", "fear of death"],
+    "keynotes": ["after exposure to cold wind"],
+    "essence": "The storm before the calm. Dominated by acute, sudden panic and a predictive fear of death, typically following exposure to dry, cold wind.",
+    "type": "acute",
+    "category": "mental"
+  },
+  {
+    "name": "Arsenicum Album",
+    "symptoms": ["restlessness", "burning pain", "weakness", "anxiety"],
+    "mind": ["fear", "insecurity"],
+    "keynotes": ["better by warmth", "thirst for small sips"],
+    "essence": "Profound insecurity manifesting as fastidiousness and extreme restlessness. Burning pains that are paradoxically relieved by heat.",
+    "type": "chronic",
+    "category": "mental"
+  },
+  {
+    "name": "Bryonia",
+    "symptoms": ["dry cough", "body pain", "worse movement"],
+    "mind": ["irritability", "wants to be alone"],
+    "keynotes": ["better by rest", "dryness"],
+    "essence": "The remedy of extreme dryness and aggravation from the slightest motion. The patient is irritable and deeply concerned about their business/material security.",
+    "type": "acute",
+    "category": "physical"
+  },
+  {
+    "name": "Nux Vomica",
+    "symptoms": ["indigestion", "irritability", "constipation"],
+    "mind": ["anger", "impatience"],
+    "keynotes": ["sedentary lifestyle", "oversensitivity"],
+    "essence": "The over-stressed, sedentary urbanite. A state of hyper-irritability, competitive drive, and ineffective urges (in-effectual straining).",
+    "type": "chronic",
+    "category": "mental"
+  }
+]
