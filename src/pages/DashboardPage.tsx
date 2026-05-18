@@ -1,7 +1,8 @@
 /**
  * DashboardPage.tsx (PRO - V12.8 Hardened)
  * Sakhi Clinic — Advanced Clinical Practice Intelligence
- * * Logic: Priority-Aware Analytics, Clinic-Scoped Risk Detection, KPI-Queue Alignment.
+ * Logic: Priority-Aware Analytics, Clinic-Scoped Risk Detection, KPI-Queue Alignment.
+ * V12.9: Added onNavigate prop for state-based navigation to TrashPage
  */
 
 import React, { useEffect, useState, useMemo } from "react";
@@ -15,6 +16,7 @@ import { db, ConsultationOutcome, normalizeOutcome, Consultation } from "../serv
 import { getAllConsultations } from "../services/consultationService";
 import { getFollowUpAlerts, FollowUpAlert } from "../services/followupEngine";
 import { generateWhatsAppLink, isValidPhone } from "../utils/whatsapp";
+import { exportBackup, importBackup } from "../services/backupService";
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement, PointElement, LineElement
@@ -30,7 +32,12 @@ interface DashboardStats {
   dataHealth: { incomplete: number; total: number; score: number };
 }
 
-const DashboardPage: React.FC = () => {
+// ✅ Step 2: Add Props interface with onNavigate
+interface Props {
+  onNavigate: (page: string) => void;
+}
+
+const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [alerts, setAlerts] = useState<FollowUpAlert[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +55,6 @@ const DashboardPage: React.FC = () => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        // 1. Scope Consultations by Clinic
         const consultations = activeClinic === "All" 
           ? allConsultations 
           : allConsultations.filter(c => c.clinicId === activeClinic);
@@ -63,19 +69,25 @@ const DashboardPage: React.FC = () => {
         };
 
         const remedyStats: Record<string, { used: number; improved: number }> = {};
-        const patientHistoryMap = new Map<string, Consultation[]>();
+        const patientById = new Map(patients.map((p) => [p.id, p] as const));
+        const patientLatestConsultations = new Map<string, Consultation[]>();
         let incompleteRecords = 0;
+        const activePatientIds = new Set<string>();
 
         consultations.forEach((c) => {
           const outcome = normalizeOutcome(c.outcome);
           outcomeStats[outcome]++;
           outcomeStats.total++;
 
-          // Integrity Check: Missing outcome or medicines
           if (!c.outcome || (c.medicines || []).length === 0) incompleteRecords++;
 
-          if (!patientHistoryMap.has(c.patientId)) patientHistoryMap.set(c.patientId, []);
-          patientHistoryMap.get(c.patientId)?.push(c);
+          activePatientIds.add(c.patientId);
+
+          const history = patientLatestConsultations.get(c.patientId) || [];
+          history.push(c);
+          history.sort((a, b) => b.date.localeCompare(a.date));
+          if (history.length > 2) history.length = 2;
+          patientLatestConsultations.set(c.patientId, history);
 
           c.medicines?.forEach((m) => {
             const rName = m.name;
@@ -86,27 +98,22 @@ const DashboardPage: React.FC = () => {
           });
         });
 
-        // 2. High-Risk Detection (Scoped to active history)
         const highRiskPatients: Array<{ id: string; name: string; reason: string }> = [];
-        patientHistoryMap.forEach((history, pId) => {
-          const sorted = history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          const lastOutcome = normalizeOutcome(sorted[0]?.outcome);
-          const pName = patients.find(p => p.id === pId)?.name || "Unknown Patient";
+        patientLatestConsultations.forEach((history, pId) => {
+          const lastOutcome = normalizeOutcome(history[0]?.outcome);
+          const pName = patientById.get(pId)?.name || "Unknown Patient";
 
           if (lastOutcome === ConsultationOutcome.WORSE) {
             highRiskPatients.push({ id: pId, name: pName, reason: "Clinical Worsening Detected" });
-          } else if (sorted.length >= 2 && 
-                     normalizeOutcome(sorted[0].outcome) === ConsultationOutcome.NO_CHANGE && 
-                     normalizeOutcome(sorted[1].outcome) === ConsultationOutcome.NO_CHANGE) {
+          } else if (history.length >= 2 &&
+                     normalizeOutcome(history[0].outcome) === ConsultationOutcome.NO_CHANGE &&
+                     normalizeOutcome(history[1].outcome) === ConsultationOutcome.NO_CHANGE) {
             highRiskPatients.push({ id: pId, name: pName, reason: "Clinical Plateau (2+ Visits)" });
           }
         });
 
-        // ✅ BUG #6 FIX: KPI-Queue Alignment
-        // Only count patients with valid phone numbers to match actionable alerts
-        const activePatientIds = new Set(consultations.map(c => c.patientId));
-        const filteredPatients = activeClinic === "All" 
-            ? patients 
+        const filteredPatients = activeClinic === "All"
+            ? patients
             : patients.filter(p => activePatientIds.has(p.id));
 
         const actionableFollowUps = filteredPatients.filter(p => {
@@ -114,7 +121,6 @@ const DashboardPage: React.FC = () => {
             return isDue && isValidPhone(p.phone);
         }).length;
 
-        // ✅ BUG #7 FIX: Scope alerts to active clinic
         const filteredAlerts = activeClinic === "All" 
             ? rawAlerts 
             : rawAlerts.filter(a => activePatientIds.has(a.patientId));
@@ -174,7 +180,29 @@ const DashboardPage: React.FC = () => {
           <div style={healthBadgeStyle(stats?.dataHealth.score || 0)}>
             System Health: {stats?.dataHealth.score}%
           </div>
-          <select value={activeClinic} onChange={(e) => setActiveClinic(e.target.value)} style={clinicSelectStyle}>
+
+          {/* ✅ Step 3: Trash button using onNavigate — no window.location.hash */}
+          <button
+            onClick={() => onNavigate("trash")}
+            style={{
+              padding: "10px 18px",
+              borderRadius: 12,
+              border: "1.5px solid #e2e8f0",
+              background: "#fff",
+              fontWeight: 700,
+              fontSize: 13,
+              cursor: "pointer",
+              color: "#64748b",
+            }}
+          >
+            🗑️ Trash
+          </button>
+
+          <select
+            value={activeClinic}
+            onChange={(e) => setActiveClinic(e.target.value)}
+            style={clinicSelectStyle}
+          >
             <option value="All">All Branches</option>
             <option value="Dabholi">Dabholi Branch</option>
             <option value="City Light">City Light Branch</option>
@@ -187,9 +215,10 @@ const DashboardPage: React.FC = () => {
         <SummaryCard label="Branch Patients" val={stats?.totalPatients} color="#2563eb" />
         <SummaryCard label="Actionable Follow-ups" val={stats?.followUpsDue} color="#d97706" />
         <SummaryCard label="High-Risk Cases" val={stats?.highRiskPatients.length} color="#ef4444" />
-        <SummaryCard label="Clinical Success Rate" 
-          val={`${Math.round(((stats?.outcomeStats[ConsultationOutcome.IMPROVED] || 0) / (stats?.outcomeStats.total || 1)) * 100)}%`} 
-          color="#10b981" 
+        <SummaryCard
+          label="Clinical Success Rate"
+          val={`${Math.round(((stats?.outcomeStats[ConsultationOutcome.IMPROVED] || 0) / (stats?.outcomeStats.total || 1)) * 100)}%`}
+          color="#10b981"
         />
       </div>
 
@@ -206,7 +235,12 @@ const DashboardPage: React.FC = () => {
                   <div style={riskNameStyle}>{p.name}</div>
                   <div style={riskReasonStyle}>{p.reason}</div>
                 </div>
-                <button style={actionButtonStyle} onClick={() => window.location.hash = `#/patient/${p.id}`}>Open Case</button>
+                <button
+                  style={actionButtonStyle}
+                  onClick={() => window.location.hash = `#/patient/${p.id}`}
+                >
+                  Open Case
+                </button>
               </div>
             ))}
           </div>
@@ -216,7 +250,9 @@ const DashboardPage: React.FC = () => {
         <div style={panelStyle}>
           <h3 style={panelTitleStyle}>Success Distribution</h3>
           <div style={{ height: 280 }}>
-            {outcomeChartData && <Pie data={outcomeChartData} options={{ maintainAspectRatio: false }} />}
+            {outcomeChartData && (
+              <Pie data={outcomeChartData} options={{ maintainAspectRatio: false }} />
+            )}
           </div>
         </div>
       </div>
@@ -226,18 +262,28 @@ const DashboardPage: React.FC = () => {
         <h3 style={panelTitleStyle}>Communication & Reminder Queue</h3>
         <div style={alertGridStyle}>
           {alerts.length === 0 ? (
-            <div style={{ ...emptyPlaceholderStyle, gridColumn: '1 / -1' }}>Queue is currently clear.</div>
+            <div style={{ ...emptyPlaceholderStyle, gridColumn: '1 / -1' }}>
+              Queue is currently clear.
+            </div>
           ) : alerts.map((alert, i) => {
             const hasPhone = isValidPhone(alert.phone || "");
-            // Highlight HIGH_RISK alerts with a different border
             const isCritical = alert.type === "HIGH_RISK";
             return (
-              <div key={i} style={{ ...alertCardStyle, borderColor: isCritical ? '#fecaca' : '#e2e8f0', background: isCritical ? '#fffcfc' : '#f8fafc' }}>
+              <div
+                key={i}
+                style={{
+                  ...alertCardStyle,
+                  borderColor: isCritical ? '#fecaca' : '#e2e8f0',
+                  background: isCritical ? '#fffcfc' : '#f8fafc',
+                }}
+              >
                 <div>
-                  <div style={{ fontWeight: 800, fontSize: 14, color: isCritical ? '#991b1b' : '#1e293b' }}>{alert.patientName}</div>
+                  <div style={{ fontWeight: 800, fontSize: 14, color: isCritical ? '#991b1b' : '#1e293b' }}>
+                    {alert.patientName}
+                  </div>
                   <div style={alertMessageStyle(alert.type)}>{alert.message}</div>
                 </div>
-                <button 
+                <button
                   disabled={!hasPhone}
                   onClick={() => window.open(generateWhatsAppLink(alert.phone || "", alert.message)!, "_blank")}
                   style={notifyButtonStyle(hasPhone, isCritical)}
@@ -249,11 +295,57 @@ const DashboardPage: React.FC = () => {
           })}
         </div>
       </div>
+
+      {/* 🔐 DATA BACKUP & RESTORE */}
+      <div style={{ ...panelStyle, marginTop: 24 }}>
+        <h3 style={panelTitleStyle}>🔐 Data Safety & Backup</h3>
+        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+          <button
+            onClick={exportBackup}
+            style={{
+              padding: "12px 18px",
+              borderRadius: 12,
+              border: "1px solid #e2e8f0",
+              background: "#fff",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            📦 Download Backup
+          </button>
+          <label
+            style={{
+              padding: "12px 18px",
+              borderRadius: 12,
+              border: "1px solid #e2e8f0",
+              background: "#fff",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            📥 Restore Backup
+            <input
+              type="file"
+              accept=".json"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                if (e.target.files?.[0]) {
+                  importBackup(e.target.files[0]);
+                }
+              }}
+            />
+          </label>
+        </div>
+        <div style={{ marginTop: 10, fontSize: 12, color: "#64748b" }}>
+          ⚠️ Restoring backup will overwrite all existing data. Use carefully.
+        </div>
+      </div>
+
     </div>
   );
 };
 
-// --- Styles (Refined for Production) ---
+// --- Styles ---
 const containerStyle: React.CSSProperties = { padding: "32px 40px", background: "#f8fafc", minHeight: "100vh", fontFamily: "'Lora', serif" };
 const headerStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 };
 const titleStyle: React.CSSProperties = { fontSize: 32, fontWeight: 800, color: "#0f172a", margin: 0 };
@@ -264,7 +356,7 @@ const healthBadgeStyle = (score: number): React.CSSProperties => ({
   background: score > 85 ? "#dcfce7" : "#fee2e2",
   color: score > 85 ? "#166534" : "#991b1b",
   border: `1px solid ${score > 85 ? "#22c55e" : "#ef4444"}`,
-  textTransform: 'uppercase'
+  textTransform: 'uppercase',
 });
 const statGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 24, marginBottom: 32 };
 const mainGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24 };
@@ -278,9 +370,9 @@ const alertGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColum
 const alertCardStyle: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', borderRadius: 16, border: '1px solid #e2e8f0' };
 const alertMessageStyle = (type: string) => ({ fontSize: 12, fontWeight: 800, color: type === "HIGH_RISK" ? "#dc2626" : "#64748b", marginTop: 4 });
 const notifyButtonStyle = (active: boolean, critical: boolean): React.CSSProperties => ({
-  background: active ? (critical ? '#991b1b' : '#22c55e') : '#cbd5e1', 
-  color: '#fff', border: 'none', padding: '12px 20px', 
-  borderRadius: 12, cursor: active ? 'pointer' : 'not-allowed', fontWeight: 800, fontSize: 12
+  background: active ? (critical ? '#991b1b' : '#22c55e') : '#cbd5e1',
+  color: '#fff', border: 'none', padding: '12px 20px',
+  borderRadius: 12, cursor: active ? 'pointer' : 'not-allowed', fontWeight: 800, fontSize: 12,
 });
 const SummaryCard = ({ label, val, color }: any) => (
   <div style={{ background: '#fff', padding: 28, borderRadius: 24, border: '1.5px solid #e2e8f0' }}>

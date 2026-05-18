@@ -14,6 +14,7 @@ import { useConsultationStore } from "../store/useConsultationStore";
 import { useAppointmentStore } from "../store/useAppointmentStore";
 import { useQueueStore, QueueEntry } from "../store/queueStore";
 import { useUIStore } from "../store/uiStore";
+import { SplitPane } from "../components/layout/LayoutPrimitives";
 import {
   Users, Clock, CheckCircle2, AlertCircle, Plus, Search,
   ChevronRight, Phone, Calendar, Activity, TrendingUp,
@@ -124,7 +125,7 @@ function StatCard({ icon, label, value, color, sub }:
 function AddToQueueDropdown({ onAdd, onClose }:
   { onAdd: (patientId: string) => void; onClose: () => void }) {
   const patients = usePatientStore((s) => s.patients);
-  const { isInQueue } = useQueueStore();
+  const isInQueue = useQueueStore((s) => s.isInQueue);
   const [q, setQ] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -208,7 +209,12 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation }:
     onSelect: (entry: QueueEntry) => void;
     goToConsultation: (patientId: string, appointmentId: string) => void }) {
 
-  const { queue, addToQueue, removeFromQueue, setStatus, moveUp, moveDown } = useQueueStore();
+  const queue = useQueueStore((s) => s.queue);
+  const addToQueue = useQueueStore((s) => s.addToQueue);
+  const removeFromQueue = useQueueStore((s) => s.removeFromQueue);
+  const setStatus = useQueueStore((s) => s.setStatus);
+  const moveUp = useQueueStore((s) => s.moveUp);
+  const moveDown = useQueueStore((s) => s.moveDown);
   const consultations = useConsultationStore((s) => s.consultations);
   const patients = usePatientStore((s) => s.patients);
   const activeClinic = useUIStore((s) => s.activeClinic);
@@ -410,7 +416,7 @@ function ActivePatientPanel({ entry, goToConsultation }:
 
   const patients = usePatientStore((s) => s.patients);
   const consultations = useConsultationStore((s) => s.consultations);
-  const { setStatus } = useQueueStore();
+  const setStatus = useQueueStore((s) => s.setStatus);
 
   const patient = entry ? patients.find(p => p.id === entry.patientId) : null;
 
@@ -681,7 +687,8 @@ function StatsPanel({ goToConsultation }:
   const consultations = useConsultationStore((s) => s.consultations);
   const patients = usePatientStore((s) => s.patients);
   const appointments = useAppointmentStore((s) => s.appointments);
-  const { addToQueue, isInQueue } = useQueueStore();
+  const addToQueue = useQueueStore((s) => s.addToQueue);
+  const isInQueue = useQueueStore((s) => s.isInQueue);
   const activeClinic = useUIStore((s) => s.activeClinic);
 
   const today = todayStr();
@@ -696,8 +703,15 @@ function StatsPanel({ goToConsultation }:
 
   // Queue stats
   const queue = useQueueStore((s) => s.queue);
-  const waiting = queue.filter(e => e.status === "waiting").length;
-  const done = queue.filter(e => e.status === "done").length;
+  const { waiting, done } = useMemo(() => {
+    let waitingCount = 0;
+    let doneCount = 0;
+    for (const entry of queue) {
+      if (entry.status === "waiting") waitingCount += 1;
+      else if (entry.status === "done") doneCount += 1;
+    }
+    return { waiting: waitingCount, done: doneCount };
+  }, [queue]);
 
   // Missed follow-ups
   const missedFollowUps = useMemo(() =>
@@ -896,9 +910,9 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
   const [activeQueueId, setActiveQueueId] = useState<string | null>(null);
   const queue = useQueueStore((s) => s.queue);
 
-  const { loadPatients } = usePatientStore();
-  const { loadConsultations } = useConsultationStore();
-  const { loadAppointments } = useAppointmentStore();
+  const loadPatients = usePatientStore((s) => s.loadPatients);
+  const loadConsultations = useConsultationStore((s) => s.loadConsultations);
+  const loadAppointments = useAppointmentStore((s) => s.loadAppointments);
 
   // Load all data on mount
   useEffect(() => {
@@ -921,8 +935,8 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
   );
 
   return (
-    <div style={{ display: "flex", height: "calc(100vh - 59px)", overflow: "hidden",
-      background: "#f8fafc", fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif" }}>
+    <SplitPane style={{ display: "flex", height: "100%", overflow: "hidden",
+      background: "#f8fafc", fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif", width: "100%" }}>
 
       {/* LEFT: Queue */}
       <QueuePanel
@@ -946,6 +960,6 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
           50% { opacity: 0.5; transform: scale(0.8); }
         }
       `}</style>
-    </div>
+    </SplitPane>
   );
 }

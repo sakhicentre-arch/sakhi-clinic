@@ -1,30 +1,25 @@
-import React, { useMemo } from "react";
+/**
+ * PrescriptionPrint.tsx
+ * Sakhi Clinic — Master Prescription Print (V8.1)
+ * Fixes: single-page output, no repeat, proper A4 isolation,
+ *        one-time print trigger via useEffect, no window.print loops
+ */
+
+import React, { useMemo, useEffect } from "react";
 import { useConsultationStore } from "../store/useConsultationStore";
 import { usePatientStore, Patient } from "../store/usePatientStore";
 import { useAppointmentStore } from "../store/useAppointmentStore";
-
-// ✅ CORE SERVICES
 import { generatePrescriptionPDF } from "../services/pdfService";
 import { shareOnWhatsApp } from "../services/whatsappService";
 import { generateClinicalSummary } from "../ai/clinicalSummaryEngine";
-
-/**
- * SAKHI CLINIC - MASTER PRESCRIPTION MODULE (V8.0)
- * -------------------------------------------------------------
- * PROTOCOL : STRICT ZERO TRUNCATION | TOTAL OUTPUT ALIGNMENT
- * FIXES    : 1. Full data density for Print, PDF, and WhatsApp
- * 2. Security Hash persistence
- * 3. Forced Totality Overview inclusion
- * -------------------------------------------------------------
- */
 
 export default function PrescriptionPrint() {
   const consultations = useConsultationStore((s) => s.consultations);
   const patients = usePatientStore((s) => s.patients);
   const appointments = useAppointmentStore((s) => s.appointments);
 
-  const lastConsultation = useMemo(() => 
-    consultations.length > 0 ? consultations[consultations.length - 1] : null, 
+  const lastConsultation = useMemo(() =>
+    consultations.length > 0 ? consultations[consultations.length - 1] : null,
     [consultations]
   );
 
@@ -35,7 +30,7 @@ export default function PrescriptionPrint() {
   }, [patients, lastConsultation]);
 
   const clinicLocation = useMemo(() => {
-    const apt = appointments.find(a => a.id === lastConsultation?.appointmentId);
+    const apt = appointments.find((a) => a.id === lastConsultation?.appointmentId);
     return apt?.clinic || "City Light Branch";
   }, [appointments, lastConsultation]);
 
@@ -45,7 +40,7 @@ export default function PrescriptionPrint() {
     gender: patient?.gender || "N/A",
     phone: patient?.phone || "N/A",
     address: patient?.address || "No Address Recorded",
-    referredBy: patient?.referredBy || "Self-Referred" 
+    referredBy: patient?.referredBy || "Self-Referred",
   }), [patient]);
 
   const advice = useMemo(() => {
@@ -54,7 +49,6 @@ export default function PrescriptionPrint() {
     const precautionSet = new Set<string>();
     const instructionSet = new Set<string>();
     const followUpSet = new Set<string>();
-
     const meds = lastConsultation.medicines || [];
     meds.forEach((m: any) => {
       const pr = m.prescription || {};
@@ -63,18 +57,29 @@ export default function PrescriptionPrint() {
       if (pr.instructions) instructionSet.add(pr.instructions);
       if (pr.followUpDays) followUpSet.add(pr.followUpDays);
     });
-    return { diet: Array.from(dietSet), precautions: Array.from(precautionSet), instructions: Array.from(instructionSet), followUps: Array.from(followUpSet) };
+    return {
+      diet: Array.from(dietSet),
+      precautions: Array.from(precautionSet),
+      instructions: Array.from(instructionSet),
+      followUps: Array.from(followUpSet),
+    };
   }, [lastConsultation]);
+
+  // ✅ Single one-time print trigger — fires only once when component mounts
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      window.print();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, []);
 
   if (!lastConsultation) {
     return <div style={{ padding: "100px", textAlign: "center" }}>Syncing Clinical Data...</div>;
   }
 
   const clinicalSummary = generateClinicalSummary(lastConsultation);
-  // Permanent Security Hash for this session
   const securityHash = `SAKHI-${lastConsultation.id.slice(-4)}-${Math.random().toString(36).substring(7).toUpperCase()}`;
 
-  // 🔥 MASTER PAYLOAD: This ensures PDF and WhatsApp receive identical clinical density
   const MASTER_PAYLOAD = {
     clinicName: "Sakhi Homeopathic Clinic",
     doctorName: "Dr. Amisha (BHMS)",
@@ -82,123 +87,225 @@ export default function PrescriptionPrint() {
     bio: `${p.age}Y / ${p.gender}`,
     referredBy: p.referredBy,
     date: new Date(lastConsultation.date).toLocaleDateString(),
-    securityHash: securityHash,
+    securityHash,
     totality: {
       complaint: lastConsultation.chiefComplaint || "-",
       miasm: lastConsultation.miasm || "Awaiting Analysis",
       thermal: lastConsultation.thermal || "N/A",
       mind: lastConsultation.mind || "-",
-      observations: lastConsultation.caseText || "-"
+      observations: lastConsultation.caseText || "-",
     },
     medicines: lastConsultation.medicines || [],
     advice: [...advice.diet, ...advice.precautions, ...advice.instructions],
     followUp: `${advice.followUps.join("/") || "15"} Days`,
-    summary: clinicalSummary
-  };
-
-  const pageStyle: React.CSSProperties = {
-    padding: "50px", maxWidth: "800px", margin: "20px auto", backgroundColor: "#ffffff",
-    fontFamily: "Inter, sans-serif", color: "#0f172a", border: "1px solid #e2e8f0", boxShadow: "0 10px 30px rgba(0,0,0,0.05)"
-  };
-
-  const sectionHeader: React.CSSProperties = {
-    fontSize: "13px", color: "#2563eb", textTransform: "uppercase", fontWeight: "900",
-    borderBottom: "2px solid #f1f5f9", paddingBottom: "6px", marginBottom: "15px"
+    summary: clinicalSummary,
   };
 
   return (
-    <div className="print-container" style={{ backgroundColor: "#f8fafc", minHeight: "100vh", padding: "20px 0" }}>
-      <div style={pageStyle} className="print-area">
-        
-        {/* HEADER AREA */}
-        <div style={{ textAlign: "center", borderBottom: "4px solid #2563eb", paddingBottom: "20px", marginBottom: "30px" }}>
-          <h1 style={{ margin: 0, fontSize: "32px", color: "#1e3a8a", fontWeight: "900" }}>{MASTER_PAYLOAD.clinicName}</h1>
-          <p style={{ margin: "5px 0", fontWeight: "700", color: "#475569" }}>{MASTER_PAYLOAD.doctorName}</p>
-          <p style={{ margin: 0, fontSize: "11px", color: "#94a3b8" }}>Authentication Code: {MASTER_PAYLOAD.securityHash}</p>
-        </div>
+    <>
+      <style>{printCSS}</style>
+      <div className="rx-screen-wrapper">
+        <div id="print-area" className="rx-page">
 
-        {/* PATIENT INFO STRIP */}
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "30px", background: "#f8fafc", padding: "15px", borderRadius: "12px", border: "1px solid #edf2f7" }}>
-          <div style={{ fontSize: "14px" }}>
-            <p style={{ margin: 0 }}><b>PATIENT:</b> {MASTER_PAYLOAD.patient}</p>
-            <p style={{ margin: 0 }}><b>BIO:</b> {MASTER_PAYLOAD.bio}</p>
+          {/* HEADER */}
+          <div className="rx-header">
+            <h1 className="rx-clinic-name">{MASTER_PAYLOAD.clinicName}</h1>
+            <p className="rx-doctor">{MASTER_PAYLOAD.doctorName}</p>
+            <p className="rx-hash">Authentication Code: {MASTER_PAYLOAD.securityHash}</p>
           </div>
-          <div style={{ textAlign: "right", fontSize: "14px" }}>
-            <p style={{ margin: 0 }}><b>DATE:</b> {MASTER_PAYLOAD.date}</p>
-            <p style={{ margin: 0 }}><b>REFERRED:</b> {MASTER_PAYLOAD.referredBy}</p>
-          </div>
-        </div>
 
-        {/* CLINICAL TOTALITY OVERVIEW */}
-        <div style={{ marginBottom: "30px" }}>
-          <h3 style={sectionHeader}>Clinical Totality</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
-            <p><b>Complaint:</b> {MASTER_PAYLOAD.totality.complaint}</p>
-            <p><b>Miasmatic Layer:</b> {MASTER_PAYLOAD.totality.miasm}</p>
-            <p><b>Thermal State:</b> {MASTER_PAYLOAD.totality.thermal}</p>
-            <p style={{ gridColumn: "span 2" }}><b>Observations:</b> {MASTER_PAYLOAD.totality.observations}</p>
+          {/* PATIENT INFO */}
+          <div className="rx-patient-strip">
+            <div>
+              <p><b>PATIENT:</b> {MASTER_PAYLOAD.patient}</p>
+              <p><b>BIO:</b> {MASTER_PAYLOAD.bio}</p>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <p><b>DATE:</b> {MASTER_PAYLOAD.date}</p>
+              <p><b>REFERRED:</b> {MASTER_PAYLOAD.referredBy}</p>
+            </div>
           </div>
-        </div>
 
-        {/* RX TABLE */}
-        <div style={{ marginBottom: "30px" }}>
-          <h3 style={sectionHeader}>Rx / Prescription</h3>
-          <table width="100%" style={{ borderCollapse: "collapse", fontSize: "14px" }}>
-            <thead>
-              <tr style={{ background: "#f8fafc", textAlign: "left" }}>
-                <th style={{ padding: "10px", borderBottom: "2px solid #e2e8f0" }}>Remedy & Potency</th>
-                <th style={{ padding: "10px", borderBottom: "2px solid #e2e8f0" }}>Dosage</th>
-                <th style={{ padding: "10px", borderBottom: "2px solid #e2e8f0" }}>Duration</th>
-              </tr>
-            </thead>
-            <tbody>
-              {MASTER_PAYLOAD.medicines.map((m: any, i: number) => (
-                <tr key={i}>
-                  <td style={{ padding: "10px", borderBottom: "1px solid #f1f5f9", fontWeight: "700" }}>{m.name}</td>
-                  <td style={{ padding: "10px", borderBottom: "1px solid #f1f5f9" }}>{m.dosage}</td>
-                  <td style={{ padding: "10px", borderBottom: "1px solid #f1f5f9" }}>{m.duration}</td>
+          {/* CLINICAL TOTALITY */}
+          <div className="rx-section">
+            <h3 className="rx-section-title">Clinical Totality</h3>
+            <div className="rx-totality-grid">
+              <p><b>Complaint:</b> {MASTER_PAYLOAD.totality.complaint}</p>
+              <p><b>Miasmatic Layer:</b> {MASTER_PAYLOAD.totality.miasm}</p>
+              <p><b>Thermal State:</b> {MASTER_PAYLOAD.totality.thermal}</p>
+              <p style={{ gridColumn: "span 2" }}><b>Observations:</b> {MASTER_PAYLOAD.totality.observations}</p>
+            </div>
+          </div>
+
+          {/* RX TABLE */}
+          <div className="rx-section">
+            <h3 className="rx-section-title">Rx / Prescription</h3>
+            <table className="rx-table">
+              <thead>
+                <tr>
+                  <th>Remedy &amp; Potency</th>
+                  <th>Dosage</th>
+                  <th>Duration</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* ADVICE & FOLLOW-UP */}
-        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "25px", marginBottom: "30px" }}>
-          <div>
-            <h3 style={sectionHeader}>Diet & Advice</h3>
-            <ul style={{ fontSize: "12px", color: "#4a5568", paddingLeft: "20px" }}>
-              {MASTER_PAYLOAD.advice.map((a, i) => <li key={i}>{a}</li>)}
-            </ul>
+              </thead>
+              <tbody>
+                {MASTER_PAYLOAD.medicines.map((m: any, i: number) => (
+                  <tr key={i}>
+                    <td style={{ fontWeight: 700 }}>{m.name}</td>
+                    <td>{m.dosage}</td>
+                    <td>{m.duration}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <div style={{ background: "#eff6ff", padding: "20px", borderRadius: "12px", textAlign: "center", border: "1px solid #bfdbfe" }}>
-            <p style={{ margin: 0, fontSize: "11px", color: "#3b82f6", fontWeight: "800" }}>NEXT FOLLOW-UP</p>
-            <p style={{ fontSize: "22px", fontWeight: "900", color: "#1e40af", margin: "10px 0" }}>{MASTER_PAYLOAD.followUp}</p>
+
+          {/* ADVICE & FOLLOW-UP */}
+          <div className="rx-advice-grid">
+            <div>
+              <h3 className="rx-section-title">Diet &amp; Advice</h3>
+              <ul className="rx-advice-list">
+                {MASTER_PAYLOAD.advice.map((a, i) => <li key={i}>{a}</li>)}
+              </ul>
+            </div>
+            <div className="rx-followup-box">
+              <p className="rx-followup-label">NEXT FOLLOW-UP</p>
+              <p className="rx-followup-value">{MASTER_PAYLOAD.followUp}</p>
+            </div>
           </div>
-        </div>
 
-        {/* CLINICAL INSIGHTS */}
-        <div style={{ marginTop: "30px", padding: "15px", borderLeft: "4px solid #e2e8f0", background: "#fcfcfc" }}>
-          <h3 style={{ ...sectionHeader, border: "none" }}>AI Clinical Insights</h3>
-          <p style={{ fontSize: "12px", color: "#718096", fontStyle: "italic" }}>{MASTER_PAYLOAD.summary}</p>
-        </div>
-
-        {/* SIGNATURE */}
-        <div style={{ marginTop: "50px", textAlign: "right" }}>
-          <div style={{ display: "inline-block", borderTop: "1px solid #0f172a", paddingTop: "8px", width: "180px", textAlign: "center" }}>
-            <p style={{ margin: 0, fontWeight: "800", fontSize: "14px" }}>Authorized Signatory</p>
+          {/* AI INSIGHTS */}
+          <div className="rx-insights">
+            <h3 className="rx-section-title" style={{ border: "none" }}>AI Clinical Insights</h3>
+            <p className="rx-insights-text">{MASTER_PAYLOAD.summary}</p>
           </div>
-        </div>
 
-        {/* ACTION BUTTONS (HIDDEN IN PRINT) */}
-        <div className="no-print" style={{ marginTop: "40px", display: "flex", gap: "15px", justifyContent: "center" }}>
-          <button style={{ padding: "12px 25px", borderRadius: "8px", background: "#0f172a", color: "#fff", cursor: "pointer", border: "none", fontWeight: "800" }} 
-                  onClick={() => generatePrescriptionPDF(MASTER_PAYLOAD)}>Generate PDF</button>
-          <button style={{ padding: "12px 25px", borderRadius: "8px", background: "#128c7e", color: "#fff", cursor: "pointer", border: "none", fontWeight: "800" }} 
-                  onClick={() => shareOnWhatsApp(MASTER_PAYLOAD)}>Send WhatsApp</button>
+          {/* SIGNATURE */}
+          <div className="rx-signature">
+            <div className="rx-signature-block">
+              <p>Authorized Signatory</p>
+            </div>
+          </div>
+
+          {/* ACTION BUTTONS — hidden in print */}
+          <div className="no-print rx-actions">
+            <button
+              className="rx-btn-dark"
+              onClick={() => generatePrescriptionPDF(MASTER_PAYLOAD)}
+            >
+              Generate PDF
+            </button>
+            <button
+              className="rx-btn-green"
+              onClick={() => shareOnWhatsApp(MASTER_PAYLOAD)}
+            >
+              Send WhatsApp
+            </button>
+          </div>
+
         </div>
       </div>
-      <style>{`@media print { .no-print { display: none !important; } .print-container { padding: 0; background: #fff; } .print-area { border: none; box-shadow: none; margin: 0; width: 100%; max-width: none; } }`}</style>
-    </div>
+    </>
   );
 }
+
+const printCSS = `
+  /* ── Screen wrapper ── */
+  .rx-screen-wrapper {
+    background: #f8fafc;
+    min-height: 100vh;
+    padding: 20px 0;
+  }
+
+  /* ── Page card (screen only) ── */
+  .rx-page {
+    padding: 50px;
+    max-width: 800px;
+    margin: 0 auto;
+    background: #ffffff;
+    font-family: Inter, sans-serif;
+    color: #0f172a;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+  }
+
+  /* ── Header ── */
+  .rx-header { text-align: center; border-bottom: 4px solid #2563eb; padding-bottom: 20px; margin-bottom: 30px; }
+  .rx-clinic-name { margin: 0; font-size: 32px; color: #1e3a8a; font-weight: 900; }
+  .rx-doctor { margin: 5px 0; font-weight: 700; color: #475569; }
+  .rx-hash { margin: 0; font-size: 11px; color: #94a3b8; }
+
+  /* ── Patient strip ── */
+  .rx-patient-strip {
+    display: flex; justify-content: space-between;
+    margin-bottom: 30px; background: #f8fafc;
+    padding: 15px; border-radius: 12px; border: 1px solid #edf2f7; font-size: 14px;
+  }
+  .rx-patient-strip p { margin: 0 0 4px; }
+
+  /* ── Sections ── */
+  .rx-section { margin-bottom: 30px; }
+  .rx-section-title {
+    font-size: 13px; color: #2563eb; text-transform: uppercase; font-weight: 900;
+    border-bottom: 2px solid #f1f5f9; padding-bottom: 6px; margin-bottom: 15px;
+  }
+  .rx-totality-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px; }
+  .rx-totality-grid p { margin: 0; }
+
+  /* ── Rx table ── */
+  .rx-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .rx-table th { padding: 10px; border-bottom: 2px solid #e2e8f0; text-align: left; background: #f8fafc; }
+  .rx-table td { padding: 10px; border-bottom: 1px solid #f1f5f9; }
+
+  /* ── Advice grid ── */
+  .rx-advice-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 25px; margin-bottom: 30px; }
+  .rx-advice-list { font-size: 12px; color: #4a5568; padding-left: 20px; margin: 0; }
+  .rx-advice-list li { margin-bottom: 4px; }
+  .rx-followup-box { background: #eff6ff; padding: 20px; border-radius: 12px; text-align: center; border: 1px solid #bfdbfe; }
+  .rx-followup-label { margin: 0; font-size: 11px; color: #3b82f6; font-weight: 800; }
+  .rx-followup-value { font-size: 22px; font-weight: 900; color: #1e40af; margin: 10px 0 0; }
+
+  /* ── Insights ── */
+  .rx-insights { margin-top: 30px; padding: 15px; border-left: 4px solid #e2e8f0; background: #fcfcfc; }
+  .rx-insights-text { font-size: 12px; color: #718096; font-style: italic; margin: 0; }
+
+  /* ── Signature ── */
+  .rx-signature { margin-top: 50px; text-align: right; }
+  .rx-signature-block { display: inline-block; border-top: 1px solid #0f172a; padding-top: 8px; width: 180px; text-align: center; }
+  .rx-signature-block p { margin: 0; font-weight: 800; font-size: 14px; }
+
+  /* ── Action buttons (screen only) ── */
+  .rx-actions { margin-top: 40px; display: flex; gap: 15px; justify-content: center; }
+  .rx-btn-dark { padding: 12px 25px; border-radius: 8px; background: #0f172a; color: #fff; cursor: pointer; border: none; font-weight: 800; }
+  .rx-btn-green { padding: 12px 25px; border-radius: 8px; background: #128c7e; color: #fff; cursor: pointer; border: none; font-weight: 800; }
+
+  /* ── PRINT RULES ── */
+  @media print {
+    /* Hide everything on the page */
+    body * { visibility: hidden !important; }
+
+    /* Show only the print area */
+    #print-area, #print-area * { visibility: visible !important; }
+
+    /* Position print area at top-left */
+    #print-area {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%;
+      margin: 0;
+      padding: 20px;
+      border: none;
+      box-shadow: none;
+      background: white;
+    }
+
+    /* Hide buttons inside print area */
+    .no-print { display: none !important; }
+
+    /* A4 page settings — prevents multi-page repeat */
+    @page {
+      size: A4;
+      margin: 10mm;
+    }
+  }
+`;

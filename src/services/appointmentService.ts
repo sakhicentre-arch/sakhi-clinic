@@ -1,42 +1,53 @@
-import { db, Appointment } from "./db";
+import { Appointment, AppointmentStatus, db } from "./db";
 
-type AppointmentStatus = Appointment["status"] | "missed";
-
+const nowIso = () => new Date().toISOString();
 const todayDateString = (): string => new Date().toISOString().slice(0, 10);
+
+const activeAppointments = () => db.appointments.filter((a) => !a.deletedAt);
 
 const canMarkMissed = (status: AppointmentStatus): boolean =>
   status === "booked" || status === "arrived";
+
+const withMetadata = (appointment: Appointment): Appointment => {
+  const timestamp = nowIso();
+  return {
+    ...appointment,
+    createdAt: appointment.createdAt || timestamp,
+    updatedAt: timestamp,
+  };
+};
 
 const markOverdueAppointmentsMissed = async (): Promise<void> => {
   const today = todayDateString();
   const overdue = await db.appointments
     .where("date")
     .below(today)
+    .filter((appointment) => !appointment.deletedAt && canMarkMissed(appointment.status))
     .toArray();
 
   await Promise.all(
-    overdue
-      .filter((appointment) => canMarkMissed(appointment.status as AppointmentStatus))
-      .map((appointment) =>
-        db.appointments.update(appointment.id, {
-          status: "missed" as Appointment["status"],
-        })
-      )
+    overdue.map((appointment) =>
+      db.appointments.update(appointment.id, {
+        status: "missed",
+        updatedAt: nowIso(),
+      })
+    )
   );
 };
 
-const isValidAppointment = (appointment: Appointment): boolean => {
-  if (!appointment?.id) return false;
-  if (!appointment?.patientId) return false;
-  if (!appointment?.patientName?.trim()) return false;
-  if (!appointment?.clinic) return false;
-  if (!appointment?.date) return false;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(appointment.date)) return false;
-  if (!appointment?.time) return false;
-  if (!/^\d{2}:\d{2}$/.test(appointment.time)) return false;
-  if (!appointment?.type) return false;
-  if (!appointment?.status) return false;
-  return true;
+const assertValidAppointment = (appointment: Appointment): void => {
+  if (!appointment?.id) throw new Error("[AppointmentService] Appointment id is required");
+  if (!appointment?.patientId) throw new Error("[AppointmentService] patientId is required");
+  if (!appointment?.patientName?.trim()) throw new Error("[AppointmentService] patientName is required");
+  if (!appointment?.clinic) throw new Error("[AppointmentService] clinic is required");
+  if (!appointment?.date || !/^\d{4}-\d{2}-\d{2}$/.test(appointment.date)) {
+    throw new Error("[AppointmentService] date must be YYYY-MM-DD");
+  }
+  if (!appointment?.time || !/^\d{1,2}:\d{2}$/.test(appointment.time)) {
+    throw new Error("[AppointmentService] time must be HH:MM");
+  }
+  if (!appointment?.type) throw new Error("[AppointmentService] type is required");
+  if (!appointment?.status) throw new Error("[AppointmentService] status is required");
 };
 
 const checkDuplicate = async (
@@ -46,268 +57,156 @@ const checkDuplicate = async (
   excludeId?: string
 ): Promise<Appointment | null> => {
   const existing = await db.appointments
-    .where({
-      date,
-      time,
-      clinic,
-    })
+    .where("[date+time+clinic]")
+    .equals([date, time, clinic])
+    .filter((a) => !a.deletedAt)
     .toArray();
 
-  const duplicates = existing.filter((a) => a.id !== excludeId);
-  return duplicates.length > 0 ? duplicates[0] : null;
+  return existing.find((a) => a.id !== excludeId) || null;
 };
 
 export const appointmentService = {
-  // ================= GET ALL =================
   async getAll(): Promise<Appointment[]> {
     await markOverdueAppointmentsMissed();
-    return await db.appointments.toArray();
+    return activeAppointments().toArray();
   },
 
-  // ================= GET BY ID =================
   async getById(id: string): Promise<Appointment | undefined> {
     if (!id) return undefined;
     await markOverdueAppointmentsMissed();
-    return await db.appointments.get(id);
+    const appointment = await db.appointments.get(id);
+    return appointment?.deletedAt ? undefined : appointment;
   },
 
-  // ================= GET BY PATIENT =================
   async getByPatient(patientId: string): Promise<Appointment[]> {
     if (!patientId) return [];
     await markOverdueAppointmentsMissed();
-    return await db.appointments.where("patientId").equals(patientId).toArray();
+    return db.appointments.where("patientId").equals(patientId).filter((a) => !a.deletedAt).toArray();
   },
 
-  // ================= CREATE APPOINTMENT =================
   async createAppointment(appointment: Appointment): Promise<boolean> {
     try {
       await markOverdueAppointmentsMissed();
-
-      if (!isValidAppointment(appointment)) {
-        console.error("[AppointmentService] Invalid appointment data");
-        return false;
-      }
+      assertValidAppointment(appointment);
 
       if (appointment.type === "scheduled") {
-        const duplicate = await checkDuplicate(
-          appointment.date,
-          appointment.time,
-          appointment.clinic
-        );
-        if (duplicate) {
-          console.warn("[AppointmentService] Slot already booked");
-          return false;
-        }
+        const duplicate = await checkDuplicate(appointment.date, appointment.time, appointment.clinic);
+        if (duplicate) throw new Error("[AppointmentService] Slot already booked");
       }
 
       const existing = await db.appointments.get(appointment.id);
-      if (existing) {
-        console.error("[AppointmentService] Appointment with this ID already exists");
-        return false;
+      if (existing && !existing.deletedAt) {
+        throw new Error("[AppointmentService] Appointment with this ID already exists");
       }
 
-      await db.appointments.add(appointment);
+      await db.appointments.add(withMetadata(appointment));
       return true;
     } catch (error) {
       console.error("[AppointmentService] createAppointment failed:", error);
-      return false;
+      throw error;
     }
   },
 
-  // ================= UPDATE APPOINTMENT =================
   async updateAppointment(id: string, changes: Partial<Appointment>): Promise<boolean> {
     try {
-      if (!id) {
-        console.error("[AppointmentService] updateAppointment requires id");
-        return false;
-      }
-
+      if (!id) throw new Error("[AppointmentService] updateAppointment requires id");
       await markOverdueAppointmentsMissed();
 
-      const existing = await db.appointments.get(id);
-      if (!existing) {
-        console.error("[AppointmentService] Appointment not found");
-        return false;
-      }
+      const existing = await this.getById(id);
+      if (!existing) throw new Error("[AppointmentService] Appointment not found");
 
-      const updated = { ...existing, ...changes, id };
+      const updated = withMetadata({ ...existing, ...changes, id });
+      assertValidAppointment(updated);
 
-      if (!isValidAppointment(updated)) {
-        console.error("[AppointmentService] Invalid appointment data after update");
-        return false;
-      }
-
-      const slotChanged =
-        changes.date !== undefined ||
-        changes.time !== undefined ||
-        changes.clinic !== undefined;
-
+      const slotChanged = changes.date !== undefined || changes.time !== undefined || changes.clinic !== undefined;
       if (slotChanged && updated.type === "scheduled") {
-        const duplicate = await checkDuplicate(
-          updated.date,
-          updated.time,
-          updated.clinic,
-          id
-        );
-        if (duplicate) {
-          console.warn("[AppointmentService] Slot already booked");
-          return false;
-        }
+        const duplicate = await checkDuplicate(updated.date, updated.time, updated.clinic, id);
+        if (duplicate) throw new Error("[AppointmentService] Slot already booked");
       }
 
-      await db.appointments.update(id, updated);
+      await db.appointments.put(updated);
       return true;
     } catch (error) {
       console.error("[AppointmentService] updateAppointment failed:", error);
-      return false;
+      throw error;
     }
   },
 
-  // ================= DELETE APPOINTMENT =================
   async deleteAppointment(id: string): Promise<boolean> {
     try {
-      if (!id) {
-        console.error("[AppointmentService] deleteAppointment requires id");
-        return false;
-      }
-
-      const existing = await db.appointments.get(id);
-      if (!existing) {
-        console.warn("[AppointmentService] Appointment not found");
-        return false;
-      }
-
-      await db.appointments.delete(id);
+      if (!id) throw new Error("[AppointmentService] deleteAppointment requires id");
+      const existing = await this.getById(id);
+      if (!existing) throw new Error("[AppointmentService] Appointment not found");
+      await db.appointments.update(id, { deletedAt: Date.now(), updatedAt: nowIso() });
       return true;
     } catch (error) {
       console.error("[AppointmentService] deleteAppointment failed:", error);
-      return false;
+      throw error;
     }
   },
 
-  // ================= ADD (LEGACY) =================
   async add(a: Appointment): Promise<boolean> {
-    await markOverdueAppointmentsMissed();
-
-    const exists = await db.appointments
-      .where({
-        date: a.date,
-        time: a.time,
-        clinic: a.clinic,
-      })
-      .first();
-
-    if (exists && exists.id !== a.id && a.type === "scheduled") {
-      alert("Slot already booked.");
-      return false;
-    }
-
-    await db.appointments.put(a);
-    return true;
+    return this.createAppointment(a);
   },
 
-  // ================= UPDATE STATUS =================
   async updateStatus(id: string, status: AppointmentStatus): Promise<boolean> {
     try {
-      if (!id) {
-        console.error("[AppointmentService] updateStatus requires id");
-        return false;
-      }
-
-      const existing = await db.appointments.get(id);
-      if (!existing) {
-        console.error("[AppointmentService] Appointment not found");
-        return false;
-      }
-
-      await db.appointments.update(id, { status });
+      if (!id) throw new Error("[AppointmentService] updateStatus requires id");
+      const existing = await this.getById(id);
+      if (!existing) throw new Error("[AppointmentService] Appointment not found");
+      await db.appointments.update(id, { status, updatedAt: nowIso() });
       return true;
     } catch (error) {
       console.error("[AppointmentService] updateStatus failed:", error);
-      return false;
+      throw error;
     }
   },
 
-  // ================= GET BY DATE =================
   async getByDate(date: string): Promise<Appointment[]> {
     if (!date) return [];
     await markOverdueAppointmentsMissed();
-    return await db.appointments.where("date").equals(date).toArray();
+    return db.appointments.where("date").equals(date).filter((a) => !a.deletedAt).toArray();
   },
 
-  // ================= MARK REMINDER SENT =================
   async markReminder(id: string): Promise<boolean> {
     try {
-      if (!id) {
-        console.error("[AppointmentService] markReminder requires id");
-        return false;
-      }
-
-      const existing = await db.appointments.get(id);
-      if (!existing) {
-        console.warn("[AppointmentService] Appointment not found");
-        return false;
-      }
-
-      await db.appointments.update(id, { reminderSent: true });
+      if (!id) throw new Error("[AppointmentService] markReminder requires id");
+      const existing = await this.getById(id);
+      if (!existing) throw new Error("[AppointmentService] Appointment not found");
+      await db.appointments.update(id, { reminderSent: true, updatedAt: nowIso() });
       return true;
     } catch (error) {
       console.error("[AppointmentService] markReminder failed:", error);
-      return false;
+      throw error;
     }
   },
 
-  // ================= MARK OVERDUE MISSED =================
   async markOverdueMissed(): Promise<void> {
     await markOverdueAppointmentsMissed();
   },
 
-  // ================= GET BY CLINIC =================
-  async getByClinic(clinic: "Dabholi" | "City Light"): Promise<Appointment[]> {
+  async getByClinic(clinic: Appointment["clinic"]): Promise<Appointment[]> {
     if (!clinic) return [];
     await markOverdueAppointmentsMissed();
-    return await db.appointments.where("clinic").equals(clinic).toArray();
+    return db.appointments.where("clinic").equals(clinic).filter((a) => !a.deletedAt).toArray();
   },
 
-  // ================= GET BY CLINIC AND DATE =================
-  async getByClinicAndDate(
-    clinic: "Dabholi" | "City Light",
-    date: string
-  ): Promise<Appointment[]> {
+  async getByClinicAndDate(clinic: Appointment["clinic"], date: string): Promise<Appointment[]> {
     if (!clinic || !date) return [];
     await markOverdueAppointmentsMissed();
-    const all = await db.appointments.where("date").equals(date).toArray();
-    return all.filter((a) => a.clinic === clinic);
+    return db.appointments.where("[clinic+date]").equals([clinic, date]).filter((a) => !a.deletedAt).toArray();
   },
 
-  // ================= GET AVAILABLE SLOTS =================
-  async getAvailableSlots(
-    clinic: "Dabholi" | "City Light",
-    date: string,
-    slots: string[]
-  ): Promise<string[]> {
-    if (!clinic || !date || !slots || slots.length === 0) return [];
-
-    const booked = await db.appointments
-      .where({
-        clinic,
-        date,
-      })
-      .toArray();
-
+  async getAvailableSlots(clinic: Appointment["clinic"], date: string, slots: string[]): Promise<string[]> {
+    if (!clinic || !date || !slots?.length) return [];
+    const booked = await this.getByClinicAndDate(clinic, date);
     const bookedTimes = new Set(booked.map((a) => a.time));
     return slots.filter((slot) => !bookedTimes.has(slot));
   },
 
-  // ================= COUNT BY STATUS =================
   async countByStatus(status: AppointmentStatus): Promise<number> {
-    try {
-      if (!status) return 0;
-      const all = await db.appointments.toArray();
-      return all.filter((a) => a.status === status).length;
-    } catch (error) {
-      console.error("[AppointmentService] countByStatus failed:", error);
-      return 0;
-    }
+    if (!status) return 0;
+    const all = await activeAppointments().toArray();
+    return all.filter((a) => a.status === status).length;
   },
 };

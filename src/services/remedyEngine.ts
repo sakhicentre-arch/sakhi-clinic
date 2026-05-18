@@ -3,7 +3,7 @@
  * Clinical Reasoning Logic correlating Materia Medica with Patient History.
  */
 import { materiaMedica } from "../data/materiaMedica";
-import { Consultation, Medicine } from "../db";
+import { Consultation, ConsultationOutcome, normalizeOutcome } from "./db";
 
 export interface RemedySuggestion {
   name: string;
@@ -47,21 +47,25 @@ export function analyzeRemedies(
     
     consultations.forEach(c => {
       const usedThis = c.medicines?.some((m: any) => 
-        m.remedy.toLowerCase().includes(remedyName.toLowerCase())
+        (m.name || "").toLowerCase().includes(remedyName.toLowerCase())
       );
       
       if (usedThis) {
-        if (c.outcome === "Improved" || c.outcome === "Recovered") historyBonus += 4;
-        if (c.outcome === "Partial") historyBonus += 2;
-        if (c.outcome === "Worse") historyBonus -= 4;
+        const outcome = normalizeOutcome(c.outcome);
+        if (outcome === ConsultationOutcome.IMPROVED) historyBonus += 4;
+        if (outcome === ConsultationOutcome.PARTIAL) historyBonus += 2;
+        if (outcome === ConsultationOutcome.WORSE) historyBonus -= 4;
       }
     });
 
     const totalScore = score + historyBonus;
 
-    if (totalScore > 2) {
+    if (totalScore >= 0) {
       // Format proper name (e.g. nux_vomica -> Nux Vomica)
-      const displayName = remedyName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      const displayName = remedyName
+        .split(" ")
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
       
       let reason = "";
       if (matches.length > 0) reason += `Matches: ${matches.slice(0, 3).join(", ")}. `;
@@ -76,5 +80,10 @@ export function analyzeRemedies(
     }
   });
 
-  return suggestions.sort((a, b) => b.score - a.score).slice(0, 5);
+  // ✅ DEBUG (to verify engine is working)
+  console.log("Remedy Suggestions:", suggestions);
+
+  return suggestions
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
 }

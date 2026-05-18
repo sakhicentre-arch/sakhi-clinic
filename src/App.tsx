@@ -7,23 +7,22 @@ import PrescriptionPrint from "./pages/PrescriptionPrint";
 import RevenuePage from "./pages/RevenuePage";
 import TodayPage from "./pages/TodayPage";
 import DashboardPage from "./pages/DashboardPage";
-import ReviewPage from "./pages/ReviewPage"; // IMPORTED
+import ReviewPage from "./pages/ReviewPage";
 import AppShell from "./components/layout/AppShell";
 import { useUIStore, ActivePage } from "./store/uiStore";
+import TrashPage from "./pages/TrashPage";
 
 export default function App() {
-  // Check if current URL is for the review page
   const isReviewPath = window.location.pathname === "/review";
-  
-  const [page, setPage] = useState(isReviewPath ? "review" : "today");
-  const [selectedPatientId, setSelectedPatientId] = useState("");
-  const [selectedAppointmentId, setSelectedAppointmentId] = useState("");
 
+  const [page, setPage] = useState(isReviewPath ? "review" : "today");
+  const activePatientId = useUIStore((s) => s.activePatientId);
+  const activeAppointmentId = useUIStore((s) => s.activeAppointmentId);
   const setActivePage = useUIStore((s) => s.setActivePage);
+  const setActivePatientId = useUIStore((s) => s.setActivePatientId);
   const setActiveConsultation = useUIStore((s) => s.setActiveConsultation);
 
   useEffect(() => {
-    // If we are on the review path, don't let internal state redirect to today
     if (isReviewPath) {
       setPage("review");
     } else {
@@ -32,8 +31,6 @@ export default function App() {
   }, [page, setActivePage, isReviewPath]);
 
   const goToConsultation = (patientId: string, appointmentId: string) => {
-    setSelectedPatientId(patientId);
-    setSelectedAppointmentId(appointmentId);
     setPage("consultation");
     setActiveConsultation(patientId, appointmentId);
   };
@@ -44,41 +41,52 @@ export default function App() {
   };
 
   const handlePatientSelect = (patientId: string) => {
-    setSelectedPatientId(patientId);
+    setActivePatientId(patientId);
     setPage("patients");
   };
 
-  // 1. Patient Experience: Review Page (No Shell)
   if (page === "review") {
     return <ReviewPage />;
   }
 
-  // 2. Print View
   if (page === "print") {
     return <PrescriptionPrint />;
   }
 
-  // 3. Doctor Experience: Standard App
   return (
     <AppShell onNavigate={handleNavigate} onPatientSelect={handlePatientSelect}>
       {page === "today" && (
         <TodayPage goToConsultation={goToConsultation} />
       )}
       {page === "patients" && (
-        <PatientPage goToConsultation={goToConsultation} />
-      )}
+  <PatientPage
+    goToConsultation={goToConsultation}
+    initialPatientId={activePatientId || undefined}
+  />
+)}
       {page === "appointments" && (
         <AppointmentPage goToConsultation={goToConsultation} />
       )}
+
+      {/* ✅ Step 1: Pass onNavigate to DashboardPage */}
       {page === "dashboard" && (
-        <DashboardPage />
+        <DashboardPage onNavigate={setPage} />
       )}
+
+      {page === "trash" && <TrashPage onNavigate={setPage} />}
+
       {page === "consultation" && (
-        <ConsultationPage
-          patientId={selectedPatientId}
-          appointmentId={selectedAppointmentId}
-          onFinish={() => setPage("today")}
-        />
+        activePatientId ? (
+          <ConsultationPage
+            patientId={activePatientId}
+            appointmentId={activeAppointmentId ?? undefined}
+            onFinish={() => setPage("today")}
+          />
+        ) : (
+          <div style={{ padding: 40, color: "#64748b", fontWeight: 700 }}>
+            Select a patient before opening consultation.
+          </div>
+        )
       )}
       {page === "revenue" && <RevenuePage />}
     </AppShell>

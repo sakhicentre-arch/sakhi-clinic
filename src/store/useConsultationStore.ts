@@ -1,7 +1,7 @@
 import { create } from "zustand";
 // FIXED: All types imported from single canonical source — db.ts
 // Local Medicine and Consultation type definitions deleted entirely.
-import { db, Consultation, Medicine } from "../services/db";
+import { Consultation, Medicine } from "../services/db";
 // FIXED: Store calls service layer, not Dexie directly.
 import {
   getAllConsultations,
@@ -9,6 +9,7 @@ import {
   getConsultationsByPatient,
   getLastConsultationByPatient,
 } from "../services/consultationService";
+import { appointmentService } from "../services/appointmentService";
 
 /**
  * SAKHI CLINIC — CONSULTATION STORE (V9.0)
@@ -29,9 +30,13 @@ import {
 // from the store without reaching into db.ts directly.
 export type { Medicine, Consultation };
 
+const toErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
 // ================= STORE SHAPE =================
 type Store = {
   consultations: Consultation[];
+  lastError: string | null;
 
   activeSession: {
     patientId: string;
@@ -54,6 +59,7 @@ type Store = {
   getPatientConsultations: (patientId: string) => Consultation[];
   getLastConsultation: (patientId: string) => Consultation | null;
   getConsultationById: (id: string) => Consultation | undefined;
+  clearError: () => void;
 
   // Phase 20: Miasm Shift Observer
   getMiasmShift: (patientId: string) => {
@@ -69,6 +75,7 @@ type Store = {
 // ================= STORE =================
 export const useConsultationStore = create<Store>((set, get) => ({
   consultations: [],
+  lastError: null,
   activeSession: null,
 
   // -------------------------------------------------------
@@ -81,17 +88,16 @@ export const useConsultationStore = create<Store>((set, get) => ({
     try {
       let data: Consultation[];
       if (dateFilter) {
-        data = await db.consultations
-          .where("date")
-          .startsWith(dateFilter)
-          .toArray();
+        const all = await getAllConsultations();
+        data = all.filter((c) => c.date?.startsWith(dateFilter));
       } else {
         // Full load — use only in Analytics/Revenue pages
         data = await getAllConsultations();
       }
-      set({ consultations: data });
+      set({ consultations: data, lastError: null });
     } catch (error) {
       console.error("[ConsultationStore] loadConsultations failed:", error);
+      set({ lastError: toErrorMessage(error) });
     }
   },
 
@@ -109,10 +115,11 @@ export const useConsultationStore = create<Store>((set, get) => ({
         const otherConsultations = state.consultations.filter(
           (c) => c.patientId !== patientId
         );
-        return { consultations: [...otherConsultations, ...data] };
+        return { consultations: [...otherConsultations, ...data], lastError: null };
       });
     } catch (error) {
       console.error("[ConsultationStore] loadPatientConsultations failed:", error);
+      set({ lastError: toErrorMessage(error) });
     }
   },
 
@@ -136,14 +143,13 @@ export const useConsultationStore = create<Store>((set, get) => ({
       const result = await persistConsultation(consultationToSave);
       if (!result) {
         console.error("[ConsultationStore] Save returned null — check service.");
+        set({ lastError: "Consultation save failed without a service result." });
         return false;
       }
 
       // Mark appointment done if session is active
       if (session?.appointmentId && session.appointmentId === c.appointmentId) {
-        await db.appointments.update(session.appointmentId, {
-          status: "done",
-        });
+        await appointmentService.updateStatus(session.appointmentId, "done");
       }
 
       // Update in-memory store: replace if exists, append if new
@@ -154,12 +160,13 @@ export const useConsultationStore = create<Store>((set, get) => ({
               x.id === c.id ? consultationToSave : x
             )
           : [...state.consultations, consultationToSave];
-        return { consultations: updated, activeSession: null };
+        return { consultations: updated, activeSession: null, lastError: null };
       });
 
       return true;
     } catch (error) {
       console.error("[ConsultationStore] saveConsultation failed:", error);
+      set({ lastError: toErrorMessage(error) });
       return false;
     }
   },
@@ -174,6 +181,7 @@ export const useConsultationStore = create<Store>((set, get) => ({
   },
 
   clearSession: () => set({ activeSession: null }),
+  clearError: () => set({ lastError: null }),
 
   // -------------------------------------------------------
   // SELECTORS

@@ -58,18 +58,19 @@ export function getFollowUpMessage(
  * 2. Gracefully handles missing potency and dosage fields.
  */
 export function getPrescriptionMessage(patientName: string, medicines: Medicine[]): string {
-  const medList = (medicines || [])
+  const prescriptions = (medicines || [])
     .filter(m => m.name.trim() !== "" && m.name !== "Unknown")
     .map(m => {
       const potencyStr = m.potency ? ` (${m.potency})` : "";
       const dosageStr = m.dosage ? ` — ${m.dosage}` : " — as directed";
-      return `• ${m.name}${potencyStr}${dosageStr}`;
+      const noteLine = m.notes?.trim() ? `\n   Note: ${m.notes.trim()}` : "";
+      return `• ${m.name}${potencyStr}${dosageStr}${noteLine}`;
     })
     .join("\n");
   
-  if (!medList) {
+  if (!prescriptions) {
     return `Hello ${patientName}, thank you for your visit to ${CLINIC_NAME}. No active medicines were prescribed for this session (Wait/Observation mode).`;
   }
-  
-  return `Hello ${patientName},\n\nHere is your digital prescription summary from ${CLINIC_NAME}:\n\n${medList}\n\n📝 Please follow the instructions as discussed. Wishing you a speedy recovery! 💊`;
+
+  return `Hello ${patientName},\n\nHere is your digital prescription summary from ${CLINIC_NAME}:\n\n${prescriptions}\n\n📝 Please follow the instructions as discussed. Wishing you a speedy recovery! 💊`;
 }

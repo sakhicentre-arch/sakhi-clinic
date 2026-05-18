@@ -17,3 +17,7 @@ Patient  Name Phone  Address Sticker Print
 Letter Pad with letter format for travelling etc
 
 Patient Bill send
+
+Phase 2
+
+Previous month patient visit summary and out of which how many patient came or due for follow up so that doctor can get over view 

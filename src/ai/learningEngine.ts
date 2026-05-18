@@ -3,12 +3,9 @@
  * PROTOCOL: NO TRUNCATION | DEXIE PERSISTENCE
  */
 
-import { db } from "../services/db";
+import { db, LearningPattern } from "../services/db";
 
-type LearningEntry = {
-  keywords: string[];
-  remedy: string;
-};
+type LearningEntry = LearningPattern & { keywords?: string[] };
 
 // ================= SAVE LEARNING =================
 /**
@@ -18,8 +15,11 @@ export const saveLearning = async (input: string, remedy: string) => {
   const words = input.toLowerCase().split(/\s+/);
 
   const entry: LearningEntry = {
+    symptomKey: words.sort().join("|"),
     keywords: words,
     remedy,
+    score: 1,
+    count: 1,
   };
 
   try {
@@ -43,7 +43,8 @@ export const applyLearningBoost = async (results: any[], input: string) => {
     let boost = 0;
 
     history.forEach((h) => {
-      const match = h.keywords.some((k) => words.includes(k));
+      const keywords = h.keywords || h.symptomKey?.split("|") || [];
+      const match = keywords.some((k) => words.includes(k));
 
       if (match && h.remedy === r.name) {
         boost += 15; // Original learning weight

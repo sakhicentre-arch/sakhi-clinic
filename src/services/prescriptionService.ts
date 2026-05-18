@@ -5,6 +5,8 @@
 
 import { db, Medicine } from "./db";
 
+export type DbPrescription = Medicine;
+
 /**
  * Standardizes medicine objects to ensure zero data loss during saving.
  */
@@ -35,3 +37,8 @@ export async function saveStandardizedPrescription(
     });
   });
 }
+
+export const prescriptionService = {
+  normalizeMedicineSchema,
+  saveStandardizedPrescription,
+};

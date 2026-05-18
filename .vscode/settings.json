@@ -1,0 +1,6 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "console.log('Build": true,
+        "==": true
+    }
+}

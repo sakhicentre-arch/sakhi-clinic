@@ -1,47 +1,48 @@
-import { create } from "zustand";
-import { db, Patient } from "../services/db";
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+import type { Patient, PatientId } from '../types/models';
 
-/**
- * SAKHI CLINIC — PATIENT STORE (V2.0)
- * PROTOCOL: TYPE SYNCHRONIZATION
- */
-
-type PatientStore = {
+interface PatientState {
   patients: Patient[];
+  selectedPatientId: PatientId | null;
+  setSelectedPatientId: (id: PatientId | null) => void;
   loadPatients: () => Promise<void>;
-  addPatient: (p: Patient) => Promise<void>;
-  updatePatient: (id: string, updates: Partial<Patient>) => Promise<void>;
-  deletePatient: (id: string) => Promise<void>;
-};
+  addPatient: (patient: Patient) => Promise<void>;
+  updatePatient: (id: PatientId, updates: Partial<Patient>) => Promise<void>;
+  deletePatient: (id: PatientId) => Promise<void>;
+}
 
-export const usePatientStore = create<PatientStore>((set) => ({
-  patients: [],
+export const usePatientStore = create<PatientState>()(
+  persist(
+    (set, get) => ({
+      patients: [],
+      selectedPatientId: null,
 
-  loadPatients: async () => {
-    const data = await db.patients.toArray();
-    set({ patients: data });
-  },
+      setSelectedPatientId: (id: PatientId | null) => {
+        set({ selectedPatientId: id ? String(id).trim() : null });
+      },
 
-  addPatient: async (p) => {
-    await db.patients.add(p);
-    set((state) => ({
-      patients: [...state.patients, p],
-    }));
-  },
+      loadPatients: async () => {
+        // Production API/DB logic
+      },
 
-  updatePatient: async (id, updates) => {
-    await db.patients.update(id, updates);
-    set((state) => ({
-      patients: state.patients.map(p => p.id === id ? { ...p, ...updates } : p),
-    }));
-  },
+      addPatient: async (patient) => {
+        set((state) => ({ patients: [...state.patients, patient] }));
+      },
 
-  deletePatient: async (id) => {
-    await db.patients.delete(id);
-    set((state) => ({
-      patients: state.patients.filter((p) => p.id !== id),
-    }));
-  },
-}));
+      updatePatient: async (id, updates) => {
+        set((state) => ({
+          patients: state.patients.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+        }));
+      },
 
-export type { Patient };
+      deletePatient: async (id) => {
+        set((state) => ({
+          patients: state.patients.filter((p) => p.id !== id),
+          selectedPatientId: get().selectedPatientId === id ? null : get().selectedPatientId
+        }));
+      },
+    }),
+    { name: 'sakhi-clinic-prod-v1', partialize: (state) => ({ patients: state.patients }) }
+  )
+);

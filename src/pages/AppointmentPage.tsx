@@ -92,15 +92,13 @@ const isSlotBooked = (date: string, time: string, clinic: "Dabholi" | "City Ligh
 export default function AppointmentPage({ goToConsultation }: Props) {
   // ================= STORE LINKAGE =================
   const patients = usePatientStore((s) => s.patients);
-  const {
-    addAppointment,
-    appointments,
-    startConsultation,
-    markArrived,
-    markDone,
-    markReminderSent,
-    loadAppointments,
-  } = useAppointmentStore();
+  const addAppointment = useAppointmentStore((s) => s.addAppointment);
+  const appointments = useAppointmentStore((s) => s.appointments);
+  const startConsultation = useAppointmentStore((s) => s.startConsultation);
+  const markArrived = useAppointmentStore((s) => s.markArrived);
+  const markDone = useAppointmentStore((s) => s.markDone);
+  const markReminderSent = useAppointmentStore((s) => s.markReminderSent);
+  const loadAppointments = useAppointmentStore((s) => s.loadAppointments);
 
   // ================= INITIAL LOAD =================
   useEffect(() => {

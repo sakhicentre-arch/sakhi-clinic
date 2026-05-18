@@ -8,6 +8,7 @@ import {
   Brain,
   ShieldAlert,
   ChevronRight,
+  ChevronDown,
   TrendingUp,
   TrendingDown,
   CheckCircle2,
@@ -22,15 +23,17 @@ import {
 } from "lucide-react";
 import { usePatientStore } from "../store/usePatientStore";
 import { useConsultationStore } from "../store/useConsultationStore";
+import { useUIStore } from "../store/uiStore";
+import { usePatientSearch } from "../hooks/usePatientSearch";
+import { SplitPane, ScrollRegion } from "../components/layout/LayoutPrimitives";
+import type { Consultation, Report } from "../types/models";
+
+type PatientPageConsultation = Omit<Consultation, "outcome" | "medicines"> & {
+  outcome?: string;
+  medicines?: { name: string; dosage?: string; duration?: string }[];
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Report {
-  id: string;
-  name: string;
-  fileUrl: string;
-  uploadedAt: string;
-}
 
 interface FormData {
   name: string;
@@ -41,27 +44,22 @@ interface FormData {
   referredBy: string;
   referredTo: string;
   miasm: string;
+  // ✅ V43: Extended patient profile fields
+  education: string;
+  maritalStatus: string;
+  occupation: string;
+  caste: string;
+  familyHistory: string;
+  pastHistory: string;
 }
 
-// Typed consultation shape — aligned with ConsultationStore payload
-interface Consultation {
-  id?: string;
-  patientId: string;
-  date: string;
-  chiefComplaint?: string;
-  caseText?: string;
-  outcome?: string;
-  miasm?: string;
-  medicines?: { name: string; dosage?: string; duration?: string }[];
-  fee?: number;
-  paymentStatus?: "paid" | "pending";
-  paymentMode?: "cash" | "upi" | "card";
-  // FIXED: Added heringsLawMatch — matches db.ts Consultation schema
-  heringsLawMatch?: boolean;
-}
-
+// ─── FIX 1: Added initialPatientId prop ──────────────────────────────────────
+// This allows App.tsx to pre-select a patient when navigating from another page.
+// Previously, handlePatientSelect in App.tsx set a local selectedPatientId that
+// was never passed down — the selection was orphaned and the RHS never opened.
 interface PatientPageProps {
   goToConsultation?: (patientId: string, appointmentId: string) => void;
+  initialPatientId?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -91,7 +89,7 @@ const getOutcomeBorder = (outcome?: string): string => {
   return "#e0e7ff";
 };
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+// ─── Sub-components ───────────────────────────────────────────────────────
 
 function LoadingScreen() {
   return (
@@ -183,40 +181,112 @@ function EmptySelect() {
   );
 }
 
+// ─── Stable default form — OUTSIDE the component ─────────────────────────────
+// Must not be inside the component body. A const declared inside a component
+// is recreated on every render, giving it a new object identity each time.
+// The sync effect's else-branch calls setFormData(DEFAULT_FORM) — if this
+// were an inline object declared inside the component, React would see a new
+// formData reference on every render, causing cascading re-renders that race
+// against setSelectedId and can leave selectedPatient null mid-cycle.
+const DEFAULT_FORM: FormData = {
+  name: "",
+  age: "",
+  gender: "Male",
+  phone: "",
+  address: "",
+  referredBy: "",
+  referredTo: "",
+  miasm: "Psora",
+  education: "",
+  maritalStatus: "",
+  occupation: "",
+  caste: "",
+  familyHistory: "",
+  pastHistory: "",
+};
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function PatientPage(
   props: PatientPageProps = {}
 ): React.ReactElement {
   // ── Stores ───────────────────────────────────────────────────────────────
+  // CRITICAL FIX: Every usePatientStore() call with NO selector subscribes to
+  // the ENTIRE store. Any mutation (addPatient, persist rehydration, etc.)
+  // triggers a full re-render AND returns new function references for
+  // loadPatients/addPatient/etc. This made the loading useEffect's dep array
+  // [loadPatients, loadConsultations] unstable — the effect re-fired on every
+  // render, creating a continuous re-render loop that reset selectedId timing.
+  //
+  // Fix: extract each action via its own scalar selector. Zustand action
+  // functions are created once in the store closure and never change — a
+  // per-action selector always returns the same reference, making deps stable.
   const patients = usePatientStore((state) => state.patients) || [];
-  const { loadPatients, addPatient, updatePatient, deletePatient } =
-    usePatientStore();
+  const loadPatients = usePatientStore((state) => state.loadPatients);
+  const addPatient = usePatientStore((state) => state.addPatient);
+  const updatePatient = usePatientStore((state) => state.updatePatient);
+  const deletePatient = usePatientStore((state) => state.deletePatient);
+
   const rawConsultations = useConsultationStore(
     (state) => state.consultations
   ) || [];
-  const consultations = rawConsultations as Consultation[];
-  const { loadConsultations } = useConsultationStore();
+  const consultations = rawConsultations as PatientPageConsultation[];
+  const loadConsultations = useConsultationStore((state) => state.loadConsultations);
+  const setActivePatientId = useUIStore((state) => state.setActivePatientId);
 
   // ── Local State ──────────────────────────────────────────────────────────
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState<string>("");
   const [reports, setReports] = useState<Report[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<"overview" | "history" | "finance">("overview");
+  // ✅ V43: Collapsible section state for left panel form
+  const [showProfile, setShowProfile] = useState<boolean>(false);
+  const [showHistory, setShowHistory] = useState<boolean>(false);
 
-  const defaultForm: FormData = {
-    name: "",
-    age: "",
-    gender: "Male",
-    phone: "",
-    address: "",
-    referredBy: "",
-    referredTo: "",
-    miasm: "Psora",
-  };
-  const [formData, setFormData] = useState<FormData>(defaultForm);
+  const [formData, setFormData] = useState<FormData>(DEFAULT_FORM);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ── FIX 2: handleOpenPatient — corrected parameter type ──────────────────
+  //
+  // ROOT CAUSE OF BUG:
+  //   usePatientSearch declares:  onOpen: (patientId: string) => void
+  //   It calls onOpen like:       onOpen(focusedPatient.id)   ← passes a STRING
+  //
+  //   The OLD handler was written as:  (patient: any) => setSelectedId(patient.id)
+  //   When it received the STRING "1714900000000", it did:
+  //     "1714900000000".id  →  undefined
+  //     setSelectedId(undefined)  →  patients.find() returns nothing  →  RHS stays empty
+  //
+  // FIX:
+  //   Accept patientId as a string directly (matching the hook's contract).
+  //   setSelectedId receives the correct string ID → patients.find() succeeds → RHS renders.
+  // ─────────────────────────────────────────────────────────────────────────
+  const syncSelectedId = useCallback(
+    (patientId: string | null) => {
+      setSelectedId(patientId);
+      setActivePatientId(patientId);
+    },
+    [setActivePatientId]
+  );
+
+  const handleOpenPatient = useCallback((patientId: string) => {
+    if (patientId != null && patientId !== "") {
+      syncSelectedId(String(patientId));
+    }
+  }, [syncSelectedId]);
+
+  // ── Task 4: usePatientSearch — uses handleOpenPatient defined above ──────
+  // ✅ FIX: Added safe defaults (filteredPatients = [], focusedIndex = 0)
+  //         to prevent "Cannot read properties of undefined" crash
+  const {
+    searchTerm,
+    setSearchTerm,
+    filteredPatients = [],
+    focusedIndex = 0,
+    setFocusedIndex,
+    handleSearchKeyDown,
+  } = usePatientSearch({ patients, onOpen: handleOpenPatient });
 
   // ── Data Loading ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -232,15 +302,61 @@ export default function PatientPage(
     init();
   }, [loadPatients, loadConsultations]);
 
-  // ── Derived Data ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // ── FIX 3: Sync initialPatientId prop → local selectedId ─────────────────
+  //
+  // Previously, App.tsx's handlePatientSelect set a local selectedPatientId
+  // state but never passed it to PatientPage. The selection was orphaned.
+  //
+  // Now App.tsx passes initialPatientId={selectedPatientId} as a prop.
+  // When it changes (e.g. user navigates from Dashboard → patient), this
+  // effect fires and opens the correct patient in the RHS.
+  // ─────────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (props.initialPatientId) {
+      syncSelectedId(String(props.initialPatientId));
+    }
+  }, [props.initialPatientId, syncSelectedId]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ── FIX 4: selectedPatient — String() coercion for type-safe ID matching ─
+  //
+  // The original strict === comparison silently fails when a patient ID is
+  // stored as a number (e.g., from Dexie auto-increment or legacy records)
+  // while selectedId is a string (always the case here). String() coercion
+  // on both sides makes comparison type-safe at zero runtime cost.
+  // ─────────────────────────────────────────────────────────────────────────
+  const patientsById = useMemo(() => {
+    const map = new Map<string, typeof patients[number]>();
+    for (const patient of patients) {
+      map.set(String(patient.id), patient);
+    }
+    return map;
+  }, [patients]);
+
+  const consultationsByPatientId = useMemo(() => {
+    const map = new Map<string, PatientPageConsultation[]>();
+    consultations.forEach((consultation) => {
+      const key = String(consultation.patientId || "");
+      const bucket = map.get(key);
+      if (bucket) {
+        bucket.push(consultation);
+      } else {
+        map.set(key, [consultation]);
+      }
+    });
+    return map;
+  }, [consultations]);
+
   const selectedPatient = useMemo(
-    () => patients.find((p) => p.id === selectedId) || null,
-    [selectedId, patients]
+    () =>
+      (selectedId ? patientsById.get(String(selectedId)) : null) || null,
+    [selectedId, patientsById]
   );
 
   const patientConsultations = useMemo(
-    () => consultations.filter((c) => c.patientId === selectedId),
-    [consultations, selectedId]
+    () => consultationsByPatientId.get(String(selectedId || "")) || [],
+    [consultationsByPatientId, selectedId]
   );
 
   const sortedConsultations = useMemo(
@@ -302,14 +418,6 @@ export default function PatientPage(
     };
   }, [patientConsultations]);
 
-  const filteredPatients = useMemo(
-    () =>
-      patients.filter((p) =>
-        (p.name || "").toLowerCase().includes(searchTerm.toLowerCase())
-      ),
-    [patients, searchTerm]
-  );
-
   // ── Sync form with selected patient ──────────────────────────────────────
   useEffect(() => {
     if (selectedPatient) {
@@ -322,10 +430,17 @@ export default function PatientPage(
         referredBy: (selectedPatient as any).referredBy || "",
         referredTo: (selectedPatient as any).referredTo || "",
         miasm: (selectedPatient as any).miasm || "Psora",
+        // ✅ V43: Sync new fields from existing patient record
+        education: (selectedPatient as any).education || "",
+        maritalStatus: (selectedPatient as any).maritalStatus || "",
+        occupation: (selectedPatient as any).occupation || "",
+        caste: (selectedPatient as any).caste || "",
+        familyHistory: (selectedPatient as any).familyHistory || "",
+        pastHistory: (selectedPatient as any).pastHistory || "",
       });
       setReports((selectedPatient as any).reports || []);
     } else {
-      setFormData(defaultForm);
+      setFormData(DEFAULT_FORM);
       setReports([]);
     }
   }, [selectedPatient]);
@@ -356,11 +471,13 @@ export default function PatientPage(
     setIsSaving(true);
     try {
       if (selectedPatient) {
+        // ✅ V43: All new fields included in update payload
         await updatePatient(selectedPatient.id, {
           ...formData,
           reports: reports as any,
         });
       } else {
+        // ✅ V43: All new fields included in add payload
         await addPatient({
           ...formData,
           id: Date.now().toString(),
@@ -368,9 +485,9 @@ export default function PatientPage(
           reports: reports as any,
         } as any);
       }
-      setFormData(defaultForm);
+      setFormData(DEFAULT_FORM);
       setReports([]);
-      setSelectedId(null);
+      syncSelectedId(null);
     } catch (error) {
       console.error("Error saving patient:", error);
       alert("Error saving patient. Please try again.");
@@ -387,7 +504,7 @@ export default function PatientPage(
     if (!window.confirm("Delete this patient? This cannot be undone.")) return;
     try {
       await deletePatient(id);
-      if (selectedId === id) setSelectedId(null);
+      if (selectedId === id) syncSelectedId(null);
     } catch (error) {
       console.error("Error deleting patient:", error);
       alert("Error deleting patient. Please try again.");
@@ -397,10 +514,10 @@ export default function PatientPage(
   const handleEditPatient = useCallback(
     (e: React.MouseEvent, patientId: string) => {
       e.stopPropagation();
-      setSelectedId(patientId);
+      syncSelectedId(patientId);
       window.scrollTo({ top: 0, behavior: "smooth" });
     },
-    []
+    [syncSelectedId]
   );
 
   const handleReportUpload = (
@@ -448,12 +565,13 @@ export default function PatientPage(
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div style={S.page}>
+    <SplitPane style={S.page}>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
       {/* ── LEFT PANEL ────────────────────────────────────────────────── */}
       <aside style={S.leftPanel}>
         {/* Registration Form */}
+        {/* ── LAYOUT FIX 2: formHeader capped at 52vh, scrollable internally ── */}
         <div style={S.formHeader}>
           <div style={S.formTitleRow}>
             <div style={S.formIconWrap}>
@@ -468,7 +586,7 @@ export default function PatientPage(
             {selectedPatient && (
               <button
                 style={S.clearBtn}
-                onClick={() => setSelectedId(null)}
+                onClick={() => syncSelectedId(null)}
                 title="Cancel edit"
               >
                 <X size={16} />
@@ -480,6 +598,7 @@ export default function PatientPage(
             onSubmit={handleAdd}
             style={{ display: "flex", flexDirection: "column", gap: "12px" }}
           >
+            {/* ── EXISTING CORE FIELDS (unchanged) ── */}
             <input
               className="sakhi-input"
               style={S.input}
@@ -522,6 +641,113 @@ export default function PatientPage(
               value={formData.address}
               onChange={(e) => handleFormChange("address", e.target.value)}
             />
+
+            {/* ── V43: PATIENT PROFILE SECTION (collapsible) ── */}
+            <div style={S.collapsibleSection}>
+              <button
+                type="button"
+                style={S.collapsibleHeader}
+                onClick={() => setShowProfile((v) => !v)}
+              >
+                <span style={S.collapsibleLabel}>Patient Profile</span>
+                <ChevronDown
+                  size={15}
+                  style={{
+                    transition: "transform 0.2s",
+                    transform: showProfile ? "rotate(180deg)" : "rotate(0deg)",
+                    color: "#64748b",
+                  }}
+                />
+              </button>
+              {showProfile && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "10px" }}>
+                  <div style={{ display: "flex", gap: "10px" }}>
+                    <select
+                      className="sakhi-input"
+                      style={{ ...S.input, flex: 1 }}
+                      value={formData.education}
+                      onChange={(e) => handleFormChange("education", e.target.value)}
+                    >
+                      <option value="">Education</option>
+                      <option value="Illiterate">Illiterate</option>
+                      <option value="Primary">Primary</option>
+                      <option value="10th Pass">10th Pass</option>
+                      <option value="12th Pass">12th Pass</option>
+                      <option value="Graduate">Graduate</option>
+                      <option value="Post-Graduate">Post-Graduate</option>
+                      <option value="Other">Other</option>
+                    </select>
+                    <select
+                      className="sakhi-input"
+                      style={{ ...S.input, flex: 1 }}
+                      value={formData.maritalStatus}
+                      onChange={(e) => handleFormChange("maritalStatus", e.target.value)}
+                    >
+                      <option value="">Marital Status</option>
+                      <option value="Single">Single</option>
+                      <option value="Married">Married</option>
+                      <option value="Divorced">Divorced</option>
+                      <option value="Widowed">Widowed</option>
+                    </select>
+                  </div>
+                  <div style={{ display: "flex", gap: "10px" }}>
+                    <input
+                      className="sakhi-input"
+                      style={{ ...S.input, flex: 1 }}
+                      placeholder="Occupation"
+                      value={formData.occupation}
+                      onChange={(e) => handleFormChange("occupation", e.target.value)}
+                    />
+                    <input
+                      className="sakhi-input"
+                      style={{ ...S.input, flex: 1 }}
+                      placeholder="Caste"
+                      value={formData.caste}
+                      onChange={(e) => handleFormChange("caste", e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── V43: MEDICAL HISTORY SECTION (collapsible) ── */}
+            <div style={S.collapsibleSection}>
+              <button
+                type="button"
+                style={S.collapsibleHeader}
+                onClick={() => setShowHistory((v) => !v)}
+              >
+                <span style={S.collapsibleLabel}>Medical History</span>
+                <ChevronDown
+                  size={15}
+                  style={{
+                    transition: "transform 0.2s",
+                    transform: showHistory ? "rotate(180deg)" : "rotate(0deg)",
+                    color: "#64748b",
+                  }}
+                />
+              </button>
+              {showHistory && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "10px" }}>
+                  <textarea
+                    className="sakhi-input"
+                    style={{ ...S.input, minHeight: "64px", resize: "vertical" }}
+                    placeholder="Family History (e.g. Father: Diabetes, Mother: BP)"
+                    value={formData.familyHistory}
+                    onChange={(e) => handleFormChange("familyHistory", e.target.value)}
+                  />
+                  <textarea
+                    className="sakhi-input"
+                    style={{ ...S.input, minHeight: "64px", resize: "vertical" }}
+                    placeholder="Past History (e.g. Appendectomy 2015, Penicillin allergy)"
+                    value={formData.pastHistory}
+                    onChange={(e) => handleFormChange("pastHistory", e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* ── EXISTING FIELDS CONTINUED (unchanged) ── */}
             <div style={{ display: "flex", gap: "10px" }}>
               <input
                 className="sakhi-input"
@@ -572,7 +798,8 @@ export default function PatientPage(
           </form>
         </div>
 
-        {/* Search */}
+        {/* ── Task 4: Enhanced Search — arrow nav + Enter to open ── */}
+        {/* ── LAYOUT FIX 3: searchWrap has flexShrink: 0 (preserved via S.searchWrap) ── */}
         <div style={S.searchWrap}>
           <span style={S.searchIcon}>
             <Search size={16} color="#94a3b8" />
@@ -580,37 +807,52 @@ export default function PatientPage(
           <input
             className="sakhi-input"
             style={{ ...S.input, paddingLeft: "40px", fontSize: "13.5px" }}
-            placeholder="Search patients..."
+            placeholder="Search patients... (↑↓ navigate, Enter to open)"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            autoComplete="off"
           />
         </div>
 
         {/* Patient List */}
-        <div className="custom-scroll" style={S.patientList}>
-          {filteredPatients.length === 0 && (
+        {/* ── LAYOUT FIX 4: patientList flex: 1, minHeight: 0, overflowY: auto ── */}
+        <ScrollRegion className="custom-scroll" style={S.patientList}>
+          {(filteredPatients?.length ?? 0) === 0 && (
             <div style={S.emptyList}>
               {searchTerm
                 ? `No patients matching "${searchTerm}"`
                 : "No patients registered yet."}
             </div>
           )}
-          {filteredPatients.map((p) => {
-            const isActive = selectedId === p.id;
+          {(filteredPatients || []).map((p, listIndex) => {
+            const isActive = String(selectedId) === String(p.id);
+            // Task 4: Highlight row focused via keyboard arrow nav
+            const isKeyboardFocused = listIndex === focusedIndex;
             return (
               <div
                 key={p.id}
-                className={`patient-row ${isActive ? "patient-row-active" : ""}`}
-                onClick={() => setSelectedId(p.id)}
+                className={`patient-row ${isActive ? "patient-row-active" : ""} ${isKeyboardFocused ? "patient-row-focused" : ""}`}
+                // ─────────────────────────────────────────────────────────
+                // FIX 5: Mouse click — String() coercion ensures correct
+                // selectedId regardless of source ID type (string vs number).
+                // This is the primary mouse-click selection path.
+                // ─────────────────────────────────────────────────────────
+                onClick={() => {
+                  if (p.id != null) syncSelectedId(String(p.id));
+                }}
+                onMouseEnter={() => setFocusedIndex(listIndex)}
               >
                 {isActive && <div style={S.activeBar} />}
                 <div
                   style={{
                     ...S.avatar,
-                    backgroundColor: isActive ? "#2563eb" : "#e2e8f0",
-                    color: isActive ? "#fff" : "#475569",
+                    backgroundColor: isActive ? "#2563eb" : isKeyboardFocused ? "#3b82f6" : "#e2e8f0",
+                    color: isActive || isKeyboardFocused ? "#fff" : "#475569",
                     boxShadow: isActive
                       ? "0 4px 12px rgba(37,99,235,0.25)"
+                      : isKeyboardFocused
+                      ? "0 4px 12px rgba(59,130,246,0.2)"
                       : "none",
                   }}
                 >
@@ -643,11 +885,11 @@ export default function PatientPage(
               </div>
             );
           })}
-        </div>
+        </ScrollRegion>
       </aside>
 
       {/* ── RIGHT PANEL ───────────────────────────────────────────────── */}
-      <main className="custom-scroll" style={S.rightPanel}>
+      <ScrollRegion className="custom-scroll" style={S.rightPanel}>
         {!selectedPatient ? (
           <EmptySelect />
         ) : (
@@ -819,7 +1061,6 @@ export default function PatientPage(
                 {/* ── TAB: OVERVIEW ─────────────────────────────────────── */}
                 {activeTab === "overview" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                    {/* Miasm mapping */}
                     <div style={S.card}>
                       <SectionTitle icon={<BarChart3 size={18} color="#6366f1" />} label="Miasmatic Mapping" />
                       <div style={{ display: "flex", flexDirection: "column", gap: "18px", marginTop: "8px" }}>
@@ -847,7 +1088,6 @@ export default function PatientPage(
                       </div>
                     </div>
 
-                    {/* Healing trend */}
                     <div style={S.card}>
                       <SectionTitle icon={<TrendingUp size={18} color="#10b981" />} label="Healing Direction" />
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px", marginTop: "12px" }}>
@@ -865,8 +1105,6 @@ export default function PatientPage(
                             {healingTrend}
                           </div>
                         </div>
-
-                        {/* FIXED: heringsLawMatch now typed in local Consultation interface */}
                         <div
                           style={{
                             padding: "20px",
@@ -1130,8 +1368,8 @@ export default function PatientPage(
             </div>
           </div>
         )}
-      </main>
-    </div>
+      </ScrollRegion>
+    </SplitPane>
   );
 }
 
@@ -1173,10 +1411,39 @@ function SectionTitle({ icon, label }: { icon: React.ReactNode; label: string })
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const S = {
-  page: { display: "flex", height: "100vh", overflow: "hidden", backgroundColor: "#f4f7f9", fontFamily: "system-ui, -apple-system, sans-serif" } as React.CSSProperties,
-  leftPanel: { width: "300px", backgroundColor: "#ffffff", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column", overflowY: "hidden", flexShrink: 0, boxShadow: "2px 0 16px rgba(0,0,0,0.025)" } as React.CSSProperties,
-  rightPanel: { flex: 1, overflowY: "auto", padding: "36px 44px", backgroundColor: "#f8fafc" } as React.CSSProperties,
-  formHeader: { padding: "24px 20px 16px", borderBottom: "1px solid #f1f5f9", flexShrink: 0 } as React.CSSProperties,
+  page: {
+    display: "flex",
+    height: "100%",
+    overflow: "hidden",
+    backgroundColor: "#f4f7f9",
+    fontFamily: "system-ui, -apple-system, sans-serif",
+    minHeight: 0,
+  } as React.CSSProperties,
+  leftPanel: {
+    width: "320px",
+    minWidth: "320px",
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    overflow: "hidden",
+    backgroundColor: "#fff",
+    borderRight: "1px solid #e5e7eb",
+  } as React.CSSProperties,
+  rightPanel: {
+    flex: 1,
+    overflowY: "auto",
+    padding: "36px 44px",
+    backgroundColor: "#f8fafc",
+    minHeight: 0,
+  } as React.CSSProperties,
+  // ── LAYOUT FIX 2: formHeader — capped at 52vh, internally scrollable, never flexShrinks ──
+  formHeader: {
+    padding: "24px 20px 16px",
+    borderBottom: "1px solid #f1f5f9",
+    flexShrink: 0,
+    maxHeight: "52vh",
+    overflowY: "auto",
+  } as React.CSSProperties,
   formTitleRow: { display: "flex", alignItems: "center", gap: "10px", marginBottom: "18px" } as React.CSSProperties,
   formIconWrap: { padding: "7px", backgroundColor: "#eff6ff", borderRadius: "8px", flexShrink: 0 } as React.CSSProperties,
   formSectionLabel: { fontSize: "10px", fontWeight: 800, color: "#94a3b8", textTransform: "uppercase" as const, letterSpacing: "1px" } as React.CSSProperties,
@@ -1184,9 +1451,22 @@ const S = {
   clearBtn: { marginLeft: "auto", background: "transparent", border: "none", cursor: "pointer", color: "#94a3b8", padding: "4px", borderRadius: "6px", display: "flex", alignItems: "center" } as React.CSSProperties,
   input: { width: "100%", padding: "11px 14px", borderRadius: "10px", border: "1px solid #e2e8f0", fontSize: "14px", outline: "none", backgroundColor: "#f8fafc", color: "#0f172a", boxSizing: "border-box" as const } as React.CSSProperties,
   btnPrimary: { backgroundColor: "#1e40af", color: "#ffffff", padding: "12px 16px", borderRadius: "10px", border: "none", fontWeight: 700, fontSize: "14px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", transition: "all 0.2s ease", boxShadow: "0 4px 12px rgba(30,64,175,0.2)", width: "100%" } as React.CSSProperties,
-  searchWrap: { padding: "14px 16px", borderBottom: "1px solid #f1f5f9", position: "relative", flexShrink: 0 } as React.CSSProperties,
+  // ── LAYOUT FIX 3: searchWrap — flexShrink: 0 ensures it never collapses ──
+  searchWrap: {
+    padding: "14px 16px",
+    borderBottom: "1px solid #f1f5f9",
+    position: "relative",
+    flexShrink: 0,
+  } as React.CSSProperties,
   searchIcon: { position: "absolute", left: "28px", top: "50%", transform: "translateY(-50%)" } as React.CSSProperties,
-  patientList: { flex: 1, overflowY: "auto", padding: "8px 0" } as React.CSSProperties,
+  // ── LAYOUT FIX 4: patientList — flex: 1 + minHeight: 0 makes it fill remaining space and scroll independently ──
+  patientList: {
+    flex: 1,
+    minHeight: 0,
+    overflowY: "auto",
+    overflowX: "hidden",
+    padding: "8px 0",
+  } as React.CSSProperties,
   emptyList: { padding: "32px 20px", textAlign: "center", color: "#94a3b8", fontSize: "13px" } as React.CSSProperties,
   activeBar: { position: "absolute", left: 0, top: 0, bottom: 0, width: "3px", backgroundColor: "#2563eb", borderRadius: "3px" } as React.CSSProperties,
   avatar: { width: "40px", height: "40px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: "15px", transition: "all 0.2s ease", flexShrink: 0 } as React.CSSProperties,
@@ -1228,6 +1508,10 @@ const S = {
   firstVisitCard: { background: "#fff", border: "2px dashed #bfdbfe", borderRadius: "20px", padding: "60px 40px", display: "flex", flexDirection: "column" as const, alignItems: "center", textAlign: "center" as const, boxShadow: "0 4px 20px rgba(37,99,235,0.05)" } as React.CSSProperties,
   firstVisitIcon: { width: "100px", height: "100px", backgroundColor: "#dbeafe", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "28px", border: "2px solid #93c5fd", boxShadow: "0 8px 24px rgba(37,99,235,0.1)" } as React.CSSProperties,
   reportItem: { padding: "10px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", fontSize: "13.5px", fontWeight: 600, color: "#334155", transition: "background 0.15s ease" } as React.CSSProperties,
+  // ✅ V43: Collapsible section styles
+  collapsibleSection: { border: "1px solid #e2e8f0", borderRadius: "10px", padding: "10px 12px", backgroundColor: "#f8fafc" } as React.CSSProperties,
+  collapsibleHeader: { width: "100%", background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", padding: 0 } as React.CSSProperties,
+  collapsibleLabel: { fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" as const, letterSpacing: "0.5px" } as React.CSSProperties,
 };
 
 const CSS = `
@@ -1244,6 +1528,7 @@ const CSS = `
   .patient-row { position: relative; padding: 12px 14px; margin: 4px 10px; cursor: pointer; display: flex; align-items: center; gap: 12px; border-radius: 12px; transition: all 0.15s ease; border: 2px solid transparent; }
   .patient-row:hover { background-color: #f0f9ff; border-color: #93c5fd; }
   .patient-row-active { background-color: #eff6ff !important; border-color: #2563eb !important; }
+  .patient-row-focused { background-color: #f0f9ff !important; border-color: #93c5fd !important; outline: none; }
   .action-btn { padding: 3px 8px; font-size: 11px; border: none; border-radius: 4px; cursor: pointer; font-weight: 700; transition: all 0.15s ease; }
   .edit-btn { background: #3b82f6; color: #fff; }
   .edit-btn:hover { background: #2563eb; }

@@ -1,6 +1,7 @@
 import React from "react";
 import TopBar from "./TopBar";
 import LeftNav from "./LeftNav";
+import { AppViewportFrame } from "./LayoutPrimitives";
 import { ActivePage } from "../../store/uiStore";
 
 interface AppShellProps {
@@ -18,15 +19,7 @@ export default function AppShell({
     <>
       <TopBar onPatientSelect={onPatientSelect} />
       <LeftNav onNavigate={onNavigate} />
-      <main
-        style={{
-          marginLeft: "64px",
-          background: "#f8fafc",
-          minHeight: `calc(100vh - 59px)`,
-        }}
-      >
-        {children}
-      </main>
+      <AppViewportFrame>{children}</AppViewportFrame>
     </>
   );
 }

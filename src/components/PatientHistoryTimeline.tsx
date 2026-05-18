@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { db, Consultation } from "../services/db";
+import { db, Consultation, ConsultationOutcome, normalizeOutcome } from "../services/db";
 
 /**
  * SAKHI CLINIC - PATIENT HISTORY TIMELINE
@@ -54,8 +54,8 @@ export default function PatientHistoryTimeline({ patientId }: { patientId: strin
               borderRadius: "8px", 
               fontSize: "12px", 
               fontWeight: "700",
-              background: c.outcome === "improved" ? "#dcfce7" : "#f1f5f9",
-              color: c.outcome === "improved" ? "#166534" : "#475569"
+              background: normalizeOutcome(c.outcome) === ConsultationOutcome.IMPROVED ? "#dcfce7" : "#f1f5f9",
+              color: normalizeOutcome(c.outcome) === ConsultationOutcome.IMPROVED ? "#166534" : "#475569"
             }}>
               {c.outcome?.toUpperCase() || "FOLLOW-UP"}
             </div>
