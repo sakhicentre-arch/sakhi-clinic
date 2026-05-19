@@ -26,6 +26,7 @@ import { useConsultationStore } from "../store/useConsultationStore";
 import { useUIStore } from "../store/uiStore";
 import { usePatientSearch } from "../hooks/usePatientSearch";
 import { SplitPane, ScrollRegion } from "../components/layout/LayoutPrimitives";
+import { normalizePatientPhone } from "../utils/whatsapp";
 import type { Consultation, Report } from "../types/models";
 
 type PatientPageConsultation = Omit<Consultation, "outcome" | "medicines"> & {
@@ -468,6 +469,20 @@ export default function PatientPage(
       return;
     }
 
+    const normalizedPhone = formData.phone.trim();
+    const duplicateExists = patients.some(
+      (p) =>
+        String(p.phone || "").trim() === normalizedPhone &&
+        (!selectedPatient || p.id !== selectedPatient.id)
+    );
+
+    if (duplicateExists) {
+      alert(
+        "A patient with this phone number already exists. Please use the existing patient record or enter a different phone number."
+      );
+      return;
+    }
+
     setIsSaving(true);
     try {
       if (selectedPatient) {
@@ -537,11 +552,9 @@ export default function PatientPage(
   const handleSendReminder = useCallback((): void => {
     if (!selectedPatient) return;
     const message = `Dear ${selectedPatient.name}, this is a reminder from Sakhi Homeopathic Clinic. You have a pending payment of ${formatCurrency(revenueAnalytics.totalPending)}. Please visit us to clear the balance. Thank you!`;
-    const phone = selectedPatient.phone?.replace(/\D/g, "") || "";
-    window.open(
-      `https://wa.me/91${phone}?text=${encodeURIComponent(message)}`,
-      "_blank"
-    );
+    const link = generateWhatsAppLink(selectedPatient.phone || (selectedPatient as any).mobile || "", message);
+    if (!link) return alert("⚠️ Patient mobile number is missing or invalid.");
+    window.open(link, "_blank");
   }, [selectedPatient, revenueAnalytics.totalPending]);
 
   const goToConsultation = useCallback(
@@ -595,11 +608,13 @@ export default function PatientPage(
           </div>
 
           <form
+            data-testid="patient-registration-form"
             onSubmit={handleAdd}
             style={{ display: "flex", flexDirection: "column", gap: "12px" }}
           >
             {/* ── EXISTING CORE FIELDS (unchanged) ── */}
             <input
+              data-testid="patient-name-input"
               className="sakhi-input"
               style={S.input}
               placeholder="Full Name *"
@@ -609,6 +624,7 @@ export default function PatientPage(
             />
             <div style={{ display: "flex", gap: "10px" }}>
               <input
+                data-testid="patient-age-input"
                 className="sakhi-input"
                 style={{ ...S.input, flex: 1 }}
                 placeholder="Age"
@@ -616,6 +632,7 @@ export default function PatientPage(
                 onChange={(e) => handleFormChange("age", e.target.value)}
               />
               <select
+                data-testid="patient-gender-select"
                 className="sakhi-input"
                 style={{ ...S.input, flex: 1.4 }}
                 value={formData.gender}
@@ -627,6 +644,7 @@ export default function PatientPage(
               </select>
             </div>
             <input
+              data-testid="patient-phone-input"
               className="sakhi-input"
               style={S.input}
               placeholder="Phone Number *"
@@ -775,6 +793,7 @@ export default function PatientPage(
               <option value="Syphilis">Syphilis</option>
             </select>
             <button
+              data-testid="save-patient-btn"
               type="submit"
               style={{
                 ...S.btnPrimary,
@@ -805,6 +824,7 @@ export default function PatientPage(
             <Search size={16} color="#94a3b8" />
           </span>
           <input
+            data-testid="patient-search-input"
             className="sakhi-input"
             style={{ ...S.input, paddingLeft: "40px", fontSize: "13.5px" }}
             placeholder="Search patients... (↑↓ navigate, Enter to open)"
@@ -817,7 +837,7 @@ export default function PatientPage(
 
         {/* Patient List */}
         {/* ── LAYOUT FIX 4: patientList flex: 1, minHeight: 0, overflowY: auto ── */}
-        <ScrollRegion className="custom-scroll" style={S.patientList}>
+        <ScrollRegion data-testid="patient-list" className="custom-scroll" style={S.patientList}>
           {(filteredPatients?.length ?? 0) === 0 && (
             <div style={S.emptyList}>
               {searchTerm
@@ -832,6 +852,8 @@ export default function PatientPage(
             return (
               <div
                 key={p.id}
+                data-testid="patient-row"
+                data-patient-id={String(p.id)}
                 className={`patient-row ${isActive ? "patient-row-active" : ""} ${isKeyboardFocused ? "patient-row-focused" : ""}`}
                 // ─────────────────────────────────────────────────────────
                 // FIX 5: Mouse click — String() coercion ensures correct

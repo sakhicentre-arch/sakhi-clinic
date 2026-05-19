@@ -31,7 +31,7 @@ import DictationButton from "../components/DictationButton";
 import StickerPrint from "../components/StickerPrint";
 import { SUGGESTIONS } from "../data/clinicalSuggestions";
 import { getLearnedSuggestions } from "../services/learningEngine";
-import { generateWhatsAppLink, getPrescriptionMessage } from "../utils/whatsapp";
+import { generateWhatsAppLink, getPrescriptionMessage, normalizePatientPhone } from "../utils/whatsapp";
 import { analyzeRemedies } from "../services/remedyEngine";
 import PrintableConsultation from "../components/PrintableConsultation";
 import { generateRemedyExplanations } from "../services/aiReasoningEngine";
@@ -415,9 +415,10 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
   };
 
   const handleWhatsAppShare = () => {
-    if (!patient?.phone) return alert("Patient phone number missing.");
+    const phone = normalizePatientPhone(patient);
+    if (!phone) return alert("Patient phone number missing.");
     const msg = getPrescriptionMessage(patient.name, formData.medicines);
-    const link = generateWhatsAppLink(patient.phone, msg);
+    const link = generateWhatsAppLink(phone, msg);
     if (link) window.open(link, "_blank");
   };
 

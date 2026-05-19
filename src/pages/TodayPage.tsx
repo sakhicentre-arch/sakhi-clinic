@@ -14,6 +14,7 @@ import { useConsultationStore } from "../store/useConsultationStore";
 import { useAppointmentStore } from "../store/useAppointmentStore";
 import { useQueueStore, QueueEntry } from "../store/queueStore";
 import { useUIStore } from "../store/uiStore";
+import { normalizePatientPhone } from "../utils/whatsapp";
 import { SplitPane } from "../components/layout/LayoutPrimitives";
 import {
   Users, Clock, CheckCircle2, AlertCircle, Plus, Search,
@@ -812,11 +813,14 @@ function StatsPanel({ goToConsultation }:
                   marginBottom: "6px" }}>
                   {daysAgo(p.nextFollowUpDate!)} days overdue
                 </div>
-                {p.phone && (
+                {normalizePatientPhone(p) && (
                   <button
                     onClick={() => {
+                      const rawNumber = p.phone || (p as any).mobile || "";
                       const msg = `Dear ${p.name}, your follow-up at Sakhi Clinic is overdue. Please visit or call us.`;
-                      window.open(`https://wa.me/91${p.phone}?text=${encodeURIComponent(msg)}`);
+                      const link = generateWhatsAppLink(rawNumber, msg);
+                      if (!link) return alert("⚠️ Patient mobile number is missing or invalid.");
+                      window.open(link);
                     }}
                     style={{ display: "flex", alignItems: "center", gap: "5px",
                       padding: "4px 10px", borderRadius: "7px",

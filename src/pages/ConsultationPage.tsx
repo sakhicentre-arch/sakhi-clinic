@@ -34,7 +34,7 @@ import LetterPad from "../components/LetterPad";
 import { SUGGESTIONS } from "../data/clinicalSuggestions";
 
 import { getLearnedSuggestions } from "../services/learningEngine";
-import { generateWhatsAppLink, getPrescriptionMessage } from "../utils/whatsapp";
+import { generateWhatsAppLink, getPrescriptionMessage, normalizePatientPhone } from "../utils/whatsapp";
 import { analyzeRemedies } from "../services/remedyEngine";
 import PrintableConsultation from "../components/PrintableConsultation";
 import { generateRemedyExplanations } from "../services/aiReasoningEngine";
@@ -831,14 +831,15 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
   // ── WhatsApp ──
   const handleWhatsAppShare = () => {
-    if (!patient?.phone) return alert("Patient phone number missing.");
+    const phone = normalizePatientPhone(patient);
+    if (!phone) return alert("Patient phone number missing.");
     const followUpNote = formData.formFollowUpDate
       ? `\n\nNext follow-up: ${new Date(formData.formFollowUpDate).toLocaleDateString("en-IN")}`
       : formData.outcome === ConsultationOutcome.WORSE
       ? "\n\n⚠️ Urgent review recommended based on current clinical status."
       : "";
     const msg = `${getPrescriptionMessage(patient.name, formData.medicines)}${followUpNote}`;
-    const link = generateWhatsAppLink(patient.phone, msg);
+    const link = generateWhatsAppLink(phone, msg);
     if (link) {
       window.open(link, "_blank");
     } else {
@@ -847,28 +848,31 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   };
 
   const handleWhatsAppBill = () => {
-    const rawMobile = patient?.phone || (patient as any)?.mobile;
-    const mobile = rawMobile?.replace(/\D/g, "");
-    if (!mobile || mobile.length < 10) return alert("⚠️ Patient mobile number is missing or invalid.");
-    const message = `*Sakhi Homeopathic Clinic — Bill*\n\nPatient: ${patient?.name || "N/A"}\nConsultation Fee: ₹${formData.fee || 0}\nPayment Status: ${formData.paymentStatus === "paid" ? "✅ Paid" : "⏳ Pending"}\n\nThank you for visiting Sakhi Clinic 🙏`;
-    window.open(`https://wa.me/91${mobile}?text=${encodeURIComponent(message)}`, "_blank");
+    const rawNumber = patient?.phone || (patient as any)?.mobile || "";
+    console.log("WHATSAPP FLOW");
+    console.log("PATIENT:", patient);
+    console.log("NORMALIZED:", normalizePatientPhone(patient));
+    const link = generateWhatsAppLink(rawNumber, `*Sakhi Homeopathic Clinic — Bill*\n\nPatient: ${patient?.name || "N/A"}\nConsultation Fee: ₹${formData.fee || 0}\nPayment Status: ${formData.paymentStatus === "paid" ? "✅ Paid" : "⏳ Pending"}\n\nThank you for visiting Sakhi Clinic 🙏`);
+    if (!link) return alert("⚠️ Patient mobile number is missing or invalid.");
+    window.open(link, "_blank");
   };
 
   const handleAskReview = () => {
-    const rawMobile = patient?.phone || (patient as any)?.mobile;
-    const mobile = rawMobile?.replace(/\D/g, "");
+    const rawNumber = patient?.phone || (patient as any)?.mobile || "";
     const name = patient?.name || "Patient";
     const complaint = formData.chiefComplaint;
-    if (!mobile || mobile.length < 10) return alert("⚠️ Patient mobile number is missing or invalid.");
+    console.log("WHATSAPP FLOW");
+    console.log("PATIENT:", patient);
+    console.log("NORMALIZED:", normalizePatientPhone(patient));
     if (!complaint) return alert("⚠️ Please enter Chief Complaint to generate a review.");
-    const isSatisfied = window.confirm(`Is ${name} satisfied with the treatment?\n\nSend review request via WhatsApp?`);
-    if (!isSatisfied) return;
     const { guj, eng } = generateReviewTexts(complaint, formData.onset || "", formData.outcome);
     const baseUrl = `${window.location.origin}/review`;
     const fullParams = `?g=${encodeURIComponent(guj)}&e=${encodeURIComponent(eng)}`;
     const reviewLink = baseUrl.length + fullParams.length > 1500 ? baseUrl : baseUrl + fullParams;
     const whatsappMessage = `Hello ${name},\n\nThank you for choosing Sakhi Homeopathic Clinic 🙏\n\nWe are glad to be part of your health journey. If you are happy with our service, please share your valuable experience here:\n\n👉 ${reviewLink}\n\nIt takes just 10 seconds and helps us serve you better! 😊`;
-    window.open(`https://wa.me/91${mobile}?text=${encodeURIComponent(whatsappMessage)}`, "_blank");
+    const link = generateWhatsAppLink(rawNumber, whatsappMessage);
+    if (!link) return alert("⚠️ Patient mobile number is missing or invalid.");
+    window.open(link, "_blank");
     alert("✅ WhatsApp opened. Please ask the patient to click the link and post the review.");
   };
 

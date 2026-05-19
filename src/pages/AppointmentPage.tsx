@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { usePatientStore } from "../store/usePatientStore";
+import { normalizePatientPhone } from "../utils/whatsapp";
 import { useAppointmentStore } from "../store/useAppointmentStore";
 
 // ============================================================
@@ -140,8 +141,11 @@ export default function AppointmentPage({ goToConsultation }: Props) {
   const openReminder = (appt: any) => {
     const patient = patients.find((p) => p.id === appt.patientId);
     if (!patient) return;
+    const phone = normalizePatientPhone(patient);
+    if (!phone) return;
     const msg = `Reminder – Sakhi Clinic\n\nDear ${patient.name},\n\nThis is a reminder for your appointment today.\n\n⏰ ${appt.time}\n🏥 ${appt.clinic}\n\nPlease arrive on time 🙏`;
-    window.open(`https://wa.me/${patient.phone}?text=${encodeURIComponent(msg)}`);
+    const link = generateWhatsAppLink(phone, msg);
+    if (link) window.open(link);
     markReminderSent(appt.id);
   };
 
@@ -155,8 +159,11 @@ export default function AppointmentPage({ goToConsultation }: Props) {
       setTimeout(() => {
         const patient = patients.find((p) => p.id === appt.patientId);
         if (!patient) return;
+        const phone = normalizePatientPhone(patient);
+        if (!phone) return;
         const msg = `Reminder – Sakhi Clinic\n\nDear ${patient.name},\n\nYour appointment is today at ${appt.time}.\n🏥 ${appt.clinic}\n\nPlease arrive on time 🙏`;
-        window.open(`https://wa.me/${patient.phone}?text=${encodeURIComponent(msg)}`);
+        const link = generateWhatsAppLink(phone, msg);
+        if (link) window.open(link);
         markReminderSent(appt.id);
       }, index * 2500); 
     });
@@ -201,8 +208,9 @@ export default function AppointmentPage({ goToConsultation }: Props) {
     });
 
     if (success) {
+      const phone = normalizePatientPhone(patient);
       const msg = `Sakhi Clinic\n\nDear ${patient.name},\n\nAppointment confirmed.\n📅 ${date}\n⏰ ${time}\n🏥 ${clinic}\n\nThank you 🙏`;
-      window.open(`https://wa.me/${patient.phone}?text=${encodeURIComponent(msg)}`);
+      if (phone) window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`);
       alert("Appointment Secured ✅");
     }
   };
@@ -244,7 +252,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
     }[status];
 
     return (
-      <div key={appt?.id || slot} style={{ 
+      <div key={appt?.id || slot} data-testid="appointment-slot-card" data-appointment-id={appt?.id} style={{ 
         border: `1.5px solid ${config.border}`, padding: "18px", marginBottom: "12px", 
         background: config.bg, borderRadius: "18px", display: "flex", 
         justifyContent: "space-between", alignItems: "center",
@@ -342,7 +350,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
 
       {/* ================= LEFT PANEL: CONTROL CONSOLE ================= */}
       <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-        <div style={S.card}>
+        <div data-testid="appointment-scheduling-form" style={S.card}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "30px" }}>
              <div style={{ background: "#eff6ff", padding: "12px", borderRadius: "14px" }}>
                <Calendar size={24} color="#2563eb" />
@@ -351,18 +359,18 @@ export default function AppointmentPage({ goToConsultation }: Props) {
           </div>
 
           <div style={{ position: "relative", marginBottom: "20px" }}>
-             <input className="input-focus" style={{...S.input, paddingLeft: '48px', marginBottom: 0}} placeholder="Find in Registry..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+             <input data-testid="appointment-patient-search-input" className="input-focus" style={{...S.input, paddingLeft: '48px', marginBottom: 0}} placeholder="Find in Registry..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
              <Search size={20} style={{ position: "absolute", left: "16px", top: "16px" }} color="#94a3b8" />
           </div>
 
           <label style={S.label}>Patient Database Link</label>
-          <select className="input-focus" style={S.input} value={selectedPatientId} onChange={(e) => setSelectedPatientId(e.target.value)}>
+          <select data-testid="appointment-patient-select" className="input-focus" style={S.input} value={selectedPatientId} onChange={(e) => setSelectedPatientId(e.target.value)}>
             <option value="">Select from Registry</option>
             {filteredPatients.slice(0, 25).map((p) => <option key={p.id} value={p.id}>{p.name} ({(p as any).phone || "000"})</option>)}
           </select>
 
           <label style={S.label}>Clinic Branch Selection</label>
-          <select className="input-focus" style={S.input} value={clinic} onChange={(e) => setClinic(e.target.value as any)}>
+          <select data-testid="appointment-clinic-select" className="input-focus" style={S.input} value={clinic} onChange={(e) => setClinic(e.target.value as any)}>
             <option value="Dabholi">🏥 Dabholi (11:00 - 14:00)</option>
             <option value="City Light">🏥 City Light (14:30 - 18:30)</option>
           </select>
@@ -370,7 +378,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
           <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: "12px", marginBottom: "25px" }}>
             <div>
               <label style={S.label}>Date</label>
-              <input className="input-focus" style={{...S.input, marginBottom: 0, borderColor: isPastDate(date) ? "#ef4444" : "#e2e8f0"}} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              <input data-testid="appointment-date-input" className="input-focus" style={{...S.input, marginBottom: 0, borderColor: isPastDate(date) ? "#ef4444" : "#e2e8f0"}} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
               {isPastDate(date) && (
                 <div style={{ fontSize: "11px", color: "#ef4444", fontWeight: "700", marginTop: "6px", display: "flex", alignItems: "center", gap: "4px" }}>
                   <AlertCircle size={14} /> Cannot book past dates
@@ -379,7 +387,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
             </div>
             <div>
               <label style={S.label}>Time Slot</label>
-              <select className="input-focus" style={{...S.input, marginBottom: 0}} value={time} onChange={(e) => setTime(e.target.value)}>
+              <select data-testid="appointment-time-select" className="input-focus" style={{...S.input, marginBottom: 0}} value={time} onChange={(e) => setTime(e.target.value)}>
                 <option value="">Select Time</option>
                 {slots.map((s) => {
                   const isBooked = isSlotBooked(date, s, clinic, appointments);
@@ -411,8 +419,8 @@ export default function AppointmentPage({ goToConsultation }: Props) {
             </div>
           </div>
 
-          <button onClick={handleAdd} style={S.btnPrimary}>Secure Appointment Slot</button>
-          <button onClick={handleWalkIn} style={{ ...S.btnPrimary, background: "#f8fafc", color: "#0f172a", border: "1.5px solid #e2e8f0", boxShadow: "none" }}>+ Emergency Walk-In Bypass</button>
+          <button data-testid="appointment-submit-btn" onClick={handleAdd} style={S.btnPrimary}>Secure Appointment Slot</button>
+          <button data-testid="appointment-walkin-btn" onClick={handleWalkIn} style={{ ...S.btnPrimary, background: "#f8fafc", color: "#0f172a", border: "1.5px solid #e2e8f0", boxShadow: "none" }}>+ Emergency Walk-In Bypass</button>
         </div>
 
         {/* OPERATIONS CONSOLE (V6.5 Sequencer Intact) */}

@@ -12,23 +12,31 @@ const CLINIC_NAME = "Sakhi Homoeopathic Clinic";
 /**
  * ✅ Validates if a string is a valid 10-digit Indian mobile number.
  */
+export function normalizePhone(phone?: string | null): string | null {
+  if (!phone) return null;
+  const digits = String(phone).replace(/\D/g, "");
+  if (digits.length === 10) return digits;
+  if (digits.length > 10) return digits.slice(-10);
+  return null;
+}
+
+export function normalizePatientPhone(patient: Partial<{ phone?: string; mobile?: string }> | null | undefined): string | null {
+  if (!patient) return null;
+  return normalizePhone(patient.phone || patient.mobile || null);
+}
+
 export function isValidPhone(phone: string | undefined): boolean {
-  if (!phone) return false;
-  const digits = phone.replace(/\D/g, "");
-  return digits.length === 10;
+  return normalizePhone(phone) !== null;
 }
 
 /**
  * ✅ Normalizes a phone number and generates a WhatsApp click-to-chat link.
  */
 export function generateWhatsAppLink(phone: string, message: string): string | null {
-  if (!isValidPhone(phone)) return null;
+  const normalized = normalizePhone(phone);
+  if (!normalized) return null;
 
-  const formatted = phone.replace(/\D/g, "");
-  // Ensure the number has the country code prefix (91 for India)
-  const finalPhone = formatted.length === 10 ? `91${formatted}` : formatted;
-  
-  return `https://wa.me/${finalPhone}?text=${encodeURIComponent(message.trim())}`;
+  return `https://wa.me/91${normalized}?text=${encodeURIComponent(message.trim())}`;
 }
 
 /**
