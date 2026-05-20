@@ -1759,14 +1759,14 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 // ─────────────────────────────────────────────────────────────────────────────
 
 const containerStyle: React.CSSProperties = { background: "#f8fafc", minHeight: "100vh", padding: "24px 40px", fontFamily: "'Lora', serif" };
-const headerStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 32 };
+const headerStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 32, flexWrap: "wrap", gap: 16 };
 const titleStyle: React.CSSProperties = { margin: 0, fontSize: 32, fontWeight: 800, color: "#0f172a" };
 const metaGridStyle: React.CSSProperties = { display: "flex", gap: 16, marginTop: 8, fontSize: 13, fontWeight: 600, color: "#64748b" };
-const contentGridStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 340px", gap: 28, alignItems: "start" };
-const formPanelStyle: React.CSSProperties = { background: "#fff", borderRadius: 24, padding: 36, border: "1px solid #e2e8f0", boxShadow: "0 10px 15px -3px rgba(0,0,0,0.04)", minHeight: "calc(100vh - 220px)" };
+const contentGridStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 340px", gap: 28, alignItems: "start", minWidth: 0 };
+const formPanelStyle: React.CSSProperties = { background: "#fff", borderRadius: 24, padding: 36, border: "1px solid #e2e8f0", boxShadow: "0 10px 15px -3px rgba(0,0,0,0.04)", minHeight: "calc(100vh - 220px)", minWidth: 0 };
 const outcomeGridStyle: React.CSSProperties = { display: "flex", gap: 10, marginBottom: 36, flexWrap: "wrap" };
 const decisionGridStyle: React.CSSProperties = { display: "flex", gap: 12 };
-const formFooterStyle: React.CSSProperties = { marginTop: 48, paddingTop: 32, borderTop: "2px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "flex-end" };
+const formFooterStyle: React.CSSProperties = { marginTop: 48, paddingTop: 32, borderTop: "2px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16 };
 const sidebarStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 24 };
 const cardHeaderStyle: React.CSSProperties = { fontSize: 12, fontWeight: 800, textTransform: "uppercase", color: "#64748b", marginBottom: 16, letterSpacing: "0.05em" };
 const subHeaderStyle: React.CSSProperties = { fontSize: 10, fontWeight: 900, color: "#3b82f6", textTransform: "uppercase", marginBottom: 10, letterSpacing: "0.05em" };
@@ -1776,9 +1776,9 @@ const emptyTextStyle: React.CSSProperties = { fontSize: 13, color: "#94a3b8", fo
 const fullMessageStyle: React.CSSProperties = { padding: 100, textAlign: "center", fontSize: 18, color: "#64748b", fontWeight: 600 };
 const lastVisitLabelStyle: React.CSSProperties = { fontSize: 10, fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 };
 const lastVisitValueStyle: React.CSSProperties = { fontSize: 13, fontWeight: 700, color: "#0f172a" };
-const modeBarStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 16, marginBottom: 24, padding: "12px 16px", background: "#fff", borderRadius: 14, border: "1.5px solid #e2e8f0" };
-const quickTopBarStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 24px", background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)", color: "#fff", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 4px 20px rgba(0,0,0,0.15)" };
-const quickBodyStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 280px", gap: 16, padding: "20px 24px", alignItems: "start" };
+const modeBarStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 16, marginBottom: 24, padding: "12px 16px", background: "#fff", borderRadius: 14, border: "1.5px solid #e2e8f0", flexWrap: "wrap" };
+const quickTopBarStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 24px", background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)", color: "#fff", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 4px 20px rgba(0,0,0,0.15)", flexWrap: "wrap", gap: 8 };
+const quickBodyStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 280px", gap: 16, padding: "20px 24px", alignItems: "start", minWidth: 0 };
 const qCardStyle: React.CSSProperties = { background: "#fff", borderRadius: 14, padding: "18px 18px 14px", border: "1.5px solid #e2e8f0", boxShadow: "0 2px 6px rgba(0,0,0,0.03)" };
 const qCardTitleStyle: React.CSSProperties = { fontSize: 10, fontWeight: 900, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 12 };
 const quickIconBtnStyle: React.CSSProperties = { background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", fontWeight: 800, fontSize: 18, cursor: "pointer", borderRadius: 8, padding: "6px 12px" };
@@ -1811,11 +1811,31 @@ const customCSS = `
     .print-only, .print-only * { visibility: visible; }
     .print-only { display: block; position: absolute; left: 0; top: 0; width: 100%; background: white; }
   }
+  @media (max-width: 768px) {
+    body { font-size: 14px; }
+    [style*="gridTemplateColumns: 1fr 340px"] { grid-template-columns: 1fr !important; }
+    [style*="gridTemplateColumns: 1fr 280px"] { grid-template-columns: 1fr !important; }
+    [style*="padding: 24px 40px"] { padding: 16px 12px !important; }
+    [style*="padding: 36px"] { padding: 18px 14px !important; }
+    .form-group { margin-bottom: 24px; }
+    .group-title { font-size: 12px; }
+    .btn-decision { font-size: 11px; padding: 12px; }
+    .btn-primary { padding: 14px 20px; font-size: 13px; }
+    .btn-review, .btn-whatsapp { padding: 10px 14px; font-size: 12px; }
+  }
 `;
 
 const quickCSS = `
   @media (max-width: 900px) {
     .quick-body { grid-template-columns: 1fr !important; }
+  }
+  @media (max-width: 768px) {
+    [style*="padding: 20px 24px"] { padding: 12px 12px !important; }
+    [style*="gridTemplateColumns: 1fr 280px"] { grid-template-columns: 1fr !important; }
+    [style*="gridTemplateColumns: 1fr 1fr"] { grid-template-columns: 1fr !important; }
+    [style*="gridTemplateColumns: repeat(3, 1fr)"] { grid-template-columns: repeat(2, 1fr) !important; }
+    [style*="gridTemplateColumns: repeat(4, 1fr)"] { grid-template-columns: repeat(2, 1fr) !important; }
+    [style*="gridTemplateColumns: repeat(2, 1fr)"] { grid-template-columns: 1fr !important; }
   }
 `;
 
