@@ -24,7 +24,6 @@ export async function saveDraft(patientId: string, formData: any): Promise<void>
       savedAt: nowIso(),
     };
     await db.drafts.put(draft);
-    console.log(`[draftService] Draft saved for patient ${patientId}`);
   } catch (error) {
     console.error("[draftService] saveDraft failed:", error);
     // Silently fail — don't break user's form
@@ -39,10 +38,7 @@ export async function loadDraft(patientId: string): Promise<any | null> {
   try {
     const draftId = `draft-${patientId}`;
     const draft = await db.drafts.get(draftId);
-    if (draft) {
-      console.log(`[draftService] Draft loaded for patient ${patientId}`);
-      return draft.formData;
-    }
+    if (draft) return draft.formData;
     return null;
   } catch (error) {
     console.error("[draftService] loadDraft failed:", error);
@@ -57,7 +53,6 @@ export async function deleteDraft(patientId: string): Promise<void> {
   try {
     const draftId = `draft-${patientId}`;
     await db.drafts.delete(draftId);
-    console.log(`[draftService] Draft deleted for patient ${patientId}`);
   } catch (error) {
     console.error("[draftService] deleteDraft failed:", error);
     // Silently fail — draft deletion is non-critical

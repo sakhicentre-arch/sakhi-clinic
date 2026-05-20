@@ -80,8 +80,7 @@ export function analyzeRemedies(
     }
   });
 
-  // ✅ DEBUG (to verify engine is working)
-  console.log("Remedy Suggestions:", suggestions);
+  // Suggestions computed
 
   return suggestions
     .sort((a, b) => b.score - a.score)

@@ -15,7 +15,9 @@ import { useAppointmentStore } from "../store/useAppointmentStore";
 import { useQueueStore, QueueEntry } from "../store/queueStore";
 import { useUIStore } from "../store/uiStore";
 import { normalizePatientPhone } from "../utils/whatsapp";
+import { getAllPatientsFromDB, db } from "../services/db";
 import { SplitPane } from "../components/layout/LayoutPrimitives";
+import { generateWhatsAppLink } from "../utils/whatsapp";
 import {
   Users, Clock, CheckCircle2, AlertCircle, Plus, Search,
   ChevronRight, Phone, Calendar, Activity, TrendingUp,
@@ -129,16 +131,56 @@ function AddToQueueDropdown({ onAdd, onClose }:
   const isInQueue = useQueueStore((s) => s.isInQueue);
   const [q, setQ] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const [results, setResults] = useState<typeof patients>([]);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  const results = useMemo(() => {
+  useEffect(() => {
+    let mounted = true;
     const t = q.toLowerCase().trim();
-    if (!t) return patients.slice(0, 8);
-    return patients.filter(p =>
-      p.name.toLowerCase().includes(t) || (p.phone || "").includes(t)
-    ).slice(0, 8);
+
+    const doSearch = async () => {
+      if (!t) {
+        // Return recent patients from transient store for speed
+        if (mounted) setResults(patients.slice(0, 8));
+        return;
+      }
+
+      try {
+        // Query canonical DB for up-to-date results
+        const all = await getAllPatientsFromDB();
+        let filtered = all.filter((p) =>
+          (p.name || '').toLowerCase().includes(t) || (p.phone || '').includes(t)
+        ).slice(0, 8);
+
+        // Fallback: if no patients found, try appointments (recent bookings)
+        if (filtered.length === 0) {
+          try {
+            const appts = await db.appointments.filter(a => !a.deletedAt && (a.patientName || '').toLowerCase().includes(t)).toArray();
+            const seen = new Set<string>();
+            const fromAppts = appts.filter(a => {
+              if (!a.patientId) return false;
+              if (seen.has(a.patientId)) return false;
+              seen.add(a.patientId);
+              return true;
+            }).slice(0, 8).map(a => ({ id: a.patientId, name: a.patientName || '', phone: '' } as any));
+            if (fromAppts.length > 0) filtered = fromAppts;
+          } catch (err) {
+            console.warn('[AddToQueueDropdown] appointment fallback failed', err);
+          }
+        }
+        if (mounted) setResults(filtered);
+      } catch (err) {
+        console.error('[AddToQueueDropdown] search failed', err);
+        if (mounted) setResults([]);
+      }
+    };
+
+    doSearch();
+    return () => { mounted = false; };
   }, [q, patients]);
+
+  
 
   return (
     <div style={{ position: "absolute", top: "calc(100% + 8px)", left: 0, right: 0,
@@ -236,29 +278,59 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation }:
   }, []);
 
   const handleAddPatient = (patientId: string) => {
-    const p = patients.find(x => x.id === patientId);
-    if (!p) return;
+    let p = patients.find(x => x.id === patientId);
+    const ensurePatient = async () => {
+      if (p) return p;
+      try {
+        const fromDb = await db.patients.get(patientId);
+        if (fromDb && !fromDb.deletedAt) {
+          // update transient store for UI
+          usePatientStore.setState((s) => ({ patients: [...s.patients, fromDb] }));
+          p = fromDb as any;
+          return p;
+        }
+        // Fallback: find appointment with same patientId and use its name
+        const appt = (await db.appointments.get({ patientId } as any)) || null;
+        if (appt) {
+          const pseudo = { id: appt.patientId, name: appt.patientName || '', phone: '' } as any;
+          usePatientStore.setState((s) => ({ patients: [...s.patients, pseudo] }));
+          p = pseudo;
+          return p;
+        }
+      } catch (err) {
+        console.warn('[QueuePanel] ensurePatient failed', err);
+      }
+      return null;
+    };
 
-    // Compute alerts
-    const patientConsults = consultations.filter(c => c.patientId === patientId);
-    const pendingConsults = patientConsults.filter(c => c.paymentStatus === "pending" && (c.fee || 0) > 0);
-    const pendingAmount = pendingConsults.reduce((s, c) => s + (c.fee || 0), 0);
-    const today = todayStr();
-    const missedFollowUp = !!(p.nextFollowUpDate && p.nextFollowUpDate < today);
+    // ensurePatient may fetch from DB; run in IIFE
+    (async () => {
+      const patientObj = await ensurePatient();
+      if (!patientObj) return;
 
-    addToQueue({
-      patientId: p.id,
-      appointmentId: "",
-      patientName: p.name,
-      clinic: activeClinic,
-      alerts: {
-        hasPendingPayment: pendingAmount > 0,
-        pendingAmount,
-        isFirstVisit: patientConsults.length === 0,
-        missedFollowUp,
-      },
-    });
-    setShowAdd(false);
+      // Compute alerts
+      const patientConsults = consultations.filter(c => c.patientId === patientId);
+      const pendingConsults = patientConsults.filter(c => c.paymentStatus === "pending" && (c.fee || 0) > 0);
+      const pendingAmount = pendingConsults.reduce((s, c) => s + (c.fee || 0), 0);
+      const today = todayStr();
+      const missedFollowUp = !!(patientObj.nextFollowUpDate && patientObj.nextFollowUpDate < today);
+
+      addToQueue({
+        patientId: patientObj.id,
+        appointmentId: "",
+        patientName: patientObj.name,
+        clinic: activeClinic,
+        alerts: {
+          hasPendingPayment: pendingAmount > 0,
+          pendingAmount,
+          isFirstVisit: patientConsults.length === 0,
+          missedFollowUp,
+        },
+      });
+      setShowAdd(false);
+    })();
+
+    return;
   };
 
   const waiting = queue.filter(e => e.status === "waiting").length;
@@ -300,7 +372,15 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation }:
         <div ref={addRef} style={{ position: "relative" }}>
           <button
             data-testid="add-patient-to-queue-btn"
-            onClick={() => setShowAdd(s => !s)}
+            onClick={async () => {
+              // Ensure patient list is hydrated from canonical DB before opening
+              try {
+                await usePatientStore.getState().loadPatients();
+              } catch (err) {
+                console.error('[QueuePanel] loadPatients failed', err);
+              }
+              setShowAdd(s => !s);
+            }}
             style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center",
               gap: "7px", padding: "9px", borderRadius: "10px",
               background: "#0D7377", border: "none", cursor: "pointer",

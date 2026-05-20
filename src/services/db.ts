@@ -310,3 +310,8 @@ class SakhiDB extends Dexie {
 }
 
 export const db = new SakhiDB();
+
+// Convenience helper: fetch all non-deleted patients from the canonical DB
+export async function getAllPatientsFromDB() {
+  return db.patients.filter((p) => !p.deletedAt).toArray();
+}

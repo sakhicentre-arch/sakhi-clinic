@@ -6,6 +6,7 @@
  */
 
 import { db, Patient } from "./db";
+import { usePatientStore } from "../store/usePatientStore";
 
 const nowIso = () => new Date().toISOString();
 
@@ -36,6 +37,18 @@ export async function syncPatientFollowUp(patientId: string): Promise<void> {
     lastVisit: lastVisitRecord?.date || "",
     updatedAt: nowIso()
   });
+
+  // Update transient UI cache if loaded
+  try {
+    const p = await db.patients.get(patientId);
+    if (p && !p.deletedAt) {
+      usePatientStore.setState((s) => ({
+        patients: s.patients.map((x) => (x.id === patientId ? p : x)),
+      }));
+    }
+  } catch (err) {
+    console.warn('[patientService] syncPatientFollowUp store sync failed', err);
+  }
 }
 
 export async function getAllPatients(): Promise<Patient[]> {
@@ -54,7 +67,16 @@ export async function addPatient(patient: Patient): Promise<void> {
     createdAt: patient.createdAt || timestamp,
     updatedAt: timestamp,
   };
-  await db.patients.add(record);
+  const key = await db.patients.add(record);
+  // Ensure id present
+  if (!record.id) record.id = String(key);
+
+  // Update transient store immediately so UI sees new patient
+  try {
+    usePatientStore.setState((s) => ({ patients: [...s.patients, record] }));
+  } catch (err) {
+    console.warn('[patientService] addPatient store sync failed', err);
+  }
 }
 
 export async function updatePatient(id: string, updates: Partial<Patient>): Promise<void> {
@@ -64,6 +86,17 @@ export async function updatePatient(id: string, updates: Partial<Patient>): Prom
   });
   if (changed === 0) {
     throw new Error(`[patientService] Patient not found: ${id}`);
+  }
+
+  try {
+    const updated = await db.patients.get(id);
+    if (updated) {
+      usePatientStore.setState((s) => ({
+        patients: s.patients.map((p) => (p.id === id ? updated : p)),
+      }));
+    }
+  } catch (err) {
+    console.warn('[patientService] updatePatient store sync failed', err);
   }
 }
 
@@ -78,6 +111,15 @@ export async function deletePatient(id: string): Promise<void> {
     await db.consultations.where("patientId").equals(id).modify({ deletedAt: timestamp, updatedAt });
     await db.appointments.where("patientId").equals(id).modify({ deletedAt: timestamp, updatedAt });
   });
+
+  try {
+    usePatientStore.setState((s) => ({
+      patients: s.patients.filter((p) => p.id !== id),
+      selectedPatientId: s.selectedPatientId === id ? null : s.selectedPatientId,
+    }));
+  } catch (err) {
+    console.warn('[patientService] deletePatient store sync failed', err);
+  }
 }
 
 // ✅ V12.1: Restore a soft-deleted patient and all their related records
@@ -91,6 +133,14 @@ export async function restorePatient(id: string): Promise<void> {
     await db.consultations.where("patientId").equals(id).modify({ deletedAt: undefined, updatedAt });
     await db.appointments.where("patientId").equals(id).modify({ deletedAt: undefined, updatedAt });
   });
+  try {
+    const p = await db.patients.get(id);
+    if (p && !p.deletedAt) {
+      usePatientStore.setState((s) => ({ patients: [...s.patients, p] }));
+    }
+  } catch (err) {
+    console.warn('[patientService] restorePatient store sync failed', err);
+  }
 }
 export async function getDeletedPatients(): Promise<Patient[]> {
   return db.patients.filter((p) => !!p.deletedAt).toArray();

@@ -898,9 +898,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
   const handleWhatsAppBill = () => {
     const rawNumber = patient?.phone || (patient as any)?.mobile || "";
-    console.log("WHATSAPP FLOW");
-    console.log("PATIENT:", patient);
-    console.log("NORMALIZED:", normalizePatientPhone(patient));
+    // WhatsApp bill flow
     const link = generateWhatsAppLink(rawNumber, `*Sakhi Homeopathic Clinic — Bill*\n\nPatient: ${patient?.name || "N/A"}\nConsultation Fee: ₹${formData.fee || 0}\nPayment Status: ${formData.paymentStatus === "paid" ? "✅ Paid" : "⏳ Pending"}\n\nThank you for visiting Sakhi Clinic 🙏`);
     if (!link) return alert("⚠️ Patient mobile number is missing or invalid.");
     window.open(link, "sakhi_whatsapp_window");
@@ -910,9 +908,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     const rawNumber = patient?.phone || (patient as any)?.mobile || "";
     const name = patient?.name || "Patient";
     const complaint = formData.chiefComplaint;
-    console.log("WHATSAPP FLOW");
-    console.log("PATIENT:", patient);
-    console.log("NORMALIZED:", normalizePatientPhone(patient));
+    // WhatsApp review flow
     if (!complaint) return alert("⚠️ Please enter Chief Complaint to generate a review.");
     const { guj, eng } = generateReviewTexts(complaint, formData.onset || "", formData.outcome);
     const baseUrl = `${window.location.origin}/review`;
