@@ -215,12 +215,21 @@ export interface CaseMemoryEntry {
   deletedAt?: number;
 }
 
+// ✅ V47: Draft persistence for consultation auto-save
+export interface ConsultationDraft {
+  id: string;  // "draft-${patientId}"
+  patientId: string;
+  formData: any;  // Serialized FormData from ConsultationPage
+  savedAt: string;  // ISO timestamp
+}
+
 class SakhiDB extends Dexie {
   patients!: Dexie.Table<Patient, string>;
   consultations!: Dexie.Table<Consultation, string>;
   learning!: Dexie.Table<LearningPattern, number>;
   caseMemory!: Dexie.Table<CaseMemoryEntry, number>;
   appointments!: Dexie.Table<Appointment, string>;
+  drafts!: Dexie.Table<ConsultationDraft, string>;
 
   constructor() {
     super("SakhiClinicDB");
@@ -284,6 +293,18 @@ class SakhiDB extends Dexie {
         appointment.createdAt = appointment.createdAt || now;
         appointment.updatedAt = appointment.updatedAt || appointment.createdAt || now;
       });
+    });
+
+    // ✅ V47: Consultation draft persistence (non-breaking)
+    this.version(47).stores({
+      patients: "id, name, phone, nextFollowUpDate, lastVisit, deletedAt, createdAt, updatedAt",
+      consultations: "id, patientId, appointmentId, date, outcome, clinicId, learnedAt, deletedAt, createdAt, updatedAt",
+      learning: "++id, [remedy+symptomKey], remedy, symptomKey",
+      caseMemory: "++id, patientId, remedy, outcome, deletedAt, createdAt, updatedAt",
+      appointments: "id, date, patientId, status, clinic, [date+time+clinic], [clinic+date], deletedAt, createdAt, updatedAt",
+      drafts: "id, patientId, savedAt"
+    }).upgrade(() => {
+      // No migration — drafts table starts empty
     });
   }
 }

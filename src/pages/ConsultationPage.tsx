@@ -40,6 +40,7 @@ import PrintableConsultation from "../components/PrintableConsultation";
 import { generateRemedyExplanations } from "../services/aiReasoningEngine";
 import { usePatientStore } from "../store/usePatientStore";
 import { useConsultationStore } from "../store/useConsultationStore";
+import { saveDraft, loadDraft, deleteDraft } from "../services/draftService";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -115,11 +116,13 @@ interface PageState {
   formData: FormData;
   patient: Patient | null;
   learnedPatterns: any[];
+  loadError: string | null;
 }
 
 type PageAction =
   | { type: "LOAD_START" }
   | { type: "LOAD_SUCCESS"; payload: { consultations: Consultation[]; patient: Patient | null } }
+  | { type: "LOAD_ERROR"; payload: string }
   | { type: "SAVE_START" }
   | { type: "SAVE_DONE" }
   | { type: "SAVE_FAIL" }
@@ -129,8 +132,9 @@ type PageAction =
 
 function pageReducer(state: PageState, action: PageAction): PageState {
   switch (action.type) {
-    case "LOAD_START": return { ...state, loading: true };
-    case "LOAD_SUCCESS": return { ...state, loading: false, consultations: action.payload.consultations, patient: action.payload.patient };
+    case "LOAD_START": return { ...state, loading: true, loadError: null };
+    case "LOAD_SUCCESS": return { ...state, loading: false, consultations: action.payload.consultations, patient: action.payload.patient, loadError: null };
+    case "LOAD_ERROR": return { ...state, loading: false, loadError: action.payload };
     case "SAVE_START": return { ...state, saving: true };
     case "SAVE_DONE": return { ...state, saving: false, editingId: null, formData: EMPTY_FORM };
     case "SAVE_FAIL": return { ...state, saving: false };
@@ -592,14 +596,17 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const [state, dispatch] = useReducer(pageReducer, {
     consultations: [], loading: false, saving: false,
     editingId: null, formData: EMPTY_FORM, patient: null, learnedPatterns: [],
+    loadError: null,
   });
 
   const [mode, setMode] = useState<"quick" | "classic">("quick");
   const [showSticker, setShowSticker] = useState(false);
   const [showLetterPad, setShowLetterPad] = useState(false);
   const [showPrintMenu, setShowPrintMenu] = useState(false);
+  const [draftAutoSaveStatus, setDraftAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [draftRecovered, setDraftRecovered] = useState(false);
 
-  const { consultations, loading, saving, editingId, formData, patient, learnedPatterns } = state;
+  const { consultations, loading, saving, editingId, formData, patient, learnedPatterns, loadError } = state;
   const previousConsultation = consultations[0];
   const isEditing = editingId !== null;
   const lang = (formData as any).language || "en-IN";
@@ -611,15 +618,56 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     dispatch({ type: "LOAD_START" });
     try {
       const [recs, p] = await Promise.all([getConsultationsByPatient(patientId), getPatientById(patientId)]);
-      dispatch({ type: "LOAD_SUCCESS", payload: { consultations: recs, patient: p || null } });
+      if (!p) {
+        throw new Error(`Patient not found for id ${patientId}`);
+      }
+      dispatch({ type: "LOAD_SUCCESS", payload: { consultations: recs, patient: p } });
     } catch (error) {
+      console.error("[ConsultationPage] loadData failed:", error);
       const cachedConsultations = useConsultationStore.getState().consultations.filter((c) => c.patientId === patientId).sort((a, b) => b.date.localeCompare(a.date));
       const cachedPatient = usePatientStore.getState().patients.find((p) => p.id === patientId) || null;
+      if (!cachedPatient) {
+        dispatch({ type: "LOAD_ERROR", payload: "Unable to resolve patient record. Please reopen consultation from the patient list or queue." });
+        return;
+      }
       dispatch({ type: "LOAD_SUCCESS", payload: { consultations: cachedConsultations, patient: cachedPatient } });
     }
   }, [patientId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // ✅ V1A: DRAFT RECOVERY ON MOUNT
+  useEffect(() => {
+    const recoverDraft = async () => {
+      const savedDraft = await loadDraft(patientId);
+      if (savedDraft && !draftRecovered) {
+        const confirmRecover = window.confirm(
+          "📝 Unsaved draft found from your last session. Recover it?"
+        );
+        if (confirmRecover) {
+          dispatch({ type: "PATCH_FORM", payload: savedDraft });
+          setDraftRecovered(true);
+        } else {
+          await deleteDraft(patientId);
+        }
+      }
+    };
+    recoverDraft();
+  }, [patientId, draftRecovered]);
+
+  // ✅ V1A: AUTO-SAVE DRAFT EVERY 30 SECONDS
+  useEffect(() => {
+    const autoSaveInterval = setInterval(async () => {
+      if (formData.chiefComplaint || formData.caseText || formData.medicines.length > 0) {
+        setDraftAutoSaveStatus("saving");
+        await saveDraft(patientId, formData);
+        setDraftAutoSaveStatus("saved");
+        setTimeout(() => setDraftAutoSaveStatus("idle"), 2000);
+      }
+    }, 30000); // Auto-save every 30 seconds
+
+    return () => clearInterval(autoSaveInterval);
+  }, [patientId, formData]);
 
   // ── AI fetch ──
   useEffect(() => {
@@ -803,6 +851,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
       const ok = await saveConsultation(session);
       if (ok) {
         success = true;
+        await deleteDraft(patientId); // ✅ V1A: DELETE DRAFT AFTER SAVE
         dispatch({ type: "SAVE_DONE" });
         await loadData();
         if (onFinish) onFinish();
@@ -891,6 +940,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     : last;
 
   if (loading) return <div style={fullMessageStyle}>Loading Clinical Timeline...</div>;
+  if (loadError) return <div style={fullMessageStyle}>{loadError}</div>;
 
   // ─────────────────────────────────────────────────────────────────────────
   // SHARED SIDEBAR (used in classic mode)
@@ -1034,6 +1084,12 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600, marginTop: 1 }}>
                 {patient?.gender} · {patient?.age} Yrs · {consultations.length} visits
                 {isFirstVisit && <span style={{ color: "#7c3aed", marginLeft: 8 }}>🆕 First Visit</span>}
+                {/* ✅ V1A: DRAFT AUTO-SAVE STATUS */}
+                {draftAutoSaveStatus !== "idle" && (
+                  <span style={{ color: draftAutoSaveStatus === "saving" ? "#f59e0b" : "#16a34a", marginLeft: 8, fontSize: 11 }}>
+                    {draftAutoSaveStatus === "saving" ? "💾 saving..." : "✓ saved"}
+                  </span>
+                )}
               </div>
             </div>
           </div>

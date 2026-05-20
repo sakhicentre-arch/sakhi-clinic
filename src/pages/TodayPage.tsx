@@ -148,7 +148,11 @@ function AddToQueueDropdown({ onAdd, onClose }:
       <div style={{ padding: "12px 14px", borderBottom: "1px solid #f1f5f9",
         display: "flex", alignItems: "center", gap: "10px" }}>
         <Search size={14} color="#94a3b8" />
-        <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)}
+        <input
+          ref={inputRef}
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          data-testid="queue-search-input"
           placeholder="Search patient…"
           style={{ border: "none", outline: "none", fontSize: "14px",
             fontFamily: "inherit", flex: 1, background: "transparent", color: "#0f172a" }} />
@@ -261,7 +265,9 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation }:
   const done = queue.filter(e => e.status === "done").length;
 
   return (
-    <div style={{ width: "280px", flexShrink: 0, background: "#fff",
+    <div
+      data-testid="queue-panel"
+      style={{ width: "280px", flexShrink: 0, background: "#fff",
       borderRight: "1px solid #f1f5f9", display: "flex", flexDirection: "column",
       height: "100%" }}>
 
@@ -292,7 +298,9 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation }:
 
         {/* Add button */}
         <div ref={addRef} style={{ position: "relative" }}>
-          <button onClick={() => setShowAdd(s => !s)}
+          <button
+            data-testid="add-patient-to-queue-btn"
+            onClick={() => setShowAdd(s => !s)}
             style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center",
               gap: "7px", padding: "9px", borderRadius: "10px",
               background: "#0D7377", border: "none", cursor: "pointer",
@@ -307,9 +315,9 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation }:
       </div>
 
       {/* Queue list */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "8px 8px" }}>
+      <div data-testid="queue-list" style={{ flex: 1, overflowY: "auto", padding: "8px 8px" }}>
         {queue.length === 0 ? (
-          <div style={{ padding: "40px 20px", textAlign: "center" }}>
+          <div data-testid="queue-empty-state" style={{ padding: "40px 20px", textAlign: "center" }}>
             <div style={{ fontSize: "36px", marginBottom: "12px" }}>🏥</div>
             <div style={{ fontSize: "13px", fontWeight: 700, color: "#94a3b8", lineHeight: 1.6 }}>
               No patients in queue.<br />Add from appointments or walk-ins.
@@ -322,7 +330,9 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation }:
               patients.find(p => p.id === entry.patientId)?.gender || ""
             );
             return (
-              <div key={entry.queueId}
+              <div
+                key={entry.queueId}
+                data-testid={isActive ? `queue-row-active-${entry.queueId}` : `queue-row-${entry.queueId}`}
                 onClick={() => entry.status !== "done" && onSelect(entry)}
                 style={{ padding: "10px 10px", borderRadius: "12px", marginBottom: "4px",
                   cursor: entry.status === "done" ? "default" : "pointer",
@@ -348,26 +358,34 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation }:
                   {/* Info */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px" }}>
-                      <span style={{ fontSize: "13px", fontWeight: 800, color: "#0f172a",
+                      <span
+                        data-testid={`queue-patient-name-${entry.queueId}`}
+                        style={{ fontSize: "13px", fontWeight: 800, color: "#0f172a",
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {entry.patientName}
                       </span>
                       <AlertDots alerts={entry.alerts} />
                     </div>
-                    <StatusChip status={entry.status} />
+                    <span data-testid={`queue-status-${entry.queueId}`}>
+                      <StatusChip status={entry.status} />
+                    </span>
                   </div>
 
                   {/* Actions */}
                   <div style={{ display: "flex", flexDirection: "column", gap: "3px", flexShrink: 0 }}>
                     {entry.status === "waiting" && (
                       <>
-                        <button onClick={e => { e.stopPropagation(); moveUp(entry.queueId); }}
+                        <button
+                          data-testid={`queue-move-up-${entry.queueId}`}
+                          onClick={e => { e.stopPropagation(); moveUp(entry.queueId); }}
                           style={{ background: "none", border: "1px solid #e2e8f0",
                             borderRadius: "6px", cursor: "pointer", padding: "2px",
                             color: "#94a3b8", display: "flex" }}>
                           <ArrowUp size={11} />
                         </button>
-                        <button onClick={e => { e.stopPropagation(); moveDown(entry.queueId); }}
+                        <button
+                          data-testid={`queue-move-down-${entry.queueId}`}
+                          onClick={e => { e.stopPropagation(); moveDown(entry.queueId); }}
                           style={{ background: "none", border: "1px solid #e2e8f0",
                             borderRadius: "6px", cursor: "pointer", padding: "2px",
                             color: "#94a3b8", display: "flex" }}>
@@ -375,7 +393,9 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation }:
                         </button>
                       </>
                     )}
-                    <button onClick={e => { e.stopPropagation(); removeFromQueue(entry.queueId); }}
+                    <button
+                      data-testid={`queue-remove-${entry.queueId}`}
+                      onClick={e => { e.stopPropagation(); removeFromQueue(entry.queueId); }}
                       style={{ background: "none", border: "1px solid #e2e8f0",
                         borderRadius: "6px", cursor: "pointer", padding: "2px",
                         color: "#94a3b8", display: "flex" }}>
@@ -387,6 +407,7 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation }:
                 {/* In-progress: Start Consultation shortcut */}
                 {isActive && entry.status === "waiting" && (
                   <button
+                    data-testid={`queue-start-consultation-${entry.queueId}`}
                     onClick={e => {
                       e.stopPropagation();
                       setStatus(entry.queueId, "in-progress");

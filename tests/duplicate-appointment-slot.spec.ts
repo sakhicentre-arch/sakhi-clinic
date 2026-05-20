@@ -1,23 +1,15 @@
 import { test, expect } from '@playwright/test';
+import { generatePatientData, getRelativeDate, navigateTo, registerPatient, bookAppointment } from './testUtils';
 
 test('duplicate appointment slot prevention', async ({ page }) => {
   // ============================================================
   // TEST DATA SETUP
   // ============================================================
-  const patient1Name = `Patient A ${Date.now()}`;
-  const patient2Name = `Patient B ${Date.now()}`;
-  const patientAge = '28';
-  const patientGender = 'Male';
-  const patient1Phone = String(9000000000 + Math.floor(Math.random() * 1000000000));
-  const patient2Phone = String(9100000000 + Math.floor(Math.random() * 1000000000));
+  const patient1 = generatePatientData('Patient A');
+  const patient2 = generatePatientData('Patient B');
   const clinicBranch = 'Dabholi';
   const appointmentTime = '11:20';
-
-  // Calculate appointment date (tomorrow to avoid past date validation)
-  const today = new Date();
-  const futureDate = new Date(today);
-  futureDate.setDate(today.getDate() + 1);
-  const appointmentDate = futureDate.toISOString().split('T')[0];
+  const appointmentDate = getRelativeDate(1);
 
   // ============================================================
   // STEP 1: NAVIGATE TO APP
@@ -28,73 +20,33 @@ test('duplicate appointment slot prevention', async ({ page }) => {
   // ============================================================
   // STEP 2: REGISTER PATIENT 1
   // ============================================================
-  console.log(`📝 Registering Patient 1: ${patient1Name}`);
-  await page.click('button[aria-label="Patients"]');
-  await expect(page.locator('[data-testid="patient-registration-form"]')).toBeVisible();
+  console.log(`📝 Registering Patient 1: ${patient1.name}`);
+  await navigateTo(page, 'Patients');
+  await registerPatient(page, patient1);
 
-  await page.fill('[data-testid="patient-name-input"]', patient1Name);
-  await page.fill('[data-testid="patient-age-input"]', patientAge);
-  await page.selectOption('[data-testid="patient-gender-select"]', patientGender);
-  await page.fill('[data-testid="patient-phone-input"]', patient1Phone);
-  await page.click('[data-testid="save-patient-btn"]');
-
-  // Wait for patient to be registered
-  const patient1Row = page.locator('[data-testid="patient-row"]', { hasText: patient1Name });
+  const patient1Row = page.locator('[data-testid="patient-row"]', { hasText: patient1.name });
   await expect(patient1Row).toBeVisible();
 
   // ============================================================
   // STEP 3: REGISTER PATIENT 2
   // ============================================================
-  console.log(`📝 Registering Patient 2: ${patient2Name}`);
-  
-  // Clear the form for second patient
-  await page.fill('[data-testid="patient-name-input"]', patient2Name);
-  await page.fill('[data-testid="patient-age-input"]', patientAge);
-  await page.selectOption('[data-testid="patient-gender-select"]', patientGender);
-  await page.fill('[data-testid="patient-phone-input"]', patient2Phone);
-  await page.click('[data-testid="save-patient-btn"]');
+  console.log(`📝 Registering Patient 2: ${patient2.name}`);
+  await registerPatient(page, patient2);
 
-  // Wait for second patient to be registered
-  const patient2Row = page.locator('[data-testid="patient-row"]', { hasText: patient2Name });
+  const patient2Row = page.locator('[data-testid="patient-row"]', { hasText: patient2.name });
   await expect(patient2Row).toBeVisible();
 
   // ============================================================
-  // STEP 4: NAVIGATE TO APPOINTMENTS
+  // STEP 4: BOOK FIRST APPOINTMENT FOR PATIENT 1 (VALID SLOT)
   // ============================================================
-  await page.click('button[aria-label="Appointments"]');
-  await expect(page.locator('[data-testid="appointment-scheduling-form"]')).toBeVisible();
+  console.log(`📅 Booking first appointment for ${patient1.name}: ${clinicBranch} on ${appointmentDate} at ${appointmentTime}`);
 
-  // ============================================================
-  // STEP 5: BOOK FIRST APPOINTMENT FOR PATIENT 1 (VALID SLOT)
-  // ============================================================
-  console.log(`📅 Booking first appointment for ${patient1Name}: ${clinicBranch} on ${appointmentDate} at ${appointmentTime}`);
-
-  // Select patient 1
-  await page.fill('[data-testid="appointment-patient-search-input"]', patient1Name);
-  const patient1SelectOption = page.locator('[data-testid="appointment-patient-select"] option', { hasText: patient1Name }).first();
-  const patient1Value = await patient1SelectOption.getAttribute('value');
-  await expect(patient1Value).not.toBeNull();
-  await page.selectOption('[data-testid="appointment-patient-select"]', patient1Value!);
-
-  // Select clinic, date, and time
-  await page.selectOption('[data-testid="appointment-clinic-select"]', clinicBranch);
-  await page.fill('[data-testid="appointment-date-input"]', appointmentDate);
-  await page.selectOption('[data-testid="appointment-time-select"]', appointmentTime);
-
-  // Handle popup that might appear
-  page.once('popup', async (popup) => {
-    await popup.close();
+  await bookAppointment(page, {
+    patientName: patient1.name,
+    clinicBranch,
+    appointmentDate,
+    appointmentTime,
   });
-
-  // Capture the first appointment dialog
-  const [firstDialog] = await Promise.all([
-    page.waitForEvent('dialog'),
-    page.click('[data-testid="appointment-submit-btn"]'),
-  ]);
-
-  // Verify success message
-  await expect(firstDialog.message()).toContain('Appointment Secured');
-  await firstDialog.accept();
 
   // ============================================================
   // VERIFY FIRST BOOKING SUCCESSFUL
@@ -102,7 +54,7 @@ test('duplicate appointment slot prevention', async ({ page }) => {
   console.log('✅ First appointment booking successful');
 
   // Verify slot card exists for patient 1
-  const bookedSlotCard = page.locator('[data-testid="appointment-slot-card"]', { hasText: patient1Name });
+  const bookedSlotCard = page.locator('[data-testid="appointment-slot-card"]', { hasText: patient1.name });
   await expect(bookedSlotCard).toHaveCount(1);
   await expect(bookedSlotCard).toContainText('Scheduled');
 
@@ -113,26 +65,21 @@ test('duplicate appointment slot prevention', async ({ page }) => {
   // ============================================================
   // STEP 6: ATTEMPT DUPLICATE BOOKING FOR PATIENT 2 (SAME CLINIC, DATE, TIME)
   // ============================================================
-  console.log(`⚠️ Attempting duplicate booking for ${patient2Name}: same slot (${clinicBranch} on ${appointmentDate} at ${appointmentTime})`);
+  console.log(`⚠️ Attempting duplicate booking for ${patient2.name}: same slot (${clinicBranch} on ${appointmentDate} at ${appointmentTime})`);
 
   // Clear the previous patient selection
   await page.selectOption('[data-testid="appointment-patient-select"]', '');
-  
-  // Small delay to allow UI to update
-  await page.waitForTimeout(300);
 
   // Select patient 2
-  await page.fill('[data-testid="appointment-patient-search-input"]', patient2Name);
-  const patient2SelectOption = page.locator('[data-testid="appointment-patient-select"] option', { hasText: patient2Name }).first();
+  await page.fill('[data-testid="appointment-patient-search-input"]', patient2.name);
+  const patient2SelectOption = page.locator('[data-testid="appointment-patient-select"] option', { hasText: patient2.name }).first();
   const patient2Value = await patient2SelectOption.getAttribute('value');
   await expect(patient2Value).not.toBeNull();
   await page.selectOption('[data-testid="appointment-patient-select"]', patient2Value!);
 
   // Clinic, date, and time should still be set (no need to change)
-  // Just verify they're correct
   const clinicValue = await page.locator('[data-testid="appointment-clinic-select"]').inputValue();
   expect(clinicValue).toBe(clinicBranch);
-  
   const dateValue = await page.locator('[data-testid="appointment-date-input"]').inputValue();
   expect(dateValue).toBe(appointmentDate);
 
@@ -154,9 +101,6 @@ test('duplicate appointment slot prevention', async ({ page }) => {
     }
   }, appointmentTime);
 
-  // Small delay for React to process the change
-  await page.waitForTimeout(500);
-
   // Try to submit - collect any dialogs that might appear
   let dialogAppeared = false;
   let alertMessage = '';
@@ -168,10 +112,7 @@ test('duplicate appointment slot prevention', async ({ page }) => {
     await dialog.accept();
   });
 
-  // Click submit button without waiting for dialog (in case it doesn't appear)
   await page.click('[data-testid="appointment-submit-btn"]');
-
-  // Wait a bit to see if dialog appears
   await page.waitForTimeout(1000);
 
   // If a dialog appeared, verify it's about duplicate booking
@@ -188,11 +129,11 @@ test('duplicate appointment slot prevention', async ({ page }) => {
   console.log('🔍 Verifying only one appointment exists for the slot...');
 
   // Count appointment slot cards for patient 1
-  const allSlotCards = page.locator('[data-testid="appointment-slot-card"]', { hasText: patient1Name });
+  const allSlotCards = page.locator('[data-testid="appointment-slot-card"]', { hasText: patient1.name });
   await expect(allSlotCards).toHaveCount(1);
 
   // Verify patient 2 has no appointments
-  const patient2SlotCards = page.locator('[data-testid="appointment-slot-card"]', { hasText: patient2Name });
+  const patient2SlotCards = page.locator('[data-testid="appointment-slot-card"]', { hasText: patient2.name });
   await expect(patient2SlotCards).toHaveCount(0);
 
   // ============================================================
@@ -221,7 +162,7 @@ test('duplicate appointment slot prevention', async ({ page }) => {
   await expect(reloadedBookedOption).toBeDisabled();
 
   // Verify the appointment card still displays for patient 1
-  const persistedSlotCard = page.locator('[data-testid="appointment-slot-card"]', { hasText: patient1Name });
+  const persistedSlotCard = page.locator('[data-testid="appointment-slot-card"]', { hasText: patient1.name });
   await expect(persistedSlotCard).toHaveCount(1);
   await expect(persistedSlotCard).toContainText('Scheduled');
 
