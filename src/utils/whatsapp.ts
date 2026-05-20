@@ -31,12 +31,13 @@ export function isValidPhone(phone: string | undefined): boolean {
 
 /**
  * ✅ Normalizes a phone number and generates a WhatsApp click-to-chat link.
+ * Uses direct web.whatsapp.com URLs to avoid intermediate landing pages.
  */
 export function generateWhatsAppLink(phone: string, message: string): string | null {
   const normalized = normalizePhone(phone);
   if (!normalized) return null;
 
-  return `https://wa.me/91${normalized}?text=${encodeURIComponent(message.trim())}`;
+  return `https://web.whatsapp.com/send?phone=91${normalized}&text=${encodeURIComponent(message.trim())}`;
 }
 
 /**

@@ -145,7 +145,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
     if (!phone) return;
     const msg = `Reminder – Sakhi Clinic\n\nDear ${patient.name},\n\nThis is a reminder for your appointment today.\n\n⏰ ${appt.time}\n🏥 ${appt.clinic}\n\nPlease arrive on time 🙏`;
     const link = generateWhatsAppLink(phone, msg);
-    if (link) window.location.href = link;
+    if (link) window.open(link, "sakhi_whatsapp_window");
     markReminderSent(appt.id);
   };
 
@@ -163,7 +163,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
         if (!phone) return;
         const msg = `Reminder – Sakhi Clinic\n\nDear ${patient.name},\n\nYour appointment is today at ${appt.time}.\n🏥 ${appt.clinic}\n\nPlease arrive on time 🙏`;
         const link = generateWhatsAppLink(phone, msg);
-        if (link) window.location.href = link;
+        if (link) window.open(link, "sakhi_whatsapp_window");
         markReminderSent(appt.id);
       }, index * 2500); 
     });

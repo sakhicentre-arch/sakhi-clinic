@@ -285,7 +285,7 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
                 </div>
                 <button
                   disabled={!hasPhone}
-                  onClick={() => { const link = generateWhatsAppLink(alert.phone || "", alert.message); if (link) window.location.href = link; }}
+                  onClick={() => { const link = generateWhatsAppLink(alert.phone || "", alert.message); if (link) window.open(link, "sakhi_whatsapp_window"); }}
                   style={notifyButtonStyle(hasPhone, isCritical)}
                 >
                   {hasPhone ? "📲 Notify" : "🚫 No Phone"}
