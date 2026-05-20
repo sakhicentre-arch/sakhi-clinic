@@ -890,7 +890,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     const msg = `${getPrescriptionMessage(patient.name, formData.medicines)}${followUpNote}`;
     const link = generateWhatsAppLink(phone, msg);
     if (link) {
-      window.open(link, "_blank");
+      window.location.href = link;
     } else {
       alert("Unable to generate WhatsApp link. Please verify the patient phone number.");
     }
@@ -903,7 +903,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     console.log("NORMALIZED:", normalizePatientPhone(patient));
     const link = generateWhatsAppLink(rawNumber, `*Sakhi Homeopathic Clinic — Bill*\n\nPatient: ${patient?.name || "N/A"}\nConsultation Fee: ₹${formData.fee || 0}\nPayment Status: ${formData.paymentStatus === "paid" ? "✅ Paid" : "⏳ Pending"}\n\nThank you for visiting Sakhi Clinic 🙏`);
     if (!link) return alert("⚠️ Patient mobile number is missing or invalid.");
-    window.open(link, "_blank");
+    window.location.href = link;
   };
 
   const handleAskReview = () => {
@@ -921,7 +921,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     const whatsappMessage = `Hello ${name},\n\nThank you for choosing Sakhi Homeopathic Clinic 🙏\n\nWe are glad to be part of your health journey. If you are happy with our service, please share your valuable experience here:\n\n👉 ${reviewLink}\n\nIt takes just 10 seconds and helps us serve you better! 😊`;
     const link = generateWhatsAppLink(rawNumber, whatsappMessage);
     if (!link) return alert("⚠️ Patient mobile number is missing or invalid.");
-    window.open(link, "_blank");
+    window.location.href = link;
     alert("✅ WhatsApp opened. Please ask the patient to click the link and post the review.");
   };
 

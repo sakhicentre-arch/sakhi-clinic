@@ -419,7 +419,7 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
     if (!phone) return alert("Patient phone number missing.");
     const msg = getPrescriptionMessage(patient.name, formData.medicines);
     const link = generateWhatsAppLink(phone, msg);
-    if (link) window.open(link, "_blank");
+    if (link) window.location.href = link;
   };
 
   const last = consultations[0] ?? null;

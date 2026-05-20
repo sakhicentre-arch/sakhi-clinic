@@ -87,7 +87,7 @@ export default function RevenuePage() {
     const msg = `Dear ${p.name}, your pending amount of ₹${p.amount} is due. Please clear at Sakhi Clinic.`;
     const link = generateWhatsAppLink(rawNumber, msg);
     if (!link) return;
-    window.open(link);
+    window.location.href = link;
   };
 
   const S = {

@@ -841,7 +841,7 @@ function StatsPanel({ goToConsultation }:
                       const msg = `Dear ${p.name}, your follow-up at Sakhi Clinic is overdue. Please visit or call us.`;
                       const link = generateWhatsAppLink(rawNumber, msg);
                       if (!link) return alert("⚠️ Patient mobile number is missing or invalid.");
-                      window.open(link);
+                      window.location.href = link;
                     }}
                     style={{ display: "flex", alignItems: "center", gap: "5px",
                       padding: "4px 10px", borderRadius: "7px",

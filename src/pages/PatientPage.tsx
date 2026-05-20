@@ -554,7 +554,7 @@ export default function PatientPage(
     const message = `Dear ${selectedPatient.name}, this is a reminder from Sakhi Homeopathic Clinic. You have a pending payment of ${formatCurrency(revenueAnalytics.totalPending)}. Please visit us to clear the balance. Thank you!`;
     const link = generateWhatsAppLink(selectedPatient.phone || (selectedPatient as any).mobile || "", message);
     if (!link) return alert("⚠️ Patient mobile number is missing or invalid.");
-    window.open(link, "_blank");
+    window.location.href = link;
   }, [selectedPatient, revenueAnalytics.totalPending]);
 
   const goToConsultation = useCallback(
