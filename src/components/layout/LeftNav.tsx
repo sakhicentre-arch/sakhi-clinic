@@ -14,6 +14,9 @@ import { ActivePage } from "../../store/uiStore";
 
 interface LeftNavProps {
   onNavigate: (page: ActivePage) => void;
+  isMobile?: boolean;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 const navItems = [
@@ -25,7 +28,7 @@ const navItems = [
   { id: "revenue", label: "Revenue", icon: TrendingUp, badge: false },
 ];
 
-export default function LeftNav({ onNavigate }: LeftNavProps) {
+export default function LeftNav({ onNavigate, isMobile = false, isOpen = false, onClose }: LeftNavProps) {
   const activePage = useUIStore((s) => s.activePage);
   const activeClinic = useUIStore((s) => s.activeClinic);
   const queue = useQueueStore((s) => s.queue);
@@ -34,22 +37,27 @@ export default function LeftNav({ onNavigate }: LeftNavProps) {
   const clinicColor = activeClinic === "Dabholi" ? "#0D7377" : "#6B3FA0";
   const waitingCount = queue.filter((e) => e.status === "waiting").length;
 
+  if (isMobile && !isOpen) {
+    return null;
+  }
+
   return (
     <div
       style={{
         position: "fixed",
-        left: "0",
-        top: "59px",
-        width: "64px",
-        height: `calc(100vh - 59px)`,
-        background: "#f8fafc",
-        borderRight: "1px solid #e2e8f0",
+        left: 0,
+        top: isMobile ? "59px" : "59px",
+        width: isMobile ? "min(280px, 100%)" : "64px",
+        height: isMobile ? "calc(100vh - 59px)" : `calc(100vh - 59px)`,
+        background: "#ffffff",
+        borderRight: isMobile ? "none" : "1px solid #e2e8f0",
+        boxShadow: isMobile ? "2px 0 24px rgba(15, 23, 42, 0.16)" : undefined,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         paddingTop: "20px",
         paddingBottom: "20px",
-        zIndex: 500,
+        zIndex: 1000,
       }}
     >
       {/* Nav Items */}
@@ -71,8 +79,9 @@ export default function LeftNav({ onNavigate }: LeftNavProps) {
                 aria-label={item.label}
                 onClick={() => onNavigate(item.id as ActivePage)}
                 style={{
-                  width: "48px",
+                  width: isMobile ? "100%" : "48px",
                   height: "48px",
+                  padding: isMobile ? "0 12px" : undefined,
                   borderRadius: "12px",
                   border: "none",
                   background: isActive ? clinicColor : "transparent",
@@ -80,12 +89,27 @@ export default function LeftNav({ onNavigate }: LeftNavProps) {
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
+                  justifyContent: isMobile ? "flex-start" : "center",
+                  gap: isMobile ? "12px" : undefined,
                   transition: "all 0.2s ease",
                   position: "relative",
                 }}
               >
                 <Icon size={20} />
+                {isMobile && (
+                  <span
+                    style={{
+                      color: isActive ? "#fff" : "#0f172a",
+                      fontWeight: 600,
+                      fontSize: 15,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {item.label}
+                  </span>
+                )}
 
                 {/* Left Bar Indicator */}
                 {isActive && (
@@ -172,6 +196,27 @@ export default function LeftNav({ onNavigate }: LeftNavProps) {
           );
         })}
       </div>
+
+      {isMobile && onClose && (
+        <button
+          aria-label="Close navigation"
+          onClick={onClose}
+          style={{
+            width: "100%",
+            padding: "12px 16px",
+            marginBottom: "12px",
+            borderRadius: "12px",
+            border: "1px solid #e2e8f0",
+            background: "#f8fafc",
+            color: "#0f172a",
+            cursor: "pointer",
+            textAlign: "left",
+            fontWeight: 700,
+          }}
+        >
+          Close menu
+        </button>
+      )}
 
       {/* Spacer */}
       <div style={{ flex: 1 }} />

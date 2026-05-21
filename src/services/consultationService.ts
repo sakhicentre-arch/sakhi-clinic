@@ -6,6 +6,7 @@
 import { db, Consultation, normalizeOutcome } from "./db";
 import { learnFromConsultation } from "./learningEngine";
 import { syncPatientFollowUp } from "./patientService";
+import { broadcastSyncEvent } from "./syncService";
 
 const nowIso = () => new Date().toISOString();
 
@@ -30,6 +31,8 @@ export async function saveConsultation(c: Consultation): Promise<boolean> {
       await db.consultations.put(normalized);
       await syncPatientFollowUp(normalized.patientId);
     });
+
+    broadcastSyncEvent({ type: "consultation:saved", payload: { id: normalized.id } });
 
     if (!normalized.learnedAt) {
       learnFromConsultation(normalized)

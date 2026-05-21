@@ -27,6 +27,7 @@ import { useUIStore } from "../store/uiStore";
 import { usePatientSearch } from "../hooks/usePatientSearch";
 import { SplitPane, ScrollRegion } from "../components/layout/LayoutPrimitives";
 import { normalizePatientPhone } from "../utils/whatsapp";
+import { addPatient as saveNewPatient, updatePatient as saveUpdatedPatient, deletePatient as removePatient } from "../services/patientService";
 import type { Consultation, Report } from "../types/models";
 
 type PatientPageConsultation = Omit<Consultation, "outcome" | "medicines"> & {
@@ -224,7 +225,6 @@ export default function PatientPage(
   // per-action selector always returns the same reference, making deps stable.
   const patients = usePatientStore((state) => state.patients) || [];
   const loadPatients = usePatientStore((state) => state.loadPatients);
-  const addPatient = usePatientStore((state) => state.addPatient);
   const updatePatient = usePatientStore((state) => state.updatePatient);
   const deletePatient = usePatientStore((state) => state.deletePatient);
 
@@ -487,13 +487,13 @@ export default function PatientPage(
     try {
       if (selectedPatient) {
         // ✅ V43: All new fields included in update payload
-        await updatePatient(selectedPatient.id, {
+        await saveUpdatedPatient(selectedPatient.id, {
           ...formData,
           reports: reports as any,
         });
       } else {
         // ✅ V43: All new fields included in add payload
-        await addPatient({
+        await saveNewPatient({
           ...formData,
           id: Date.now().toString(),
           createdAt: new Date().toISOString(),
@@ -518,7 +518,7 @@ export default function PatientPage(
     e.stopPropagation();
     if (!window.confirm("Delete this patient? This cannot be undone.")) return;
     try {
-      await deletePatient(id);
+      await removePatient(id);
       if (selectedId === id) syncSelectedId(null);
     } catch (error) {
       console.error("Error deleting patient:", error);

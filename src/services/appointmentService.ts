@@ -1,4 +1,5 @@
 import { Appointment, AppointmentStatus, db } from "./db";
+import { broadcastSyncEvent } from "./syncService";
 
 const nowIso = () => new Date().toISOString();
 const todayDateString = (): string => new Date().toISOString().slice(0, 10);
@@ -100,6 +101,7 @@ export const appointmentService = {
       }
 
       await db.appointments.add(withMetadata(appointment));
+      broadcastSyncEvent({ type: "appointment:created", payload: { id: appointment.id } });
       return true;
     } catch (error) {
       console.error("[AppointmentService] createAppointment failed:", error);
@@ -125,6 +127,7 @@ export const appointmentService = {
       }
 
       await db.appointments.put(updated);
+      broadcastSyncEvent({ type: "appointment:updated", payload: { id } });
       return true;
     } catch (error) {
       console.error("[AppointmentService] updateAppointment failed:", error);
@@ -138,6 +141,7 @@ export const appointmentService = {
       const existing = await this.getById(id);
       if (!existing) throw new Error("[AppointmentService] Appointment not found");
       await db.appointments.update(id, { deletedAt: Date.now(), updatedAt: nowIso() });
+      broadcastSyncEvent({ type: "appointment:deleted", payload: { id } });
       return true;
     } catch (error) {
       console.error("[AppointmentService] deleteAppointment failed:", error);
@@ -155,6 +159,7 @@ export const appointmentService = {
       const existing = await this.getById(id);
       if (!existing) throw new Error("[AppointmentService] Appointment not found");
       await db.appointments.update(id, { status, updatedAt: nowIso() });
+      broadcastSyncEvent({ type: "appointment:updated", payload: { id } });
       return true;
     } catch (error) {
       console.error("[AppointmentService] updateStatus failed:", error);

@@ -2,13 +2,21 @@ import React, { useState, useEffect } from "react";
 import { useUIStore } from "../../store/uiStore";
 import GlobalSearch from "../shared/GlobalSearch";
 import ClinicBadge from "../shared/ClinicBadge";
-import { Clock } from "lucide-react";
+import { Clock, Menu, X } from "lucide-react";
 
 interface TopBarProps {
   onPatientSelect: (patientId: string) => void;
+  isMobile?: boolean;
+  mobileNavOpen?: boolean;
+  onToggleMobileNav: () => void;
 }
 
-export default function TopBar({ onPatientSelect }: TopBarProps) {
+export default function TopBar({
+  onPatientSelect,
+  isMobile = false,
+  mobileNavOpen = false,
+  onToggleMobileNav,
+}: TopBarProps) {
   const activeClinic = useUIStore((s) => s.activeClinic);
   const draftStatus = useUIStore((s) => s.draftStatus);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -47,14 +55,35 @@ export default function TopBar({ onPatientSelect }: TopBarProps) {
           borderBottom: "1px solid #e2e8f0",
           display: "flex",
           alignItems: "center",
-          paddingLeft: "24px",
-          paddingRight: "24px",
-          gap: "24px",
+          paddingLeft: isMobile ? "14px" : "24px",
+          paddingRight: isMobile ? "14px" : "24px",
+          gap: isMobile ? "12px" : "24px",
+          flexWrap: isMobile ? "wrap" : "nowrap",
           zIndex: 1000,
           boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)",
         }}
       >
-        {/* Sakhi Logo */}
+        {isMobile && (
+          <button
+            onClick={onToggleMobileNav}
+            aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 12,
+              border: "none",
+              background: "#f1f5f9",
+              color: "#0f172a",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+            }}
+          >
+            {mobileNavOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
+        )}
+
         <div
           style={{
             fontSize: "18px",
@@ -94,16 +123,12 @@ export default function TopBar({ onPatientSelect }: TopBarProps) {
           }}
         />
 
-        {/* ClinicBadge */}
-        <ClinicBadge />
+        {!isMobile && <ClinicBadge />}
 
-        {/* Global Search */}
-        <GlobalSearch onSelectPatient={onPatientSelect} />
+        {!isMobile && <GlobalSearch onSelectPatient={onPatientSelect} />}
 
-        {/* Spacer */}
         <div style={{ flex: 1 }} />
 
-        {/* Live Clock */}
         <div
           style={{
             display: "flex",
@@ -124,7 +149,7 @@ export default function TopBar({ onPatientSelect }: TopBarProps) {
         </div>
 
         {/* Draft Status Badge */}
-        {draftStatus && (
+        {!isMobile && draftStatus && (
           <div
             style={{
               padding: "6px 12px",

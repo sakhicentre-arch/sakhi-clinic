@@ -45,6 +45,7 @@ export async function registerPatient(page: Page, patientData: {
   await page.selectOption('[data-testid="patient-gender-select"]', patientData.gender);
   await page.fill('[data-testid="patient-phone-input"]', patientData.phone);
   await page.click('[data-testid="save-patient-btn"]');
+  await expect(page.locator('[data-testid="patient-row"]', { hasText: patientData.name })).toBeVisible({ timeout: 10000 });
 }
 
 export async function bookAppointment(page: Page, bookingData: {

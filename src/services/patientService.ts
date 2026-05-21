@@ -7,6 +7,7 @@
 
 import { db, Patient } from "./db";
 import { usePatientStore } from "../store/usePatientStore";
+import { broadcastSyncEvent } from "./syncService";
 
 const nowIso = () => new Date().toISOString();
 
@@ -49,6 +50,8 @@ export async function syncPatientFollowUp(patientId: string): Promise<void> {
   } catch (err) {
     console.warn('[patientService] syncPatientFollowUp store sync failed', err);
   }
+
+  broadcastSyncEvent({ type: "patient:updated", payload: { id: patientId } });
 }
 
 export async function getAllPatients(): Promise<Patient[]> {
@@ -77,6 +80,8 @@ export async function addPatient(patient: Patient): Promise<void> {
   } catch (err) {
     console.warn('[patientService] addPatient store sync failed', err);
   }
+
+  broadcastSyncEvent({ type: "patient:created", payload: { id: String(record.id) } });
 }
 
 export async function updatePatient(id: string, updates: Partial<Patient>): Promise<void> {
@@ -98,6 +103,8 @@ export async function updatePatient(id: string, updates: Partial<Patient>): Prom
   } catch (err) {
     console.warn('[patientService] updatePatient store sync failed', err);
   }
+
+  broadcastSyncEvent({ type: "patient:updated", payload: { id } });
 }
 
 export async function deletePatient(id: string): Promise<void> {
@@ -120,6 +127,8 @@ export async function deletePatient(id: string): Promise<void> {
   } catch (err) {
     console.warn('[patientService] deletePatient store sync failed', err);
   }
+
+  broadcastSyncEvent({ type: "patient:deleted", payload: { id } });
 }
 
 // ✅ V12.1: Restore a soft-deleted patient and all their related records
@@ -141,6 +150,8 @@ export async function restorePatient(id: string): Promise<void> {
   } catch (err) {
     console.warn('[patientService] restorePatient store sync failed', err);
   }
+
+  broadcastSyncEvent({ type: "patient:restored", payload: { id } });
 }
 export async function getDeletedPatients(): Promise<Patient[]> {
   return db.patients.filter((p) => !!p.deletedAt).toArray();

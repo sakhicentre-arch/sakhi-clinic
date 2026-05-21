@@ -38,5 +38,13 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    {
+      name: 'pixel5',
+      use: { ...devices['Pixel 5'], viewport: devices['Pixel 5'].viewport, isMobile: true },
+    },
+    {
+      name: 'small-android',
+      use: { viewport: { width: 360, height: 780 }, userAgent: 'Mozilla/5.0 (Linux; Android 10; Pixel 4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36', isMobile: true },
+    },
   ],
 });

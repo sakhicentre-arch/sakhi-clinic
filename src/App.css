@@ -1,3 +1,44 @@
+:root {
+  color-scheme: normal;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  min-width: 100%;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: inherit;
+}
+
+body {
+  font-family: Inter, 'Segoe UI', system-ui, sans-serif;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  text-size-adjust: 100%;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  touch-action: manipulation;
+}
+
 /* ================= PRINT LAYOUT FIX ================= */
 
 .print-area {

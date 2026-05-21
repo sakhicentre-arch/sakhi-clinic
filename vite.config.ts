@@ -15,6 +15,7 @@ export default defineConfig({
         theme_color: '#0f172a',
         background_color: '#ffffff',
         display: 'standalone',
+        display_override: ['standalone', 'fullscreen'],
         scope: '/',
         start_url: '/',
         orientation: 'portrait-primary',
@@ -23,25 +24,13 @@ export default defineConfig({
             src: '/img/icons/icon-192x192.png',
             sizes: '192x192',
             type: 'image/png',
-            purpose: 'any',
+            purpose: 'any maskable',
           },
           {
             src: '/img/icons/icon-512x512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any',
-          },
-          {
-            src: '/img/icons/icon-192x192-maskable.png',
-            sizes: '192x192',
-            type: 'image/png',
-            purpose: 'maskable',
-          },
-          {
-            src: '/img/icons/icon-512x512-maskable.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'maskable',
+            purpose: 'any maskable',
           },
         ],
         categories: ['medical', 'productivity'],
@@ -55,6 +44,34 @@ export default defineConfig({
             src: '/img/screenshots/screenshot-1280x720.png',
             sizes: '1280x720',
             type: 'image/png',
+          },
+        ],
+        shortcuts: [
+          {
+            name: 'Open Today',
+            short_name: 'Today',
+            description: 'Open today’s clinic board',
+            url: '/?source=shortcut-today',
+            icons: [
+              {
+                src: '/img/icons/icon-192x192.png',
+                sizes: '192x192',
+                type: 'image/png',
+              },
+            ],
+          },
+          {
+            name: 'View Patients',
+            short_name: 'Patients',
+            description: 'Open the patient list',
+            url: '/?source=shortcut-patients',
+            icons: [
+              {
+                src: '/img/icons/icon-192x192.png',
+                sizes: '192x192',
+                type: 'image/png',
+              },
+            ],
           },
         ],
       },
@@ -87,4 +104,7 @@ export default defineConfig({
       },
     }),
   ],
+  define: {
+    __APP_VERSION__: JSON.stringify(process.env.npm_package_version || 'dev'),
+  },
 })

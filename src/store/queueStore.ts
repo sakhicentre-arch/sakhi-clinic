@@ -1,5 +1,16 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import {
+  subscribeToSync,
+  broadcastQueueSnapshot,
+} from "../services/syncService";
+
+let skipQueueBroadcast = false;
+
+const triggerQueueSnapshot = (getQueue: () => QueueEntry[]) => {
+  if (skipQueueBroadcast) return;
+  broadcastQueueSnapshot(getQueue());
+};
 
 export type QueueAlerts = {
   hasPendingPayment: boolean;
@@ -56,12 +67,14 @@ export const useQueueStore = create<QueueStore>()(
         set((state) => ({
           queue: [...state.queue, queueEntry],
         }));
+        triggerQueueSnapshot(() => get().queue);
       },
 
       removeFromQueue: (queueId) => {
         set((state) => ({
           queue: state.queue.filter((e) => e.queueId !== queueId),
         }));
+        triggerQueueSnapshot(() => get().queue);
       },
 
       setStatus: (queueId, status) => {
@@ -70,6 +83,7 @@ export const useQueueStore = create<QueueStore>()(
             e.queueId === queueId ? { ...e, status } : e
           ),
         }));
+        triggerQueueSnapshot(() => get().queue);
       },
 
       moveUp: (queueId) => {
@@ -80,6 +94,7 @@ export const useQueueStore = create<QueueStore>()(
           [newQueue[index], newQueue[index - 1]] = [newQueue[index - 1], newQueue[index]];
           return { queue: newQueue };
         });
+        triggerQueueSnapshot(() => get().queue);
       },
 
       moveDown: (queueId) => {
@@ -90,10 +105,12 @@ export const useQueueStore = create<QueueStore>()(
           [newQueue[index], newQueue[index + 1]] = [newQueue[index + 1], newQueue[index]];
           return { queue: newQueue };
         });
+        triggerQueueSnapshot(() => get().queue);
       },
 
       clearQueue: () => {
         set({ queue: [] });
+        triggerQueueSnapshot(() => get().queue);
       },
 
       isInQueue: (patientId) => {
@@ -114,3 +131,26 @@ export const useQueueStore = create<QueueStore>()(
     }
   )
 );
+
+if (typeof window !== "undefined") {
+  subscribeToSync((message) => {
+    switch (message.type) {
+      case "queue:snapshot-request": {
+        broadcastQueueSnapshot(useQueueStore.getState().queue);
+        break;
+      }
+      case "queue:snapshot":
+      case "queue:snapshot-response": {
+        const payload = message.payload as { queue?: QueueEntry[] };
+        if (!payload || !Array.isArray(payload.queue)) return;
+
+        skipQueueBroadcast = true;
+        useQueueStore.setState({ queue: payload.queue });
+        skipQueueBroadcast = false;
+        break;
+      }
+      default:
+        break;
+    }
+  });
+}

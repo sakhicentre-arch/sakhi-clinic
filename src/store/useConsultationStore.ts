@@ -1,7 +1,7 @@
 import { create } from "zustand";
 // FIXED: All types imported from single canonical source — db.ts
 // Local Medicine and Consultation type definitions deleted entirely.
-import { Consultation, Medicine } from "../services/db";
+import { Consultation, Medicine, db } from "../services/db";
 // FIXED: Store calls service layer, not Dexie directly.
 import {
   getAllConsultations,
@@ -10,6 +10,7 @@ import {
   getLastConsultationByPatient,
 } from "../services/consultationService";
 import { appointmentService } from "../services/appointmentService";
+import { subscribeToSync } from "../services/syncService";
 
 /**
  * SAKHI CLINIC — CONSULTATION STORE (V9.0)
@@ -264,3 +265,31 @@ export const useConsultationStore = create<Store>((set, get) => ({
     };
   },
 }));
+
+if (typeof window !== "undefined") {
+  subscribeToSync(async (message) => {
+    if (!message.payload || typeof message.payload !== "object") return;
+    const consultationId = String((message.payload as any).id || "");
+    if (!consultationId) return;
+
+    switch (message.type) {
+      case "consultation:saved": {
+        const consultation = await db.consultations.get(consultationId);
+        if (consultation && !consultation.deletedAt) {
+          useConsultationStore.setState((state) => {
+            const exists = state.consultations.some((c) => c.id === consultation.id);
+            return {
+              consultations: exists
+                ? state.consultations.map((c) => (c.id === consultation.id ? consultation : c))
+                : [...state.consultations, consultation],
+            };
+          });
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  });
+}
+

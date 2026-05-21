@@ -1,6 +1,7 @@
 import { create } from "zustand";
-import { Appointment } from "../services/db";
+import { db, Appointment } from "../services/db";
 import { appointmentService } from "../services/appointmentService";
+import { subscribeToSync } from "../services/syncService";
 
 const toErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -108,3 +109,44 @@ export const useAppointmentStore = create<AppointmentStore>((set, get) => ({
 
   clearError: () => set({ lastError: null }),
 }));
+
+if (typeof window !== "undefined") {
+  subscribeToSync(async (message) => {
+    if (!message.payload || typeof message.payload !== "object") return;
+    const appointmentId = String((message.payload as any).id || "");
+    if (!appointmentId) return;
+
+    switch (message.type) {
+      case "appointment:created": {
+        const appointment = await db.appointments.get(appointmentId);
+        if (appointment && !appointment.deletedAt) {
+          useAppointmentStore.setState((state) => {
+            if (state.appointments.some((a) => a.id === appointment.id)) return {};
+            return { appointments: [...state.appointments, appointment] };
+          });
+        }
+        break;
+      }
+      case "appointment:updated": {
+        const appointment = await db.appointments.get(appointmentId);
+        if (appointment) {
+          useAppointmentStore.setState((state) => ({
+            appointments: state.appointments.map((a) =>
+              a.id === appointmentId ? appointment : a
+            ),
+          }));
+        }
+        break;
+      }
+      case "appointment:deleted": {
+        useAppointmentStore.setState((state) => ({
+          appointments: state.appointments.filter((a) => a.id !== appointmentId),
+        }));
+        break;
+      }
+      default:
+        break;
+    }
+  });
+}
+
