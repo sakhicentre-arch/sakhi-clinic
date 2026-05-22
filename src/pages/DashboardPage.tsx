@@ -15,8 +15,13 @@ import { Pie } from 'react-chartjs-2';
 import { db, ConsultationOutcome, normalizeOutcome, Consultation } from "../services/db"; 
 import { getAllConsultations } from "../services/consultationService";
 import { getFollowUpAlerts, FollowUpAlert } from "../services/followupEngine";
-import { generateWhatsAppLink, isValidPhone } from "../utils/whatsapp";
+import { isValidPhone } from "../utils/whatsapp";
+import { openWhatsApp } from "../services/whatsappService";
 import { exportBackup, importBackup } from "../services/backupService";
+import { useUIStore } from "../store/uiStore";
+import { MobileCard, MobileSection, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
+import { haptic } from "../utils/haptics";
+import { useQueueStore } from "../store/queueStore";
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement, PointElement, LineElement
@@ -26,6 +31,12 @@ interface DashboardStats {
   totalPatients: number;
   totalConsultations: number;
   followUpsDue: number;
+  patientsToday: number;
+  todayPaid: number;
+  todayPending: number;
+  monthPaid: number;
+  monthPending: number;
+  last7Days: Array<{ day: string; count: number }>;
   outcomeStats: Record<ConsultationOutcome | 'total', number>;
   remedyStats: Record<string, { used: number; improved: number }>;
   highRiskPatients: Array<{ id: string; name: string; reason: string }>;
@@ -38,10 +49,22 @@ interface Props {
 }
 
 const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
+  const setActivePatientId = useUIStore((s) => s.setActivePatientId);
+  const setActiveConsultation = useUIStore((s) => s.setActiveConsultation);
+  const [isMobile, setIsMobile] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [alerts, setAlerts] = useState<FollowUpAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeClinic, setActiveClinic] = useState<string>("All");
+  const queue = useQueueStore((s) => s.queue);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   useEffect(() => {
     const fetchAnalytics = async () => {
@@ -54,10 +77,26 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
+        const todayKey = today.toISOString().slice(0, 10);
+        const monthKey = new Date().getMonth();
 
         const consultations = activeClinic === "All" 
           ? allConsultations 
           : allConsultations.filter(c => c.clinicId === activeClinic);
+
+        let todayPaid = 0;
+        let todayPending = 0;
+        let monthPaid = 0;
+        let monthPending = 0;
+        let patientsToday = 0;
+        const last7Counts = new Map<string, number>();
+        const last7 = Array.from({ length: 7 }).map((_, i) => {
+          const d = new Date();
+          d.setHours(0, 0, 0, 0);
+          d.setDate(d.getDate() - (6 - i));
+          return d.toISOString().slice(5, 10); // MM-DD
+        });
+        last7.forEach((k) => last7Counts.set(k, 0));
 
         const outcomeStats = {
           [ConsultationOutcome.IMPROVED]: 0,
@@ -75,6 +114,26 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
         const activePatientIds = new Set<string>();
 
         consultations.forEach((c) => {
+          const dateKey = String(c.date || "").slice(0, 10);
+          const fee = Number(c.fee || 0);
+          const pay = (c.paymentStatus || "pending") as any;
+
+          if (dateKey === todayKey) {
+            patientsToday += 1;
+            if (pay === "paid") todayPaid += fee;
+            else todayPending += fee;
+          }
+          const m = c.date ? new Date(c.date).getMonth() : -1;
+          if (m === monthKey) {
+            if (pay === "paid") monthPaid += fee;
+            else monthPending += fee;
+          }
+
+          if (dateKey) {
+            const k = dateKey.slice(5, 10);
+            if (last7Counts.has(k)) last7Counts.set(k, (last7Counts.get(k) || 0) + 1);
+          }
+
           const outcome = normalizeOutcome(c.outcome);
           outcomeStats[outcome]++;
           outcomeStats.total++;
@@ -129,6 +188,12 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           totalPatients: filteredPatients.length,
           totalConsultations: consultations.length,
           followUpsDue: actionableFollowUps,
+          patientsToday,
+          todayPaid,
+          todayPending,
+          monthPaid,
+          monthPending,
+          last7Days: last7.map((k) => ({ day: k, count: last7Counts.get(k) || 0 })),
           outcomeStats,
           remedyStats,
           highRiskPatients,
@@ -169,6 +234,161 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
 
   if (loading) return <div style={loadingOverlayStyle}>📊 Synthesizing Practice Intelligence...</div>;
 
+  if (isMobile) {
+    const successRate = Math.round(((stats?.outcomeStats[ConsultationOutcome.IMPROVED] || 0) / (stats?.outcomeStats.total || 1)) * 100);
+    const waiting = (queue || []).filter((e) => e.status === "waiting").length;
+    const inProgress = (queue || []).find((e) => e.status === "in-progress") || null;
+    const todayPaid = Math.round(stats?.todayPaid || 0);
+    const todayPending = Math.round(stats?.todayPending || 0);
+    const monthPaid = Math.round(stats?.monthPaid || 0);
+    const monthPending = Math.round(stats?.monthPending || 0);
+    const trendMax = Math.max(1, ...(stats?.last7Days || []).map((d) => d.count));
+    return (
+      <ResponsiveContainer data-testid="dashboard-root" className="sakhi-page">
+        <div className="sakhi-row" style={{ justifyContent: "space-between" }}>
+          <div style={{ minWidth: 0 }}>
+            <div className="sakhi-micro">Dashboard</div>
+            <div className="sakhi-title">Clinic Ops</div>
+          </div>
+          <select value={activeClinic} onChange={(e) => setActiveClinic(e.target.value)} className="sakhi-input" style={{ width: 170, height: 48 }}>
+            <option value="All">All</option>
+            <option value="Dabholi">Dabholi</option>
+            <option value="City Light">City Light</option>
+          </select>
+        </div>
+
+        {/* SECTION 1 — Compact Today Snapshot */}
+        <MobileCard data-testid="dashboard-today-snapshot" elevated={false} style={{ marginTop: "var(--space-3)", padding: "var(--space-3)", borderRadius: "var(--radius-3)" }}>
+          <div className="sakhi-micro">Today</div>
+          <div style={{ marginTop: "var(--space-2)", display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "var(--space-2)" }}>
+            <div style={{ minWidth: 0 }}>
+              <div className="sakhi-caption">Patients</div>
+              <div className="sakhi-title" style={{ marginTop: "var(--space-1)" }}>{stats?.patientsToday || 0}</div>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div className="sakhi-caption">Waiting</div>
+              <div className="sakhi-title" style={{ marginTop: "var(--space-1)", color: "var(--brand)" }}>{waiting}</div>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div className="sakhi-caption">Collected</div>
+              <div className="sakhi-title" style={{ marginTop: "var(--space-1)", color: "#16a34a" }}>₹{todayPaid}</div>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div className="sakhi-caption">Avg consult</div>
+              <div className="sakhi-caption" style={{ marginTop: "var(--space-1)", color: "#94a3b8" }}>not tracked</div>
+            </div>
+          </div>
+          <div className="sakhi-row" style={{ marginTop: "var(--space-2)", flexWrap: "wrap" }}>
+            <span className="sakhi-pill">Pending ₹{todayPending}</span>
+            <span className="sakhi-pill">Month ₹{monthPaid} / ₹{monthPending}</span>
+            <span className="sakhi-pill">Success {successRate}%</span>
+          </div>
+        </MobileCard>
+
+        {/* SECTION 2 — Primary Operational Actions */}
+        <MobileCard data-testid="dashboard-primary-actions" style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
+          <div className="sakhi-micro">Actions</div>
+          <div style={{ marginTop: "var(--space-2)", display: "grid", gap: "var(--space-2)" }}>
+            <button
+              data-testid="dashboard-primary-continue"
+              className="sakhi-btn-primary sakhi-tap sakhi-focus-ring"
+              style={{ minHeight: 56 }}
+              onClick={() => {
+                haptic("tap");
+                if (inProgress) {
+                  setActiveConsultation(inProgress.patientId, inProgress.appointmentId);
+                  onNavigate("consultation");
+                } else {
+                  onNavigate("today");
+                }
+              }}
+            >
+              {inProgress ? "Continue" : "Start next"}
+            </button>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-2)" }}>
+              <button
+                className="sakhi-btn-secondary sakhi-tap sakhi-focus-ring"
+                style={{ minHeight: 56 }}
+                onClick={() => { haptic("tap"); onNavigate("today"); }}
+              >
+                Start next patient
+              </button>
+              <button
+                className="sakhi-btn-secondary sakhi-tap sakhi-focus-ring"
+                style={{ minHeight: 56 }}
+                onClick={() => { haptic("tap"); onNavigate("today"); }}
+              >
+                Add walk-in
+              </button>
+              <button
+                className="sakhi-btn-secondary sakhi-tap sakhi-focus-ring"
+                style={{ minHeight: 56 }}
+                onClick={() => { haptic("tap"); onNavigate("today"); }}
+              >
+                Queue
+              </button>
+              <button
+                className="sakhi-btn-secondary sakhi-tap sakhi-focus-ring"
+                style={{ minHeight: 56 }}
+                onClick={() => { haptic("tap"); onNavigate("patients"); }}
+              >
+                Pending follow-ups
+              </button>
+            </div>
+          </div>
+        </MobileCard>
+
+        {/* SECTION 3 — Queue Intelligence */}
+        <MobileCard data-testid="dashboard-queue-intel" style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
+          <div className="sakhi-micro">Queue intelligence</div>
+          <div style={{ marginTop: "var(--space-2)", display: "grid", gap: "var(--space-2)" }}>
+            {(alerts || []).slice(0, 6).map((alert, i) => (
+              <div key={i} className="sakhi-surface" style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", minWidth: 0, padding: "var(--space-2)", borderRadius: "var(--radius-2)", boxShadow: "none" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="sakhi-body" style={{ fontWeight: 900, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{alert.patientName || "Patient"}</div>
+                  <div className="sakhi-caption" style={{ marginTop: "var(--space-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{alert.message}</div>
+                </div>
+                <button
+                  type="button"
+                  className="sakhi-tap sakhi-focus-ring"
+                  onClick={() => openWhatsApp({ phone: alert.phone || "", message: alert.message })}
+                  style={{ minHeight: 48, padding: "0 var(--space-3)", borderRadius: "var(--radius-2)", border: "1px solid rgba(13,115,119,0.25)", background: "rgba(13,115,119,0.10)", color: "var(--brand-ink, #064e52)", fontWeight: 900, fontSize: "var(--type-caption)" }}
+                >
+                  WhatsApp
+                </button>
+              </div>
+            ))}
+            {alerts.length === 0 && <div className="sakhi-caption">All clear.</div>}
+          </div>
+        </MobileCard>
+
+        {/* SECTION 4/5 — Compact finance + mini trend */}
+        <MobileCard data-testid="dashboard-mini-trend" elevated={false} style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
+          <div className="sakhi-micro">Trend</div>
+          <div style={{ marginTop: "var(--space-2)", display: "flex", gap: "var(--space-2)", alignItems: "flex-end" }}>
+            {(stats?.last7Days || []).map((d) => (
+              <div key={d.day} style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    height: Math.max(6, Math.round((d.count / trendMax) * 36)),
+                    borderRadius: "var(--radius-1)",
+                    background: "rgba(13, 115, 119, 0.22)",
+                    border: "1px solid rgba(13, 115, 119, 0.18)",
+                  }}
+                  title={`${d.day}: ${d.count}`}
+                />
+                <div className="sakhi-micro" style={{ marginTop: "var(--space-1)", textAlign: "center" }}>
+                  {d.day.split("-")[1]}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="sakhi-caption" style={{ marginTop: "var(--space-2)" }}>Last 7 days consult volume</div>
+        </MobileCard>
+      </ResponsiveContainer>
+    );
+  }
+
   return (
     <div style={containerStyle}>
       <header style={headerStyle}>
@@ -185,8 +405,8 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           <button
             onClick={() => onNavigate("trash")}
             style={{
-              padding: "10px 18px",
-              borderRadius: 12,
+              padding: "var(--space-2) var(--space-3)",
+              borderRadius: "var(--radius-1)",
               border: "1.5px solid #e2e8f0",
               background: "#fff",
               fontWeight: 700,
@@ -237,7 +457,10 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
                 </div>
                 <button
                   style={actionButtonStyle}
-                  onClick={() => window.location.hash = `#/patient/${p.id}`}
+                  onClick={() => {
+                    setActivePatientId(String(p.id));
+                    onNavigate("patients");
+                  }}
                 >
                   Open Case
                 </button>
@@ -285,7 +508,7 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
                 </div>
                 <button
                   disabled={!hasPhone}
-                  onClick={() => { const link = generateWhatsAppLink(alert.phone || "", alert.message); if (link) window.open(link, "sakhi_whatsapp_window"); }}
+                  onClick={() => openWhatsApp({ phone: alert.phone || "", message: alert.message })}
                   style={notifyButtonStyle(hasPhone, isCritical)}
                 >
                   {hasPhone ? "📲 Notify" : "🚫 No Phone"}
@@ -303,8 +526,8 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           <button
             onClick={exportBackup}
             style={{
-              padding: "12px 18px",
-              borderRadius: 12,
+              padding: "var(--space-2) var(--space-3)",
+              borderRadius: "var(--radius-1)",
               border: "1px solid #e2e8f0",
               background: "#fff",
               fontWeight: 800,
@@ -315,8 +538,8 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           </button>
           <label
             style={{
-              padding: "12px 18px",
-              borderRadius: 12,
+              padding: "var(--space-2) var(--space-3)",
+              borderRadius: "var(--radius-1)",
               border: "1px solid #e2e8f0",
               background: "#fff",
               fontWeight: 800,
@@ -336,7 +559,7 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
             />
           </label>
         </div>
-        <div style={{ marginTop: 10, fontSize: 12, color: "#64748b" }}>
+        <div style={{ marginTop: "var(--space-2)", fontSize: 12, color: "#64748b" }}>
           ⚠️ Restoring backup will overwrite all existing data. Use carefully.
         </div>
       </div>
@@ -350,9 +573,9 @@ const containerStyle: React.CSSProperties = { padding: "32px 40px", background: 
 const headerStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 };
 const titleStyle: React.CSSProperties = { fontSize: 32, fontWeight: 800, color: "#0f172a", margin: 0 };
 const subtitleStyle: React.CSSProperties = { color: "#64748b", marginTop: 4, fontSize: 15 };
-const clinicSelectStyle: React.CSSProperties = { padding: "10px 16px", borderRadius: 12, border: "1.5px solid #e2e8f0", background: "#fff", fontWeight: 700, cursor: 'pointer', outline: 'none' };
+const clinicSelectStyle: React.CSSProperties = { padding: "var(--space-2) var(--space-3)", borderRadius: "var(--radius-1)", border: "1.5px solid #e2e8f0", background: "#fff", fontWeight: 700, cursor: 'pointer', outline: 'none' };
 const healthBadgeStyle = (score: number): React.CSSProperties => ({
-  padding: "10px 18px", borderRadius: 12, fontWeight: 800, fontSize: 12,
+  padding: "var(--space-2) var(--space-3)", borderRadius: "var(--radius-1)", fontWeight: 800, fontSize: 12,
   background: score > 85 ? "#dcfce7" : "#fee2e2",
   color: score > 85 ? "#166534" : "#991b1b",
   border: `1px solid ${score > 85 ? "#22c55e" : "#ef4444"}`,
@@ -371,8 +594,8 @@ const alertCardStyle: React.CSSProperties = { display: 'flex', justifyContent: '
 const alertMessageStyle = (type: string) => ({ fontSize: 12, fontWeight: 800, color: type === "HIGH_RISK" ? "#dc2626" : "#64748b", marginTop: 4 });
 const notifyButtonStyle = (active: boolean, critical: boolean): React.CSSProperties => ({
   background: active ? (critical ? '#991b1b' : '#22c55e') : '#cbd5e1',
-  color: '#fff', border: 'none', padding: '12px 20px',
-  borderRadius: 12, cursor: active ? 'pointer' : 'not-allowed', fontWeight: 800, fontSize: 12,
+  color: '#fff', border: 'none', padding: 'var(--space-2) var(--space-3)',
+  borderRadius: 'var(--radius-1)', cursor: active ? 'pointer' : 'not-allowed', fontWeight: 800, fontSize: 12,
 });
 const SummaryCard = ({ label, val, color }: any) => (
   <div style={{ background: '#fff', padding: 28, borderRadius: 24, border: '1.5px solid #e2e8f0' }}>

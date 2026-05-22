@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  generateWhatsAppLink,
   normalizePatientPhone,
 } from "../utils/whatsapp";
+import { openWhatsApp } from "../services/whatsappService";
 import useKeyboardInset from "../hooks/useKeyboardInset";
 import { useAppointmentStore } from "../store/useAppointmentStore";
 import { usePatientStore } from "../store/usePatientStore";
@@ -215,8 +215,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
       `This is a reminder for your appointment today.\n\n` +
       `⏰ ${appt.time}\n🏥 ${appt.clinic}\n\n` +
       `Please arrive on time 🙏`;
-    const link = generateWhatsAppLink(phone, msg);
-    if (link) window.open(link, "sakhi_whatsapp_window");
+    openWhatsApp({ phone, message: msg });
     markReminderSent(appt.id);
   };
 
@@ -237,8 +236,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
           `Your appointment is today at ${appt.time}.\n` +
           `🏥 ${appt.clinic}\n\n` +
           `Please arrive on time 🙏`;
-        const link = generateWhatsAppLink(phone, msg);
-        if (link) window.open(link, "sakhi_whatsapp_window");
+        openWhatsApp({ phone, message: msg });
         markReminderSent(appt.id);
       }, index * 2500);
     });
@@ -277,7 +275,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
         `⏰ ${time}\n` +
         `🏥 ${clinic}\n\n` +
         `Thank you 🙏`;
-      if (phone) window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`);
+      if (phone) openWhatsApp({ phone, message: msg });
       alert("Appointment Secured ✅");
     }
   };

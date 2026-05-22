@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { useConsultationStore } from "../store/useConsultationStore";
 import { normalizePatientPhone } from "../utils/whatsapp";
 import { usePatientStore } from "../store/usePatientStore";
+import { openWhatsApp } from "../services/whatsappService";
 
 export default function RevenuePage() {
   const consultations = useConsultationStore((s) => s.consultations);
@@ -85,9 +86,7 @@ export default function RevenuePage() {
   const sendReminder = (p: any) => {
     const rawNumber = p.phone || (p as any).mobile || "";
     const msg = `Dear ${p.name}, your pending amount of ₹${p.amount} is due. Please clear at Sakhi Clinic.`;
-    const link = generateWhatsAppLink(rawNumber, msg);
-    if (!link) return;
-    window.open(link, "sakhi_whatsapp_window");
+    openWhatsApp({ phone: rawNumber, message: msg });
   };
 
   const S = {

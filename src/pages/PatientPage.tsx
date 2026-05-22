@@ -27,6 +27,7 @@ import { useUIStore } from "../store/uiStore";
 import { usePatientSearch } from "../hooks/usePatientSearch";
 import { PullToRefreshScrollRegion, SplitPane, ScrollRegion } from "../components/layout/LayoutPrimitives";
 import { normalizePatientPhone } from "../utils/whatsapp";
+import { openWhatsApp } from "../services/whatsappService";
 import { addPatient as saveNewPatient, updatePatient as saveUpdatedPatient, deletePatient as removePatient } from "../services/patientService";
 import type { Consultation, Report } from "../types/models";
 
@@ -552,9 +553,8 @@ export default function PatientPage(
   const handleSendReminder = useCallback((): void => {
     if (!selectedPatient) return;
     const message = `Dear ${selectedPatient.name}, this is a reminder from Sakhi Homeopathic Clinic. You have a pending payment of ${formatCurrency(revenueAnalytics.totalPending)}. Please visit us to clear the balance. Thank you!`;
-    const link = generateWhatsAppLink(selectedPatient.phone || (selectedPatient as any).mobile || "", message);
-    if (!link) return alert("⚠️ Patient mobile number is missing or invalid.");
-    window.open(link, "sakhi_whatsapp_window");
+    const phone = selectedPatient.phone || (selectedPatient as any).mobile || "";
+    if (!openWhatsApp({ phone, message })) return alert("⚠️ Patient mobile number is missing or invalid.");
   }, [selectedPatient, revenueAnalytics.totalPending]);
 
   const goToConsultation = useCallback(

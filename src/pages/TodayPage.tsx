@@ -17,7 +17,7 @@ import { useUIStore } from "../store/uiStore";
 import { normalizePatientPhone } from "../utils/whatsapp";
 import { getAllPatientsFromDB, db } from "../services/db";
 import { PullToRefreshScrollRegion, SplitPane } from "../components/layout/LayoutPrimitives";
-import { generateWhatsAppLink } from "../utils/whatsapp";
+import { openWhatsApp } from "../services/whatsappService";
 import { MobileCard, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
 import { haptic } from "../utils/haptics";
 import {
@@ -974,9 +974,9 @@ function StatsPanel({ goToConsultation, isMobile = false }:
                     onClick={() => {
                       const rawNumber = p.phone || (p as any).mobile || "";
                       const msg = `Dear ${p.name}, your follow-up at Sakhi Clinic is overdue. Please visit or call us.`;
-                      const link = generateWhatsAppLink(rawNumber, msg);
-                      if (!link) return alert("⚠️ Patient mobile number is missing or invalid.");
-                      window.open(link, "sakhi_whatsapp_window");
+                      if (!openWhatsApp({ phone: rawNumber, message: msg })) {
+                        alert("⚠️ Patient mobile number is missing or invalid.");
+                      }
                     }}
                     style={{ display: "flex", alignItems: "center", gap: "5px",
                       padding: "4px 10px", borderRadius: "7px",

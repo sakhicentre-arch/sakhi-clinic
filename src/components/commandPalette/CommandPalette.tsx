@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Search, X, CornerDownLeft } from "lucide-react";
+import { CornerDownLeft, Search, X } from "lucide-react";
 import { ActivePage, useUIStore } from "../../store/uiStore";
 import { usePatientStore } from "../../store/usePatientStore";
 import { QueueEntry, useQueueStore } from "../../store/queueStore";
@@ -96,6 +96,109 @@ export default function CommandPalette({
       .finally(() => setLoadingRecent(false));
   }, [isOpen]);
 
+  const normalizedQuery = query.trim().toLowerCase();
+
+  const score = (haystack: string) => {
+    const h = haystack.toLowerCase();
+    if (!normalizedQuery) return 0;
+    if (h.startsWith(normalizedQuery)) return 0;
+    if (h.includes(normalizedQuery)) return 1;
+    let qi = 0;
+    for (let i = 0; i < h.length && qi < normalizedQuery.length; i++) {
+      if (h[i] === normalizedQuery[qi]) qi++;
+    }
+    return qi === normalizedQuery.length ? 2 : 999;
+  };
+
+  const results: PaletteItem[] = useMemo(() => {
+    if (!isOpen) return [];
+
+    const items: PaletteItem[] = [];
+
+    const queueItems = (queue || [])
+      .filter((e) => e.status !== "done")
+      .map((e) => {
+        const s = Math.min(score(e.patientName || ""), score(String(e.patientId)));
+        return { e, s };
+      })
+      .filter(({ s }) => s < 999)
+      .sort((a, b) => a.s - b.s)
+      .slice(0, 8)
+      .map(({ e }) => {
+        return {
+          kind: "queue" as const,
+          key: `queue:${e.queueId}`,
+          title: e.patientName || `Patient ${e.patientId}`,
+          subtitle: e.complaint ? `Complaint: ${e.complaint}` : e.status,
+          hint: e.status,
+          entry: e,
+          actionLabel: "Open",
+          run: () => {
+            setActivePatientId(String(e.patientId));
+            setActiveAppointmentId(String(e.appointmentId || ""));
+            onSelectPatient(String(e.patientId));
+            onNavigate("today");
+          },
+        };
+      });
+
+    const patientItems = (patients || [])
+      .map((p) => {
+        const s = Math.min(score(p.name || ""), score(String(p.id || "")));
+        return { p, s };
+      })
+      .filter(({ s }) => s < 999)
+      .sort((a, b) => a.s - b.s)
+      .slice(0, 10)
+      .map(({ p }) => {
+        return {
+          kind: "patient" as const,
+          key: `patient:${p.id}`,
+          title: p.name || `Patient ${p.id}`,
+          subtitle: p.phone ? `Phone: ${p.phone}` : undefined,
+          patientId: String(p.id),
+          actionLabel: "Open",
+          run: () => {
+            setActivePatientId(String(p.id));
+            onSelectPatient(String(p.id));
+            onNavigate("patients");
+          },
+        };
+      });
+
+    const recentItems = (recentConsultations || [])
+      .map((c) => {
+        const patient = (patients || []).find((p) => String(p.id) === String(c.patientId));
+        const title = patient?.name ? patient.name : `Patient ${c.patientId}`;
+        const subtitle = c.chiefComplaint ? c.chiefComplaint : c.date ? String(c.date).slice(0, 10) : undefined;
+        const s = Math.min(score(title), score(String(c.patientId)));
+        return { c, s, title, subtitle };
+      })
+      .filter(({ s }) => s < 999)
+      .sort((a, b) => a.s - b.s)
+      .slice(0, 6)
+      .map(({ c, title, subtitle }) => {
+        return {
+          kind: "consultation" as const,
+          key: `consultation:${c.patientId}:${c.date}`,
+          title,
+          subtitle,
+          patientId: String(c.patientId),
+          actionLabel: "Consult",
+          run: () => {
+            setActivePatientId(String(c.patientId));
+            onSelectPatient(String(c.patientId));
+            onNavigate("consultation");
+          },
+        };
+      });
+
+    items.push(...queueItems);
+    items.push(...patientItems);
+    items.push(...recentItems);
+    return items;
+  }, [isOpen, query, patients, queue, recentConsultations]);
+
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -121,127 +224,15 @@ export default function CommandPalette({
         haptic("tap");
         item.run();
         close();
-        return;
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isOpen, selectedIndex, query, patients, queue, recentConsultations]);
-
-  const normalizedQuery = query.trim().toLowerCase();
-
-  const score = (haystack: string) => {
-    const h = haystack.toLowerCase();
-    if (!normalizedQuery) return 0;
-    if (h.startsWith(normalizedQuery)) return 0;
-    if (h.includes(normalizedQuery)) return 1;
-    // simple subsequence match
-    let qi = 0;
-    for (let i = 0; i < h.length && qi < normalizedQuery.length; i++) {
-      if (h[i] === normalizedQuery[qi]) qi++;
-    }
-    return qi === normalizedQuery.length ? 2 : 999;
-  };
-
-  const results: PaletteItem[] = useMemo(() => {
-    if (!isOpen) return [];
-
-    const items: PaletteItem[] = [];
-
-    const queueItems = (queue || [])
-      .filter((e) => e.status !== "done")
-      .map((e) => {
-        const s = Math.min(score(e.patientName || ""), score(String(e.patientId)));
-        return { e, s };
-      })
-      .filter(({ s }) => s < 999)
-      .sort((a, b) => a.s - b.s)
-      .slice(0, 8)
-      .map(({ e }) => {
-        return {
-          kind: "queue",
-          key: `queue:${e.queueId}`,
-          title: e.patientName,
-          subtitle: `Queue • ${e.status === "in-progress" ? "In progress" : "Waiting"} • ${e.clinic}`,
-          hint: "Enter",
-          entry: e,
-          actionLabel: "Start",
-          run: () => {
-            setActivePatientId(e.patientId);
-            setActiveAppointmentId(e.appointmentId);
-            onNavigate("consultation");
-          },
-        } satisfies PaletteItem;
-      });
-
-    if (queueItems.length) items.push(...queueItems);
-
-    const patientItems = (patients || [])
-      .map((p) => {
-        const label = `${p.name || ""} ${p.phone || ""}`.trim();
-        const s = score(label);
-        return { p, s };
-      })
-      .filter(({ s }) => (normalizedQuery ? s < 999 : true))
-      .sort((a, b) => a.s - b.s)
-      .slice(0, normalizedQuery ? 12 : 8)
-      .map(({ p }) => {
-        const last = p.lastVisit ? new Date(p.lastVisit).toLocaleDateString() : "Never";
-        const age = p.age ? `${p.age}Y` : "Age N/A";
-        return {
-          kind: "patient",
-          key: `patient:${p.id}`,
-          title: p.name || "Unknown patient",
-          subtitle: `${p.phone || "No phone"} • ${age} • Last: ${last}`,
-          hint: "Enter",
-          patientId: String(p.id),
-          actionLabel: "Open",
-          run: () => onSelectPatient(String(p.id)),
-        } satisfies PaletteItem;
-      });
-
-    items.push(...patientItems);
-
-    const consultItems = (recentConsultations || [])
-      .map((c) => {
-        const patient = (patients || []).find((p) => String(p.id) === String(c.patientId));
-        const title = patient?.name ? patient.name : `Patient ${String(c.patientId).slice(-6)}`;
-        const when = c.date ? new Date(c.date).toLocaleString() : "";
-        const hintText = c.chiefComplaint ? c.chiefComplaint : "Consultation";
-        const label = `${title} ${hintText}`.trim();
-        const s = score(label);
-        return { c, s, title, when, hintText };
-      })
-      .filter(({ s }) => (normalizedQuery ? s < 999 : true))
-      .sort((a, b) => a.s - b.s)
-      .slice(0, normalizedQuery ? 6 : 5)
-      .map(({ c, title, when, hintText }) => {
-        return {
-          kind: "consultation",
-          key: `consult:${c.patientId}:${c.date}`,
-          title,
-          subtitle: `${hintText} • ${when}`,
-          hint: "Enter",
-          patientId: String(c.patientId),
-          actionLabel: "Open",
-          run: () => onSelectPatient(String(c.patientId)),
-        } satisfies PaletteItem;
-      });
-
-    if (consultItems.length) items.push(...consultItems);
-
-    return items;
-  }, [isOpen, normalizedQuery, queue, patients, recentConsultations]);
-
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [normalizedQuery]);
+  }, [isOpen, selectedIndex, results]);
 
   useEffect(() => {
     if (!isOpen) return;
-    const el = listRef.current?.querySelector<HTMLButtonElement>(
-      `[data-palette-index="${selectedIndex}"]`
-    );
+    const el = listRef.current?.querySelector(`[data-palette-index="${selectedIndex}"]`) as HTMLElement | null;
     el?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex, isOpen]);
 
@@ -253,23 +244,7 @@ export default function CommandPalette({
       role="dialog"
       aria-modal="true"
       aria-label="Command palette"
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 2000,
-        background: "rgba(2, 6, 23, 0.42)",
-        display: "grid",
-        alignItems: "start",
-        justifyItems: "center",
-        paddingTop: "calc(env(safe-area-inset-top, 0px) + 18px)",
-        paddingLeft: 16,
-        paddingRight: 16,
-        paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + ${Math.max(
-          16,
-          keyboard.insetPx + 12
-        )}px)`,
-        boxSizing: "border-box",
-      }}
+      className="sakhi-palette-overlay"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) close();
       }}
@@ -277,31 +252,13 @@ export default function CommandPalette({
         if (e.target === e.currentTarget) close();
       }}
     >
-      <div
-        style={{
-          width: "min(720px, 100%)",
-          maxWidth: "100%",
-          borderRadius: 20,
-          background: "var(--surface, #ffffff)",
-          border: "1px solid var(--border, #e2e8f0)",
-          boxShadow: "var(--shadow-3, 0 24px 80px rgba(2, 6, 23, 0.28))",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "12px 12px",
-            borderBottom: "1px solid var(--border, #e2e8f0)",
-          }}
-        >
+      <div className="sakhi-palette-panel">
+        <div className="sakhi-palette-header">
           <div
             style={{
-              width: 40,
-              height: 40,
-              borderRadius: 14,
+              width: "var(--space-6)",
+              height: "var(--space-6)",
+              borderRadius: "var(--radius-2)",
               background: "rgba(2, 132, 199, 0.10)",
               display: "grid",
               placeItems: "center",
@@ -317,12 +274,7 @@ export default function CommandPalette({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search patients, queue, recent consultations…"
             className="sakhi-input"
-            style={{
-              flex: 1,
-              minWidth: 0,
-              height: 44,
-              borderRadius: 14,
-            }}
+            style={{ flex: 1, minWidth: 0, height: 48 }}
           />
           <button
             type="button"
@@ -330,9 +282,9 @@ export default function CommandPalette({
             aria-label="Close"
             className="sakhi-tap sakhi-focus-ring"
             style={{
-              width: 44,
-              height: 44,
-              borderRadius: 14,
+              width: 48,
+              height: 48,
+              borderRadius: "var(--radius-2)",
               border: "1px solid var(--border, #e2e8f0)",
               background: "rgba(2, 6, 23, 0.02)",
               display: "grid",
@@ -346,21 +298,18 @@ export default function CommandPalette({
 
         <div
           ref={listRef}
-          style={{
-            maxHeight: "min(520px, calc(var(--app-vh, 100vh) - 220px))",
-            overflowY: "auto",
-            WebkitOverflowScrolling: "touch",
-          }}
+          className="sakhi-palette-list"
+          style={{ maxHeight: "min(520px, calc(var(--app-vh, 100vh) - 220px))" }}
         >
           {loadingRecent && results.length === 0 ? (
-            <div style={{ padding: 16 }}>
-              <div className="sakhi-skeleton" style={{ height: 14, width: "60%", marginBottom: 12 }} />
-              <div className="sakhi-skeleton" style={{ height: 52, borderRadius: 14, marginBottom: 10 }} />
-              <div className="sakhi-skeleton" style={{ height: 52, borderRadius: 14, marginBottom: 10 }} />
-              <div className="sakhi-skeleton" style={{ height: 52, borderRadius: 14 }} />
+            <div style={{ padding: "var(--space-3)" }}>
+              <div className="sakhi-skeleton" style={{ height: 16, width: "60%", marginBottom: 16 }} />
+              <div className="sakhi-skeleton" style={{ height: 48, borderRadius: "var(--radius-2)", marginBottom: 8 }} />
+              <div className="sakhi-skeleton" style={{ height: 48, borderRadius: "var(--radius-2)", marginBottom: 8 }} />
+              <div className="sakhi-skeleton" style={{ height: 48, borderRadius: "var(--radius-2)" }} />
             </div>
           ) : results.length === 0 ? (
-            <div style={{ padding: 18, color: "var(--muted, #64748b)", fontWeight: 700 }}>
+            <div className="sakhi-caption" style={{ padding: "var(--space-3)" }}>
               No results.
             </div>
           ) : (
@@ -369,70 +318,34 @@ export default function CommandPalette({
                 key={item.key}
                 type="button"
                 data-palette-index={idx}
+                data-selected={idx === selectedIndex}
                 onMouseEnter={() => setSelectedIndex(idx)}
                 onClick={() => {
                   haptic("tap");
                   item.run();
                   close();
                 }}
-                className="sakhi-focus-ring"
-                style={{
-                  width: "100%",
-                  border: "none",
-                  background: idx === selectedIndex ? "rgba(2, 132, 199, 0.10)" : "transparent",
-                  textAlign: "left",
-                  padding: "12px 14px",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  borderBottom: "1px solid rgba(226, 232, 240, 0.8)",
-                }}
+                className="sakhi-palette-item sakhi-focus-ring sakhi-tap"
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ fontWeight: 900, color: "#0f172a" }}>{item.title}</div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 800,
-                        color: "var(--muted, #64748b)",
-                        padding: "2px 8px",
-                        borderRadius: 999,
-                        border: "1px solid rgba(226, 232, 240, 0.9)",
-                        background: "rgba(2, 6, 23, 0.02)",
-                        flex: "0 0 auto",
-                      }}
-                    >
-                      {item.kind === "queue" ? "Queue" : item.kind === "patient" ? "Patient" : "Recent"}
+                  <div className="sakhi-row" style={{ gap: "var(--space-2)" }}>
+                    <div className="sakhi-body" style={{ fontWeight: 900, color: "#0f172a" }}>
+                      {item.title}
                     </div>
+                    <span className="sakhi-kbd-hint" style={{ fontWeight: 800 }}>
+                      {item.kind === "queue" ? "Queue" : item.kind === "patient" ? "Patient" : "Recent"}
+                    </span>
                   </div>
                   {item.subtitle && (
-                    <div
-                      style={{
-                        marginTop: 4,
-                        fontSize: 12,
-                        fontWeight: 700,
-                        color: "var(--muted, #64748b)",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {item.subtitle}
+                    <div style={{ marginTop: "var(--space-1)" }}>
+                      <span className="sakhi-caption">{item.subtitle}</span>
                     </div>
                   )}
                 </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    flex: "0 0 auto",
-                    color: "var(--muted, #64748b)",
-                  }}
-                >
-                  <div style={{ fontSize: 12, fontWeight: 900 }}>{item.actionLabel}</div>
+                <div className="sakhi-row" style={{ flex: "0 0 auto", color: "#64748b" }}>
+                  <div className="sakhi-caption" style={{ fontWeight: 900 }}>
+                    {item.actionLabel}
+                  </div>
                   <CornerDownLeft size={16} />
                 </div>
               </button>
@@ -440,29 +353,15 @@ export default function CommandPalette({
           )}
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            padding: "10px 14px",
-            borderTop: "1px solid var(--border, #e2e8f0)",
-            color: "var(--muted, #64748b)",
-            fontSize: 12,
-            fontWeight: 800,
-          }}
-        >
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <div className="sakhi-palette-footer">
+          <div className="sakhi-row" style={{ gap: "var(--space-2)" }}>
             <span>Esc</span>
             <span style={{ opacity: 0.6 }}>•</span>
             <span>↑↓</span>
             <span style={{ opacity: 0.6 }}>•</span>
             <span>Enter</span>
           </div>
-          <div style={{ opacity: 0.85 }}>
-            {keyboard.isOpen ? "Keyboard active" : "Ctrl/Cmd+K"}
-          </div>
+          <div style={{ opacity: 0.85 }}>{keyboard.isOpen ? "Keyboard active" : "Ctrl/Cmd+K"}</div>
         </div>
       </div>
     </div>

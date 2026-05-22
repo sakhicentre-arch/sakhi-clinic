@@ -127,6 +127,66 @@ export async function assertNoFixedStickyOverlap(page: Page) {
   expect(overlaps).toEqual([]);
 }
 
+type Rect = { top: number; bottom: number; left: number; right: number; width: number; height: number };
+
+async function getRect(page: Page, selector: string): Promise<Rect | null> {
+  return page.evaluate((sel) => {
+    const el = document.querySelector(sel) as HTMLElement | null;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    if (!r || r.width === 0 || r.height === 0) return null;
+    return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width, height: r.height };
+  }, selector);
+}
+
+export async function assertVisibleBelowStickyHeader(page: Page, targetSelector: string, stickySelectors: string[]) {
+  const target = await getRect(page, targetSelector);
+  expect(target).not.toBeNull();
+  if (!target) return;
+
+  const blockers = await Promise.all(stickySelectors.map((s) => getRect(page, s)));
+  const bottom = blockers
+    .filter((r): r is Rect => Boolean(r))
+    .reduce((max, r) => Math.max(max, r.bottom), 0);
+
+  // Allow a tiny tolerance for subpixel rounding.
+  expect(target.top).toBeGreaterThanOrEqual(bottom - 1);
+}
+
+export async function assertLastActionNotCoveredByActionBar(page: Page, sectionSelector: string, actionBarSelector: string) {
+  const actionBar = await getRect(page, actionBarSelector);
+  expect(actionBar).not.toBeNull();
+  if (!actionBar) return;
+
+  const section = page.locator(sectionSelector).first();
+  await expect(section).toBeVisible({ timeout: 10000 });
+
+  // Choose the last likely interactive control in the section.
+  const focusables = section.locator('button, input, select, textarea, [role="button"]');
+  const count = await focusables.count();
+  if (count === 0) return;
+  const last = focusables.nth(count - 1);
+  await last.scrollIntoViewIfNeeded();
+
+  const lastRect = await last.boundingBox();
+  expect(lastRect).not.toBeNull();
+  if (!lastRect) return;
+
+  // Ensure bottom of the last control sits above the action bar top.
+  expect(lastRect.y + lastRect.height).toBeLessThanOrEqual(actionBar.top + 1);
+}
+
+export async function assertAboveBottomNav(page: Page, targetSelector: string, bottomNavSelector = '[data-testid="bottom-nav"]') {
+  const target = await getRect(page, targetSelector);
+  expect(target).not.toBeNull();
+  if (!target) return;
+
+  const bottomNav = await getRect(page, bottomNavSelector);
+  if (!bottomNav) return;
+
+  expect(target.bottom).toBeLessThanOrEqual(bottomNav.top + 1);
+}
+
 export async function registerPatient(page: Page, patientData: {
   name: string;
   age: string;

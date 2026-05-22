@@ -34,7 +34,8 @@ import LetterPad from "../components/LetterPad";
 import { SUGGESTIONS } from "../data/clinicalSuggestions";
 
 import { getLearnedSuggestions } from "../services/learningEngine";
-import { generateWhatsAppLink, getPrescriptionMessage, normalizePatientPhone } from "../utils/whatsapp";
+import { getPrescriptionMessage, normalizePatientPhone } from "../utils/whatsapp";
+import { openWhatsApp } from "../services/whatsappService";
 import { analyzeRemedies } from "../services/remedyEngine";
 import PrintableConsultation from "../components/PrintableConsultation";
 import { generateRemedyExplanations } from "../services/aiReasoningEngine";
@@ -1080,20 +1081,20 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
       ? "\n\n⚠️ Urgent review recommended based on current clinical status."
       : "";
     const msg = `${getPrescriptionMessage(patient.name, formData.medicines)}${followUpNote}`;
-    const link = generateWhatsAppLink(phone, msg);
-    if (link) {
-      window.open(link, "sakhi_whatsapp_window");
-    } else {
-      alert("Unable to generate WhatsApp link. Please verify the patient phone number.");
-    }
+    openWhatsApp({ phone, message: msg });
   };
 
   const handleWhatsAppBill = () => {
     const rawNumber = patient?.phone || (patient as any)?.mobile || "";
-    // WhatsApp bill flow
-    const link = generateWhatsAppLink(rawNumber, `*Sakhi Homeopathic Clinic — Bill*\n\nPatient: ${patient?.name || "N/A"}\nConsultation Fee: ₹${formData.fee || 0}\nPayment Status: ${formData.paymentStatus === "paid" ? "✅ Paid" : "⏳ Pending"}\n\nThank you for visiting Sakhi Clinic 🙏`);
-    if (!link) return alert("⚠️ Patient mobile number is missing or invalid.");
-    window.open(link, "sakhi_whatsapp_window");
+    openWhatsApp({
+      phone: rawNumber,
+      message:
+        `*Sakhi Homeopathic Clinic — Bill*\n\n` +
+        `Patient: ${patient?.name || "N/A"}\n` +
+        `Consultation Fee: ₹${formData.fee || 0}\n` +
+        `Payment Status: ${formData.paymentStatus === "paid" ? "✅ Paid" : "⏳ Pending"}\n\n` +
+        `Thank you for visiting Sakhi Clinic.`,
+    });
   };
 
   const handleAskReview = () => {
@@ -1107,9 +1108,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     const fullParams = `?g=${encodeURIComponent(guj)}&e=${encodeURIComponent(eng)}`;
     const reviewLink = baseUrl.length + fullParams.length > 1500 ? baseUrl : baseUrl + fullParams;
     const whatsappMessage = `Hello ${name},\n\nThank you for choosing Sakhi Homeopathic Clinic 🙏\n\nWe are glad to be part of your health journey. If you are happy with our service, please share your valuable experience here:\n\n👉 ${reviewLink}\n\nIt takes just 10 seconds and helps us serve you better! 😊`;
-    const link = generateWhatsAppLink(rawNumber, whatsappMessage);
-    if (!link) return alert("⚠️ Patient mobile number is missing or invalid.");
-    window.open(link, "sakhi_whatsapp_window");
+    openWhatsApp({ phone: rawNumber, message: whatsappMessage });
     alert("✅ WhatsApp opened. Please ask the patient to click the link and post the review.");
   };
 
@@ -1264,13 +1263,21 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
       { id: "followup", label: "Follow-up" },
     ];
 
-    const shouldShowStage = (stage: typeof mobileStage) => !isMobile || mobileStage === stage;
+    const stageVisibleStyle = (stage: typeof mobileStage): React.CSSProperties =>
+      !isMobile || mobileStage === stage ? { display: "block" } : { display: "none" };
 
     return (
       <div data-testid="consultation-root" className="min-h-screen bg-slate-50 text-slate-900">
         <style>{customCSS}</style>
 
-        <div className="sticky top-0 z-30 border-b border-slate-200 bg-slate-900/95 px-4 py-3 backdrop-blur-sm">
+        <div
+          data-testid="consultation-sticky-header"
+          className="sticky z-30 border-b border-slate-200 bg-slate-900/95 px-4 py-3 backdrop-blur-sm"
+          style={{
+            // AppShell TopBar is fixed; keep consultation header from sliding underneath it on scroll.
+            top: "calc(59px + env(safe-area-inset-top, 0px))",
+          }}
+        >
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               {onFinish && (
@@ -1377,14 +1384,24 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
           {isMobile && (
             <div className="mx-auto mt-3 max-w-6xl">
-              <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+              <div
+                data-testid="consultation-stage-strip"
+                className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]"
+              >
                 {stageItems.map((item) => (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => { haptic("tap"); setMobileStage(item.id); }}
+                    data-testid={`consultation-stage-${item.id}`}
+                    onClick={() => {
+                      haptic("tap");
+                      setMobileStage(item.id);
+                      // Ensure the newly selected stage is immediately visible (prevents "blank/clipped stage" perception
+                      // when switching while scrolled deep within another stage).
+                      window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+                    }}
                     className={
-                      "flex-none rounded-2xl px-4 py-2 text-sm font-semibold ring-1 ring-white/10 " +
+                      "sakhi-tap sakhi-focus-ring flex-none rounded-2xl px-4 py-2 text-sm font-semibold ring-1 ring-white/10 " +
                       (mobileStage === item.id ? "bg-white text-slate-900" : "bg-slate-800 text-white/85")
                     }
                     style={{ minHeight: 44 }}
@@ -1397,9 +1414,23 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
           )}
         </div>
 
-        <main className="mx-auto max-w-6xl px-4 pb-44 pt-4 sm:px-6 xl:px-8">
+        <main
+          className="mx-auto max-w-6xl px-4 pt-4 sm:px-6 xl:px-8"
+          style={{
+            // Keep all stages fully scrollable and prevent the keyboard-aware action bar
+            // from covering the bottom of forms while typing.
+            paddingBottom: isMobile
+              ? "calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px) + 120px)"
+              : undefined,
+          }}
+        >
           <div className="space-y-4">
-            {shouldShowStage("complaint") && (
+            <div
+              data-stage="complaint"
+              className="sakhi-stage-pane"
+              data-active={String(!isMobile || mobileStage === "complaint")}
+              style={stageVisibleStyle("complaint")}
+            >
             <MobileSection title="Chief Complaint" subtitle="Capture the patient's primary issue" testId="section-chief-complaint">
               <div className="space-y-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1440,9 +1471,14 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 />
               </div>
             </MobileSection>
-            )}
+            </div>
 
-            {shouldShowStage("exam") && (
+            <div
+              data-stage="exam"
+              className="sakhi-stage-pane"
+              data-active={String(!isMobile || mobileStage === "exam")}
+              style={stageVisibleStyle("exam")}
+            >
             <MobileSection title="Examination" subtitle="Quick clinical context" testId="section-examination">
               <div className="grid gap-3">
                 <MobileField label="Mental / Generals" optional>
@@ -1484,9 +1520,14 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 </div>
               </div>
             </MobileSection>
-            )}
+            </div>
 
-            {shouldShowStage("remedy") && (
+            <div
+              data-stage="remedy"
+              className="sakhi-stage-pane"
+              data-active={String(!isMobile || mobileStage === "remedy")}
+              style={stageVisibleStyle("remedy")}
+            >
             <MobileSection title="Prescription & Remedies" subtitle="Mobile-first remedy cards" testId="section-prescription">
               <div className="flex flex-wrap gap-2">
                 {last && (last.medicines?.length || 0) > 0 && (
@@ -1776,10 +1817,15 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 </div>
               )}
             </MobileSection>
-            )}
+            </div>
 
-            {shouldShowStage("followup") && (
-            <MobileSection title="Outcome & Follow-up" subtitle="Quick action and billing" testId="section-outcome">
+            <div
+              data-stage="followup"
+              className="sakhi-stage-pane"
+              data-active={String(!isMobile || mobileStage === "followup")}
+              style={stageVisibleStyle("followup")}
+            >
+            <MobileSection title="Outcome & Follow-up" subtitle="Quick action and billing" testId="section-followup">
               <div className="grid gap-2 sm:grid-cols-2">
                 {Object.values(ConsultationOutcome).map((o) => (
                   <button
@@ -1822,7 +1868,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 </MobileField>
               </div>
             </MobileSection>
-            )}
+            </div>
 
             {!isMobile && (
               <MobileSection title="Consultation Notes" subtitle="Keep narrative and mental state together" testId="section-notes">
@@ -2650,6 +2696,19 @@ const customCSS = `
     .btn-decision { font-size: 11px; padding: 12px; }
     .btn-primary { padding: 14px 20px; font-size: 13px; }
     .btn-review, .btn-whatsapp { padding: 10px 14px; font-size: 12px; }
+  }
+
+  /* Quick-mode stage mounting: keep DOM stable, add subtle transition on activation */
+  .sakhi-stage-pane { min-width: 0; }
+  .sakhi-stage-pane[data-active="true"] {
+    animation: sakhiStageIn 140ms ease-out;
+  }
+  @keyframes sakhiStageIn {
+    from { opacity: 0.92; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sakhi-stage-pane[data-active="true"] { animation: none; }
   }
 `;
 

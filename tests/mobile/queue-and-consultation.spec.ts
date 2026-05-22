@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { generatePatientData, registerPatient, bookAppointment, navigateTo } from '../testUtils';
+import { generatePatientData, registerPatient, bookAppointment, navigateTo, assertVisibleBelowStickyHeader, assertLastActionNotCoveredByActionBar } from '../testUtils';
 
 test.describe('Mobile queue and consultation workflow', () => {
   test.setTimeout(60000);
@@ -64,5 +64,40 @@ test.describe('Mobile queue and consultation workflow', () => {
 
     // Mobile action bar exists for clinical speed controls
     await expect(page.locator('[data-testid="consultation-action-bar"]')).toBeVisible({ timeout: 10000 }).catch(() => {});
+
+    if (isMobile) {
+      // Stage switching must be stable and sections must remain reachable.
+      await page.click('[data-testid="consultation-stage-exam"]');
+      await expect(page.locator('[data-testid="section-examination"]')).toBeVisible({ timeout: 10000 });
+      await assertVisibleBelowStickyHeader(page, '[data-testid="section-examination"]', [
+        '[data-testid="consultation-sticky-header"]',
+        '[data-testid="consultation-stage-strip"]',
+      ]);
+      await assertLastActionNotCoveredByActionBar(page, '[data-testid="section-examination"]', '[data-testid="consultation-action-bar"]');
+
+      await page.click('[data-testid="consultation-stage-remedy"]');
+      await expect(page.locator('[data-testid="section-prescription"]')).toBeVisible({ timeout: 10000 });
+      await assertVisibleBelowStickyHeader(page, '[data-testid="section-prescription"]', [
+        '[data-testid="consultation-sticky-header"]',
+        '[data-testid="consultation-stage-strip"]',
+      ]);
+      await assertLastActionNotCoveredByActionBar(page, '[data-testid="section-prescription"]', '[data-testid="consultation-action-bar"]');
+
+      await page.click('[data-testid="consultation-stage-followup"]');
+      await expect(page.locator('[data-testid="section-followup"]')).toBeVisible({ timeout: 10000 });
+      await assertVisibleBelowStickyHeader(page, '[data-testid="section-followup"]', [
+        '[data-testid="consultation-sticky-header"]',
+        '[data-testid="consultation-stage-strip"]',
+      ]);
+      await assertLastActionNotCoveredByActionBar(page, '[data-testid="section-followup"]', '[data-testid="consultation-action-bar"]');
+
+      await page.click('[data-testid="consultation-stage-complaint"]');
+      await expect(page.locator('[data-testid="section-chief-complaint"]')).toBeVisible({ timeout: 10000 });
+      await assertVisibleBelowStickyHeader(page, '[data-testid="section-chief-complaint"]', [
+        '[data-testid="consultation-sticky-header"]',
+        '[data-testid="consultation-stage-strip"]',
+      ]);
+      await assertLastActionNotCoveredByActionBar(page, '[data-testid="section-chief-complaint"]', '[data-testid="consultation-action-bar"]');
+    }
   });
 });

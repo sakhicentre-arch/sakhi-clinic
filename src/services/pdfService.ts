@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable"; // Changed from side-effect import to direct import
+import { openWhatsApp } from "./whatsappService";
 
 /**
  * SAKHI CLINIC - MASTER PDF ENGINE (V9.2)
@@ -133,6 +134,5 @@ export const shareOnWhatsApp = (data: any) => {
   message += `*Rx / Prescription:*\n`;
   data.medicines.forEach((m: any) => { message += `💊 *${m.name}*\n   ${m.dosage} | ${m.duration}\n`; });
   message += `\n*Follow-up:* ${data.followUp || "15 Days"}\n`;
-  const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-  window.open(url, "_blank");
+  openWhatsApp({ message });
 };

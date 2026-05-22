@@ -25,11 +25,11 @@ test.describe("Command palette (mobile)", () => {
     const input = palette.locator('input[placeholder^="Search patients"]');
     await input.fill("Palette Test");
 
-    await expect(palette.getByText("Palette Test Patient")).toBeVisible({ timeout: 10000 });
-    await palette.getByText("Palette Test Patient").first().click();
+    const row = palette.locator('button', { hasText: "Palette Test Patient" }).first();
+    await expect(row).toBeVisible({ timeout: 10000 });
+    await row.click();
 
     await expect(palette).toBeHidden({ timeout: 10000 });
     await assertNoHorizontalOverflow(page);
   });
 });
-

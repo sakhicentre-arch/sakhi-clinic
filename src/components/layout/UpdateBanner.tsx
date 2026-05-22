@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from "react";
 
 declare const __APP_VERSION__: string;
 
@@ -9,25 +9,25 @@ export default function UpdateBanner() {
     function onNeed() {
       setVisible(true);
     }
-    window.addEventListener('sw:need-refresh', onNeed as EventListener);
-    return () => window.removeEventListener('sw:need-refresh', onNeed as EventListener);
+    window.addEventListener("sw:need-refresh", onNeed as EventListener);
+    return () => window.removeEventListener("sw:need-refresh", onNeed as EventListener);
   }, []);
 
   if (!visible) return null;
 
-  const version = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
+  const version = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev";
 
   const doUpdate = () => {
     try {
       if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
+        navigator.serviceWorker.controller.postMessage({ type: "SKIP_WAITING" });
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
           window.location.reload();
         });
       } else {
         window.location.reload();
       }
-    } catch (err) {
+    } catch {
       window.location.reload();
     }
   };
@@ -35,26 +35,56 @@ export default function UpdateBanner() {
   return (
     <div
       style={{
-        position: 'fixed',
-        left: 8,
-        right: 8,
+        position: "fixed",
+        left: "var(--space-2)",
+        right: "var(--space-2)",
         bottom: 68,
-        padding: 10,
-        background: '#111827',
-        color: '#fff',
-        borderRadius: 8,
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
+        padding: "var(--space-2)",
+        background: "#111827",
+        color: "#fff",
+        borderRadius: "var(--radius-2)",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
         zIndex: 70,
       }}
       role="status"
     >
-      <div style={{ fontSize: 13 }}>Update available — v{version}</div>
+      <div className="sakhi-caption" style={{ color: "#fff" }}>
+        Update available — v{version}
+      </div>
       <div>
-        <button onClick={() => setVisible(false)} style={{ marginRight: 8 }}>Dismiss</button>
-        <button onClick={doUpdate} style={{ fontWeight: 700 }}>Update</button>
+        <button
+          onClick={() => setVisible(false)}
+          className="sakhi-tap sakhi-focus-ring"
+          style={{
+            marginRight: "var(--space-2)",
+            padding: "var(--space-1) var(--space-2)",
+            borderRadius: 999,
+            background: "rgba(255,255,255,0.10)",
+            border: "1px solid rgba(255,255,255,0.18)",
+            color: "#fff",
+            fontWeight: 800,
+          }}
+        >
+          Dismiss
+        </button>
+        <button
+          onClick={doUpdate}
+          className="sakhi-tap sakhi-focus-ring"
+          style={{
+            padding: "var(--space-1) var(--space-2)",
+            borderRadius: 999,
+            background: "#fff",
+            border: "1px solid rgba(255,255,255,0.18)",
+            color: "#111827",
+            fontWeight: 900,
+          }}
+        >
+          Update
+        </button>
       </div>
     </div>
   );
 }
+

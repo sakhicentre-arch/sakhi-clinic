@@ -4,6 +4,8 @@ const devServerURL = 'http://127.0.0.1:5173';
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || devServerURL;
 const preferredChannel =
   process.env.SAKHI_PLAYWRIGHT_CHANNEL ||
+  // On Windows, Playwright-managed browsers can be blocked by enterprise policy/AV.
+  // Defaulting to system Chrome keeps local runs viable.
   (process.platform === 'win32' ? 'chrome' : undefined);
 
 export default defineConfig({
