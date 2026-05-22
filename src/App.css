@@ -1,5 +1,42 @@
 :root {
   color-scheme: normal;
+
+  /* ================= Mobile Design Tokens =================
+   * Spacing scale: 4, 8, 16, 24, 32, 48 (px)
+   */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+  --space-6: 48px;
+
+  /* Radii */
+  --radius-1: 12px;
+  --radius-2: 16px;
+  --radius-3: 20px;
+  --radius-4: 24px;
+
+  /* Surfaces */
+  --surface: #ffffff;
+  --surface-muted: #f8fafc;
+  --border: #e2e8f0;
+  --border-muted: #eef2f6;
+
+  /* Brand */
+  --brand: #0D7377;
+  --brand-ink: #064e52;
+
+  /* Type scale (mobile-first) */
+  --type-display: 22px;
+  --type-title: 16px;
+  --type-body: 14px;
+  --type-caption: 12px;
+  --type-micro: 11px;
+
+  /* Shadows (restrained) */
+  --shadow-1: 0 2px 10px rgba(15, 23, 42, 0.06);
+  --shadow-2: 0 10px 30px rgba(15, 23, 42, 0.10);
 }
 
 html,
@@ -37,6 +74,130 @@ select {
 
 button {
   touch-action: manipulation;
+}
+
+/* ================= Native-ish Touch Feedback ================= */
+.sakhi-tap {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  transition: transform 90ms ease, filter 90ms ease, background-color 90ms ease;
+}
+.sakhi-tap:active {
+  transform: translateY(1px);
+  filter: brightness(0.98);
+}
+.sakhi-focus-ring:focus-visible {
+  outline: 2px solid rgba(13, 115, 119, 0.45);
+  outline-offset: 2px;
+}
+
+/* ================= Typography Helpers ================= */
+.sakhi-micro {
+  font-size: var(--type-micro);
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.sakhi-title {
+  font-size: var(--type-title);
+  font-weight: 900;
+  letter-spacing: -0.2px;
+  color: #0f172a;
+}
+.sakhi-body {
+  font-size: var(--type-body);
+  font-weight: 700;
+  color: #334155;
+}
+.sakhi-caption {
+  font-size: var(--type-caption);
+  font-weight: 700;
+  color: #64748b;
+}
+
+/* ================= Form + Button Primitives ================= */
+.sakhi-label {
+  font-size: var(--type-micro);
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.sakhi-input {
+  width: 100%;
+  min-width: 0;
+  padding: 14px 14px;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: #0f172a;
+  outline: none;
+}
+.sakhi-input::placeholder {
+  color: #94a3b8;
+  font-weight: 600;
+}
+.sakhi-input:focus {
+  border-color: rgba(13, 115, 119, 0.55);
+  box-shadow: 0 0 0 4px rgba(13, 115, 119, 0.10);
+}
+.sakhi-btn-primary {
+  width: 100%;
+  min-height: 56px;
+  padding: 14px 16px;
+  border-radius: var(--radius-3);
+  border: 1px solid rgba(13, 115, 119, 0.0);
+  background: var(--brand);
+  color: #ffffff;
+  font-weight: 900;
+  letter-spacing: -0.2px;
+  box-shadow: var(--shadow-1);
+}
+.sakhi-btn-secondary {
+  width: 100%;
+  min-height: 56px;
+  padding: 14px 16px;
+  border-radius: var(--radius-3);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: #0f172a;
+  font-weight: 900;
+}
+.sakhi-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: #0f172a;
+  font-size: var(--type-caption);
+  font-weight: 800;
+}
+
+/* ================= Skeleton (Premium + Subtle) ================= */
+.sakhi-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(90deg, #f1f5f9 0%, #e8eef5 40%, #f1f5f9 80%);
+  background-size: 220% 100%;
+  border-radius: var(--radius-2);
+  animation: sakhi-skeleton-shimmer 1.05s ease-in-out infinite;
+}
+@keyframes sakhi-skeleton-shimmer {
+  0% {
+    background-position: 100% 0%;
+  }
+  100% {
+    background-position: 0% 0%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sakhi-skeleton {
+    animation: none;
+  }
 }
 
 /* ================= PRINT LAYOUT FIX ================= */

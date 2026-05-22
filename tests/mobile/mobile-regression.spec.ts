@@ -15,7 +15,10 @@ test.describe('Mobile regression audit', () => {
     const bottomNav = page.locator('[data-testid="bottom-nav"]');
     await expect(bottomNav).toBeVisible({ timeout: 10000 });
     const bottomNavStyle = await bottomNav.evaluate((nav) => getComputedStyle(nav).paddingBottom);
-    expect(bottomNavStyle).toContain('env(safe-area-inset-bottom');
+    // Computed style resolves env(safe-area-inset-bottom) to a px value (often 0px in headless),
+    // so assert the resulting padding is at least our base padding.
+    const bottomPadding = Number(String(bottomNavStyle).replace('px', '').trim()) || 0;
+    expect(bottomPadding).toBeGreaterThanOrEqual(8);
 
     await navigateTo(page, 'Patients');
     await assertNoHorizontalOverflow(page);
@@ -44,5 +47,10 @@ test.describe('Mobile regression audit', () => {
 
     const appVh = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--app-vh'));
     expect(appVh.trim()).not.toBe('');
+
+    // Consultation mobile action bar should exist once consultation is opened (smoke check)
+    await navigateTo(page, 'Today');
+    // If queue is empty we can't enter consultation in a deterministic way here; just ensure page renders without overflow.
+    await assertNoHorizontalOverflow(page);
   });
 });

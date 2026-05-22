@@ -5,6 +5,9 @@ import { AppViewportFrame } from "./LayoutPrimitives";
 import { ActivePage } from "../../store/uiStore";
 import BottomNav from './BottomNav';
 import UpdateBanner from './UpdateBanner';
+import useKeyboardInset from '../../hooks/useKeyboardInset';
+import { useUIStore } from "../../store/uiStore";
+import CommandPalette from "../commandPalette/CommandPalette";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -19,6 +22,9 @@ export default function AppShell({
 }: AppShellProps) {
   const [isMobile, setIsMobile] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const keyboard = useKeyboardInset();
+  const globalSearchOpen = useUIStore((s) => s.globalSearchOpen);
+  const setGlobalSearchOpen = useUIStore((s) => s.setGlobalSearchOpen);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
@@ -27,6 +33,38 @@ export default function AppShell({
     mq.addEventListener("change", update);
     return () => mq.removeEventListener("change", update);
   }, []);
+
+  useEffect(() => {
+    const isTypingTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      if (!el) return false;
+      if (el.isContentEditable) return true;
+      const tag = el.tagName?.toLowerCase();
+      return tag === "input" || tag === "textarea" || tag === "select";
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && globalSearchOpen) {
+        e.preventDefault();
+        setGlobalSearchOpen(false);
+        return;
+      }
+
+      if (isTypingTarget(e.target)) return;
+
+      const isK = e.key.toLowerCase() === "k";
+      const isPaletteChord = isK && (e.ctrlKey || e.metaKey);
+      const isSlash = e.key === "/";
+
+      if (isPaletteChord || isSlash) {
+        e.preventDefault();
+        setGlobalSearchOpen(true);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [globalSearchOpen, setGlobalSearchOpen]);
 
   const handleNavigate = (page: ActivePage) => {
     setDrawerOpen(false);
@@ -63,7 +101,14 @@ export default function AppShell({
       )}
       <UpdateBanner />
       <AppViewportFrame>{children}</AppViewportFrame>
-      {isMobile && <BottomNav onNavigate={handleNavigate} isMobile={isMobile} />}
+      {isMobile && !keyboard.isOpen && (
+        <BottomNav
+          onNavigate={handleNavigate}
+          isMobile={isMobile}
+          onOpenSearch={() => setGlobalSearchOpen(true)}
+        />
+      )}
+      <CommandPalette onNavigate={handleNavigate} onSelectPatient={onPatientSelect} />
     </>
   );
 }

@@ -12,6 +12,7 @@ test.describe('Mobile navigation and bottom-nav usability', () => {
       'bottom-nav-patients-button',
       'bottom-nav-consult-button',
       'bottom-nav-appointments-button',
+      // "More" slot is now the global command palette trigger (Search)
       'bottom-nav-more-button',
     ];
 
@@ -23,6 +24,13 @@ test.describe('Mobile navigation and bottom-nav usability', () => {
       await btn.scrollIntoViewIfNeeded();
       await btn.click();
       await page.waitForTimeout(200);
+
+      if (testId === 'bottom-nav-more-button') {
+        const palette = page.locator('[data-testid="command-palette"]');
+        await expect(palette).toBeVisible({ timeout: 10000 });
+        await page.keyboard.press('Escape');
+        await expect(palette).toBeHidden({ timeout: 10000 });
+      }
     }
   });
 });

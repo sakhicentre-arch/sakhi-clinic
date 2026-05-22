@@ -41,6 +41,13 @@ import { generateRemedyExplanations } from "../services/aiReasoningEngine";
 import { usePatientStore } from "../store/usePatientStore";
 import { useConsultationStore } from "../store/useConsultationStore";
 import { saveDraft, loadDraft, deleteDraft } from "../services/draftService";
+import useKeyboardInset from "../hooks/useKeyboardInset";
+import { haptic } from "../utils/haptics";
+import RemedyInput from "../components/RemedyInput";
+import { loadRemedyDefaults, saveRemedyDefaults } from "../utils/remedyDefaults";
+import { useQueueStore } from "../store/queueStore";
+import { useUIStore } from "../store/uiStore";
+import { deleteRxTemplate, loadRxTemplates, togglePinTemplate, upsertRxTemplate } from "../utils/rxTemplates";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -635,6 +642,17 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const [draftAutoSaveStatus, setDraftAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [draftRecovered, setDraftRecovered] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const keyboard = useKeyboardInset();
+  const [mobileStage, setMobileStage] = useState<"complaint" | "exam" | "remedy" | "followup">("complaint");
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  const [showNotesSheet, setShowNotesSheet] = useState(false);
+  const [showFollowUpSheet, setShowFollowUpSheet] = useState(false);
+  const [showTemplatesSheet, setShowTemplatesSheet] = useState(false);
+  const [saveToast, setSaveToast] = useState<null | { kind: "saved"; canNext: boolean }>(null);
+  const setActiveConsultation = useUIStore((s) => s.setActiveConsultation);
+  const setDraftStatus = useUIStore((s) => s.setDraftStatus);
+  const queue = useQueueStore((s) => s.queue);
+  const setQueueStatus = useQueueStore((s) => s.setStatus);
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
@@ -643,6 +661,84 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     mq.addEventListener('change', update);
     return () => mq.removeEventListener('change', update);
   }, []);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    const onScroll = () => setHeaderCollapsed(window.scrollY > 48);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [isMobile]);
+
+  const remedyDefaults = useMemo(() => loadRemedyDefaults({ potency: "30C", dosage: "1-1-1", duration: "5 Days" }), []);
+
+  const [autoAdvanceAfterDosage, setAutoAdvanceAfterDosage] = useState(true);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("sakhi.remedyComposer.autoAdvance.v1");
+      if (raw === "0") setAutoAdvanceAfterDosage(false);
+      if (raw === "1") setAutoAdvanceAfterDosage(true);
+    } catch {
+      // ignore
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("sakhi.remedyComposer.autoAdvance.v1", autoAdvanceAfterDosage ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [autoAdvanceAfterDosage]);
+
+  const [composerStepByMedId, setComposerStepByMedId] = useState<Record<string, "dosage" | "duration" | null>>({});
+  const setComposerStep = useCallback((medId: string, step: "dosage" | "duration" | null) => {
+    setComposerStepByMedId((prev) => ({ ...prev, [medId]: step }));
+  }, []);
+
+  const [templateNameDraft, setTemplateNameDraft] = useState("");
+  const [rxTemplatesVersion, setRxTemplatesVersion] = useState(0);
+  const rxTemplates = useMemo(() => {
+    rxTemplatesVersion;
+    return loadRxTemplates();
+  }, [rxTemplatesVersion]);
+  const pinnedTemplates = useMemo(() => rxTemplates.filter((t) => t.pinned), [rxTemplates]);
+  const recentTemplates = useMemo(() => rxTemplates.filter((t) => !t.pinned), [rxTemplates]);
+
+  const saveAndMaybeToast = async (opts?: { next?: boolean }) => {
+    setSaveToast(null);
+    setDraftStatus("Saving…");
+    try {
+      await handleSave();
+      setDraftStatus("Saved");
+    } catch (err) {
+      setDraftStatus("Save failed");
+      throw err;
+    }
+
+    const currentQueueEntry =
+      queue.find((e) => e.patientId === patientId && (appointmentId ? e.appointmentId === appointmentId : true)) ||
+      queue.find((e) => e.patientId === patientId) ||
+      null;
+
+    if (currentQueueEntry) {
+      setQueueStatus(currentQueueEntry.queueId, "done");
+    }
+
+    const nextEntry = queue.find((e) => e.status === "waiting" && e.patientId !== patientId) || null;
+    const canNext = Boolean(nextEntry);
+
+    if (opts?.next && nextEntry) {
+      haptic("success");
+      setActiveConsultation(nextEntry.patientId, nextEntry.appointmentId);
+      window.scrollTo({ top: 0, behavior: "instant" as any });
+      setMobileStage("complaint");
+      setSaveToast(null);
+      return;
+    }
+
+    setSaveToast({ kind: "saved", canNext });
+    window.setTimeout(() => setSaveToast(null), 2200);
+  };
 
 
   const { consultations, loading, saving, editingId, formData, patient, learnedPatterns, loadError } = state;
@@ -766,6 +862,62 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
   const remedyExplanations = useMemo(() => generateRemedyExplanations(remedySuggestions, formData.chiefComplaint), [remedySuggestions, formData.chiefComplaint]);
 
+  const recentRemedyNames = useMemo(() => {
+    const names: string[] = [];
+    const seen = new Set<string>();
+    for (const c of consultations.slice(0, 20)) {
+      for (const m of c.medicines || []) {
+        const nm = (m.name || "").trim();
+        if (!nm) continue;
+        const k = nm.toLowerCase();
+        if (seen.has(k)) continue;
+        seen.add(k);
+        names.push(nm);
+        if (names.length >= 12) return names;
+      }
+    }
+    return names;
+  }, [consultations]);
+
+  const recentPrescriptionTokens = useMemo(() => {
+    const out: Array<{ name: string; potency?: string; dosage?: string; duration?: string }> = [];
+    const seen = new Set<string>();
+    for (const c of consultations.slice(0, 12)) {
+      for (const m of c.medicines || []) {
+        const name = (m.name || "").trim();
+        if (!name) continue;
+        const token = {
+          name,
+          potency: m.potency || "",
+          dosage: (m as any).dosage || "",
+          duration: (m as any).duration || "",
+        };
+        const key = `${token.name.toLowerCase()}|${token.potency.toLowerCase()}|${token.dosage.toLowerCase()}|${token.duration.toLowerCase()}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(token);
+        if (out.length >= 10) return out;
+      }
+    }
+    return out;
+  }, [consultations]);
+
+  const recentFullRxTemplates = useMemo(() => {
+    const templates: Array<{ id: string; label: string; date: string; meds: Medicine[] }> = [];
+    for (const c of consultations.slice(0, 6)) {
+      const meds = (c.medicines || []).filter((m) => (m.name || "").trim().length > 0);
+      if (meds.length === 0) continue;
+      templates.push({
+        id: c.id,
+        label: `${meds.length} remedies`,
+        date: c.date,
+        meds: meds.map((m) => ({ ...m, id: crypto.randomUUID() })),
+      });
+      if (templates.length >= 3) break;
+    }
+    return templates;
+  }, [consultations]);
+
   const decisionRules = useMemo(() => {
     const last = consultations[0];
     const outcome = normalizeOutcome(last?.outcome);
@@ -797,7 +949,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const [focusMedIndex, setFocusMedIndex] = useState<number | null>(null);
 
   const addMedRow = (baseMeds: Medicine[] = formData.medicines) => {
-    const newMed: Medicine = { id: crypto.randomUUID(), name: "", potency: "30C", dosage: "1-1-1", duration: "5 Days", notes: "" };
+    const defaults = remedyDefaults;
+    const newMed: Medicine = { id: crypto.randomUUID(), name: "", potency: defaults.potency, dosage: defaults.dosage, duration: defaults.duration, notes: "" };
     const nextIndex = baseMeds.length;
     patch({ medicines: [...baseMeds, newMed] });
     setFocusMedIndex(nextIndex);
@@ -1104,6 +1257,15 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   // ─────────────────────────────────────────────────────────────────────────
 
   if (mode === "quick") {
+    const stageItems: Array<{ id: typeof mobileStage; label: string }> = [
+      { id: "complaint", label: "Complaint" },
+      { id: "exam", label: "Examination" },
+      { id: "remedy", label: "Remedy" },
+      { id: "followup", label: "Follow-up" },
+    ];
+
+    const shouldShowStage = (stage: typeof mobileStage) => !isMobile || mobileStage === stage;
+
     return (
       <div data-testid="consultation-root" className="min-h-screen bg-slate-50 text-slate-900">
         <style>{customCSS}</style>
@@ -1123,8 +1285,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               )}
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">Consultation</p>
-                <h1 className="truncate text-lg font-semibold text-white">{patient?.name || patientName || "Patient"}</h1>
-                <p className="mt-1 text-sm text-slate-300">
+                <h1 className={`truncate font-semibold text-white ${headerCollapsed ? "text-base" : "text-lg"}`}>{patient?.name || patientName || "Patient"}</h1>
+                <p className={`mt-1 text-sm text-slate-300 ${headerCollapsed ? "hidden" : "block"}`}>
                   {patient?.gender || "—"} · {patient?.age ?? "?"} yrs · {consultations.length} visits
                   {isFirstVisit && (
                     <span className="ml-2 inline-flex rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-100">
@@ -1132,6 +1294,43 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     </span>
                   )}
                 </p>
+                {!headerCollapsed && consultations[0] && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <span className="inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-[12px] font-semibold text-white/90 ring-1 ring-white/10">
+                      Last: {new Date(consultations[0].date).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}
+                    </span>
+                    {(consultations[0].medicines?.length || 0) > 0 && (
+                      <span className="inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-[12px] font-semibold text-white/90 ring-1 ring-white/10">
+                        Rx: {consultations[0].medicines?.length}
+                      </span>
+                    )}
+                    {consultations[0].followUpDate && (
+                      <span
+                        className="inline-flex items-center rounded-full px-3 py-1 text-[12px] font-semibold ring-1"
+                        style={{
+                          background:
+                            new Date(consultations[0].followUpDate).getTime() < Date.now()
+                              ? "rgba(244, 63, 94, 0.18)"
+                              : "rgba(56, 189, 248, 0.18)",
+                          color:
+                            new Date(consultations[0].followUpDate).getTime() < Date.now()
+                              ? "#fecdd3"
+                              : "#bae6fd",
+                          borderColor:
+                            new Date(consultations[0].followUpDate).getTime() < Date.now()
+                              ? "rgba(244, 63, 94, 0.35)"
+                              : "rgba(56, 189, 248, 0.35)",
+                        }}
+                      >
+                        FU:{" "}
+                        {new Date(consultations[0].followUpDate).toLocaleDateString(undefined, {
+                          day: "2-digit",
+                          month: "short",
+                        })}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1145,6 +1344,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               <button
                 type="button"
                 onClick={handleWhatsAppShare}
+                data-testid="consultation-whatsapp-button"
                 className="rounded-2xl bg-emerald-500 px-4 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-emerald-400/30"
               >
                 📲 WA Rx
@@ -1174,10 +1374,32 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               </div>
             </div>
           </div>
+
+          {isMobile && (
+            <div className="mx-auto mt-3 max-w-6xl">
+              <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+                {stageItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => { haptic("tap"); setMobileStage(item.id); }}
+                    className={
+                      "flex-none rounded-2xl px-4 py-2 text-sm font-semibold ring-1 ring-white/10 " +
+                      (mobileStage === item.id ? "bg-white text-slate-900" : "bg-slate-800 text-white/85")
+                    }
+                    style={{ minHeight: 44 }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <main className="mx-auto max-w-6xl px-4 pb-44 pt-4 sm:px-6 xl:px-8">
           <div className="space-y-4">
+            {shouldShowStage("complaint") && (
             <MobileSection title="Chief Complaint" subtitle="Capture the patient's primary issue" testId="section-chief-complaint">
               <div className="space-y-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1218,13 +1440,59 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 />
               </div>
             </MobileSection>
+            )}
 
+            {shouldShowStage("exam") && (
+            <MobileSection title="Examination" subtitle="Quick clinical context" testId="section-examination">
+              <div className="grid gap-3">
+                <MobileField label="Mental / Generals" optional>
+                  <HybridField
+                    fieldKey="mind"
+                    value={formData.mind || ""}
+                    onChange={(val) => patch({ mind: val })}
+                    lang={lang}
+                    options={MIND_OPTIONS}
+                    placeholder="Anxieties, fears, disposition…"
+                    rows={2}
+                  />
+                </MobileField>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <MobileField label="Thermal" optional>
+                    <select
+                      value={formData.thermal || ""}
+                      onChange={(e) => patch({ thermal: e.target.value })}
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
+                    >
+                      <option value="">— Select —</option>
+                      <option value="Hot">Hot</option>
+                      <option value="Cold">Cold</option>
+                      <option value="Neutral">Neutral</option>
+                    </select>
+                  </MobileField>
+                  <MobileField label="Appetite" optional>
+                    <select
+                      value={formData.appetite || ""}
+                      onChange={(e) => patch({ appetite: e.target.value })}
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
+                    >
+                      <option value="">— Select —</option>
+                      <option value="Increased">Increased</option>
+                      <option value="Decreased">Decreased</option>
+                      <option value="Normal">Normal</option>
+                    </select>
+                  </MobileField>
+                </div>
+              </div>
+            </MobileSection>
+            )}
+
+            {shouldShowStage("remedy") && (
             <MobileSection title="Prescription & Remedies" subtitle="Mobile-first remedy cards" testId="section-prescription">
               <div className="flex flex-wrap gap-2">
                 {last && (last.medicines?.length || 0) > 0 && (
                   <button
                     type="button"
-                    onClick={() => patch({ medicines: [...(last.medicines || [])] })}
+                    onClick={() => patch({ medicines: (last.medicines || []).map((m) => ({ ...m, id: crypto.randomUUID() })) })}
                     className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700"
                   >
                     🔁 Repeat Last
@@ -1237,7 +1505,56 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 >
                   🔄 Clear
                 </button>
+                <button
+                  type="button"
+                  onClick={() => { haptic("tap"); setShowTemplatesSheet(true); }}
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                >
+                  ⭐ Templates
+                </button>
+                {isMobile && (
+                  <button
+                    type="button"
+                    onClick={() => setAutoAdvanceAfterDosage((v) => !v)}
+                    className={
+                      "rounded-2xl border px-4 py-2 text-sm font-semibold " +
+                      (autoAdvanceAfterDosage ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-700")
+                    }
+                    title="Toggle auto-advance after dosage selection"
+                  >
+                    {autoAdvanceAfterDosage ? "Auto-advance: ON" : "Auto-advance: OFF"}
+                  </button>
+                )}
               </div>
+
+              {/* Full prescription templates (multi-remedy reuse) */}
+              {recentFullRxTemplates.length > 0 && (
+                <div className="mt-3 rounded-3xl border border-slate-200 bg-white p-4">
+                  <div className="sakhi-micro mb-2">Recent Full Rx</div>
+                  <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+                    {recentFullRxTemplates.map((t, idx) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => {
+                          haptic("success");
+                          patch({ medicines: t.meds });
+                        }}
+                        className="sakhi-tap sakhi-focus-ring flex-none rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-left"
+                        style={{ minHeight: 48, minWidth: 220 }}
+                        title="Reuse full prescription"
+                      >
+                        <div className="text-sm font-extrabold text-slate-900">
+                          {idx === 0 ? "Last Rx" : `Rx ${idx + 1}`}
+                        </div>
+                        <div className="mt-0.5 text-xs font-semibold text-slate-600">
+                          {new Date(t.date).toLocaleDateString(undefined, { day: "2-digit", month: "short" })} · {t.label}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {formData.medicines.length === 0 ? (
                 <div className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
@@ -1254,49 +1571,158 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0 space-y-3">
                           <MobileField label={`Remedy ${idx + 1}`}>
-                            <SmartInput
+                            <RemedyInput
                               value={med.name || ""}
-                              onChange={(value) => updateMedRow(idx, { ...med, name: value })}
+                              onChange={(next) => updateMedRow(idx, { ...med, name: next })}
                               suggestions={COMMON_REMEDIES}
-                              placeholder="Remedy name"
-                              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
+                              recentRemedies={recentRemedyNames}
+                              recentPrescriptions={recentPrescriptionTokens}
+                              onPrescriptionCommit={(rx) => {
+                                const nextMed = {
+                                  ...med,
+                                  name: rx.name,
+                                  potency: rx.potency || med.potency || remedyDefaults.potency,
+                                  dosage: rx.dosage || med.dosage || remedyDefaults.dosage,
+                                  duration: rx.duration || med.duration || remedyDefaults.duration,
+                                };
+                                updateMedRow(idx, nextMed as any);
+                                saveRemedyDefaults({
+                                  potency: nextMed.potency || remedyDefaults.potency,
+                                  dosage: (nextMed as any).dosage || remedyDefaults.dosage,
+                                  duration: (nextMed as any).duration || remedyDefaults.duration,
+                                });
+                                handleMedEnter(idx);
+                              }}
+                              placeholder="Type remedy…"
+                              autoFocus={focusMedIndex === idx}
+                              potency={med.potency || remedyDefaults.potency}
+                              potencies={POTENCIES}
+                              onPotencyChange={(p) => {
+                                updateMedRow(idx, { ...med, potency: p });
+                                saveRemedyDefaults({ potency: p, dosage: med.dosage || remedyDefaults.dosage, duration: med.duration || remedyDefaults.duration });
+                                if (med.id) setComposerStep(String(med.id), "dosage");
+                              }}
+                              onCommit={() => {
+                                if (med.id) {
+                                  setComposerStep(String(med.id), "dosage");
+                                }
+                              }}
                             />
                           </MobileField>
-                          <div className="grid gap-3 sm:grid-cols-3">
-                            <MobileField label="Potency">
-                              <select
-                                value={med.potency || "30C"}
-                                onChange={(e) => updateMedRow(idx, { ...med, potency: e.target.value })}
-                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
-                              >
-                                {POTENCIES.map((p) => (
-                                  <option key={p} value={p}>{p}</option>
-                                ))}
-                              </select>
-                            </MobileField>
-                            <MobileField label="Dosage">
-                              <select
-                                value={med.dosage || "1-1-1"}
-                                onChange={(e) => updateMedRow(idx, { ...med, dosage: e.target.value })}
-                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
-                              >
-                                {DOSAGE_PRESETS.map((d) => (
-                                  <option key={d} value={d}>{d}</option>
-                                ))}
-                              </select>
-                            </MobileField>
-                            <MobileField label="Duration">
-                              <select
-                                value={med.duration || "5 Days"}
-                                onChange={(e) => updateMedRow(idx, { ...med, duration: e.target.value })}
-                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
-                              >
-                                {DURATIONS.map((d) => (
-                                  <option key={d} value={d}>{d}</option>
-                                ))}
-                              </select>
-                            </MobileField>
-                          </div>
+                          {/* RemedyComposer controls: mobile uses quick chips; desktop keeps compact selects. */}
+                          {isMobile ? (
+                            <div className="grid gap-3">
+                              <MobileField label="Dosage (tap)">
+                                <div
+                                  className="flex flex-wrap gap-2"
+                                  style={
+                                    med.id && composerStepByMedId[String(med.id)] === "dosage"
+                                      ? ({ outline: "2px solid rgba(13, 115, 119, 0.25)", outlineOffset: 4, borderRadius: 16 } as any)
+                                      : undefined
+                                  }
+                                >
+                                  {DOSAGE_PRESETS.map((d) => (
+                                    <button
+                                      key={d}
+                                      type="button"
+                                      onClick={() => {
+                                        haptic("tap");
+                                        updateMedRow(idx, { ...med, dosage: d });
+                                        saveRemedyDefaults({ potency: med.potency || remedyDefaults.potency, dosage: d, duration: med.duration || remedyDefaults.duration });
+                                        if (med.id) setComposerStep(String(med.id), "duration");
+                                        if (autoAdvanceAfterDosage) {
+                                          handleMedEnter(idx);
+                                        }
+                                      }}
+                                      className={
+                                        "sakhi-tap sakhi-focus-ring rounded-2xl border px-3 py-2 text-xs font-semibold " +
+                                        ((med.dosage || remedyDefaults.dosage) === d
+                                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                          : "border-slate-200 bg-white text-slate-700")
+                                      }
+                                      style={{ minHeight: 40 }}
+                                    >
+                                      {d}
+                                    </button>
+                                  ))}
+                                </div>
+                              </MobileField>
+
+                              <MobileField label="Duration (tap)">
+                                <div className="flex flex-wrap gap-2">
+                                  {DURATIONS.map((d) => (
+                                    <button
+                                      key={d}
+                                      type="button"
+                                      onClick={() => {
+                                        haptic("tap");
+                                        updateMedRow(idx, { ...med, duration: d });
+                                        saveRemedyDefaults({ potency: med.potency || remedyDefaults.potency, dosage: med.dosage || remedyDefaults.dosage, duration: d });
+                                        if (med.id) setComposerStep(String(med.id), null);
+                                      }}
+                                      className={
+                                        "sakhi-tap sakhi-focus-ring rounded-2xl border px-3 py-2 text-xs font-semibold " +
+                                        ((med.duration || remedyDefaults.duration) === d
+                                          ? "border-sky-200 bg-sky-50 text-sky-800"
+                                          : "border-slate-200 bg-white text-slate-700")
+                                      }
+                                      style={{ minHeight: 40 }}
+                                    >
+                                      {d}
+                                    </button>
+                                  ))}
+                                </div>
+                              </MobileField>
+                            </div>
+                          ) : (
+                            <div className="grid gap-3 sm:grid-cols-3">
+                              <MobileField label="Potency">
+                                <select
+                                  value={med.potency || remedyDefaults.potency}
+                                  onChange={(e) => updateMedRow(idx, { ...med, potency: e.target.value })}
+                                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
+                                >
+                                  {POTENCIES.map((p) => (
+                                    <option key={p} value={p}>
+                                      {p}
+                                    </option>
+                                  ))}
+                                </select>
+                              </MobileField>
+                              <MobileField label="Dosage">
+                                <select
+                                  value={med.dosage || remedyDefaults.dosage}
+                                  onChange={(e) => {
+                                    updateMedRow(idx, { ...med, dosage: e.target.value });
+                                    saveRemedyDefaults({ potency: med.potency || remedyDefaults.potency, dosage: e.target.value, duration: med.duration || remedyDefaults.duration });
+                                  }}
+                                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
+                                >
+                                  {DOSAGE_PRESETS.map((d) => (
+                                    <option key={d} value={d}>
+                                      {d}
+                                    </option>
+                                  ))}
+                                </select>
+                              </MobileField>
+                              <MobileField label="Duration">
+                                <select
+                                  value={med.duration || remedyDefaults.duration}
+                                  onChange={(e) => {
+                                    updateMedRow(idx, { ...med, duration: e.target.value });
+                                    saveRemedyDefaults({ potency: med.potency || remedyDefaults.potency, dosage: med.dosage || remedyDefaults.dosage, duration: e.target.value });
+                                  }}
+                                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
+                                >
+                                  {DURATIONS.map((d) => (
+                                    <option key={d} value={d}>
+                                      {d}
+                                    </option>
+                                  ))}
+                                </select>
+                              </MobileField>
+                            </div>
+                          )}
                         </div>
                         <button
                           type="button"
@@ -1350,7 +1776,9 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 </div>
               )}
             </MobileSection>
+            )}
 
+            {shouldShowStage("followup") && (
             <MobileSection title="Outcome & Follow-up" subtitle="Quick action and billing" testId="section-outcome">
               <div className="grid gap-2 sm:grid-cols-2">
                 {Object.values(ConsultationOutcome).map((o) => (
@@ -1394,60 +1822,470 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 </MobileField>
               </div>
             </MobileSection>
+            )}
 
-            <MobileSection title="Consultation Notes" subtitle="Keep narrative and mental state together" testId="section-notes">
-              <MobileField label="Case Notes">
-                <textarea
-                  className="w-full rounded-3xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
-                  rows={4}
-                  value={formData.caseText}
-                  onChange={(e) => patch({ caseText: e.target.value })}
-                  placeholder="Symptoms, observations, history..."
-                />
-              </MobileField>
-              <MobileField label="Mental / Generals">
-                <HybridField fieldKey="mind" value={formData.mind || ""} onChange={(val) => patch({ mind: val })} lang={lang} options={MIND_OPTIONS} placeholder="Anxieties, fears, disposition..." rows={2} />
-              </MobileField>
-            </MobileSection>
+            {!isMobile && (
+              <MobileSection title="Consultation Notes" subtitle="Keep narrative and mental state together" testId="section-notes">
+                <MobileField label="Case Notes">
+                  <textarea
+                    className="w-full rounded-3xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
+                    rows={4}
+                    value={formData.caseText}
+                    onChange={(e) => patch({ caseText: e.target.value })}
+                    placeholder="Symptoms, observations, history..."
+                  />
+                </MobileField>
+                <MobileField label="Mental / Generals">
+                  <HybridField fieldKey="mind" value={formData.mind || ""} onChange={(val) => patch({ mind: val })} lang={lang} options={MIND_OPTIONS} placeholder="Anxieties, fears, disposition..." rows={2} />
+                </MobileField>
+              </MobileSection>
+            )}
           </div>
         </main>
 
-        <div
-          className="sticky bottom-0 inset-x-0 z-50 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur-sm"
-          style={{
-            boxShadow: "0 -10px 30px rgba(15, 23, 42, 0.09)",
-            paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
-            marginTop: "24px",
-          }}
-        >
-          <div className="mx-auto flex max-w-6xl flex-wrap gap-3">
-            <button
-              type="button"
-              data-testid="consultation-save-button"
-              onClick={handleSave}
-              disabled={saving}
-              className={`flex-1 rounded-3xl px-5 py-3 text-sm font-semibold text-white shadow-sm ${saving ? "bg-slate-400 cursor-not-allowed" : "bg-slate-900 hover:bg-slate-800"}`}
-              aria-label="Save consultation"
-            >
-              {saving ? "Saving..." : isEditing ? "✅ Update Record" : "✅ Save"}
-            </button>
-            <button
-              type="button"
-              data-testid="consultation-whatsapp-button"
-              onClick={handleWhatsAppShare}
-              className="rounded-3xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-600"
-            >
-              WA Rx
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowPrintMenu((v) => !v)}
-              className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-900 shadow-sm hover:bg-slate-50"
-            >
-              Print
-            </button>
+        {!isMobile && (
+          <div
+            className="sticky bottom-0 inset-x-0 z-50 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur-sm"
+            style={{
+              boxShadow: "0 -10px 30px rgba(15, 23, 42, 0.09)",
+              paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
+              marginTop: "24px",
+            }}
+          >
+            <div className="mx-auto flex max-w-6xl flex-wrap gap-3">
+              <button
+                type="button"
+                data-testid="consultation-save-button"
+                onClick={handleSave}
+                disabled={saving}
+                className={`flex-1 rounded-3xl px-5 py-3 text-sm font-semibold text-white shadow-sm ${saving ? "bg-slate-400 cursor-not-allowed" : "bg-slate-900 hover:bg-slate-800"}`}
+                aria-label="Save consultation"
+              >
+                {saving ? "Saving..." : isEditing ? "✅ Update Record" : "✅ Save"}
+              </button>
+              <button
+                type="button"
+                data-testid="consultation-whatsapp-button"
+                onClick={handleWhatsAppShare}
+                className="rounded-3xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-600"
+              >
+                WA Rx
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowPrintMenu((v) => !v)}
+                className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-900 shadow-sm hover:bg-slate-50"
+              >
+                Print
+              </button>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* Mobile keyboard-aware action bar + sheets */}
+        {isMobile && (
+          <>
+            {saveToast?.kind === "saved" && (
+              <div
+                data-testid="consultation-saved-toast"
+                style={{
+                  position: "fixed",
+                  left: 12,
+                  right: 12,
+                  bottom: "calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px) + 88px)",
+                  zIndex: 80,
+                  background: "rgba(15, 23, 42, 0.92)",
+                  color: "#fff",
+                  borderRadius: 16,
+                  padding: "12px 14px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.28)",
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 800 }}>Saved</div>
+                {saveToast.canNext && (
+                  <button
+                    type="button"
+                    onClick={() => void saveAndMaybeToast({ next: true })}
+                    className="sakhi-tap sakhi-focus-ring"
+                    style={{ minHeight: 40, padding: "8px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.08)", color: "#fff", fontWeight: 900, fontSize: 12 }}
+                  >
+                    Next patient →
+                  </button>
+                )}
+              </div>
+            )}
+            <div
+              data-testid="consultation-action-bar"
+              style={{
+                position: "fixed",
+                left: 0,
+                right: 0,
+                bottom: `calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px))`,
+                padding: "8px 16px",
+                background: "rgba(248, 250, 252, 0.92)",
+                borderTop: "1px solid rgba(226, 232, 240, 0.9)",
+                backdropFilter: "blur(12px)",
+                zIndex: 50,
+                boxSizing: "border-box",
+              }}
+            >
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    haptic("tap");
+                    const next = [...(formData.medicines || [])];
+                    next.push({ name: "", potency: remedyDefaults.potency, dosage: remedyDefaults.dosage, duration: remedyDefaults.duration } as any);
+                    patch({ medicines: next });
+                    setMobileStage("remedy");
+                  }}
+                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a" }}
+                  className="sakhi-tap sakhi-focus-ring"
+                >
+                  + Remedy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { haptic("tap"); setShowNotesSheet(true); }}
+                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a" }}
+                  className="sakhi-tap sakhi-focus-ring"
+                >
+                  Notes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { haptic("tap"); setShowFollowUpSheet(true); }}
+                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a" }}
+                  className="sakhi-tap sakhi-focus-ring"
+                >
+                  Follow-up
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { haptic("tap"); setShowTemplatesSheet(true); }}
+                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a" }}
+                  className="sakhi-tap sakhi-focus-ring"
+                >
+                  Templates
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextEntry = queue.find((e) => e.status === "waiting" && e.patientId !== patientId) || null;
+                    const shouldNext = Boolean(nextEntry);
+                    haptic("success");
+                    void saveAndMaybeToast({ next: shouldNext });
+                  }}
+                  disabled={saving}
+                  style={{ minHeight: 48, borderRadius: 16, border: "none", background: "#0D7377", color: "#fff", fontWeight: 900, fontSize: 12, opacity: saving ? 0.65 : 1 }}
+                  className="sakhi-tap sakhi-focus-ring"
+                >
+                  {saving ? "Saving…" : (queue.some((e) => e.status === "waiting" && e.patientId !== patientId) ? "Save & Next" : "Save")}
+                </button>
+              </div>
+            </div>
+
+            {showNotesSheet && (
+              <div role="dialog" aria-modal="true" data-testid="notes-sheet" style={{ position: "fixed", inset: 0, zIndex: 70 }}>
+                <div onClick={() => setShowNotesSheet(false)} style={{ position: "absolute", inset: 0, background: "rgba(15, 23, 42, 0.45)" }} />
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    borderTopLeftRadius: 24,
+                    borderTopRightRadius: 24,
+                    background: "#fff",
+                    padding: 16,
+                    boxShadow: "0 -16px 40px rgba(15, 23, 42, 0.18)",
+                    maxHeight: "calc(var(--app-vh, 1vh) * 100 - 80px)",
+                    overflow: "auto",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                    <div style={{ fontSize: 14, fontWeight: 900, color: "#0f172a" }}>Notes</div>
+                    <button type="button" onClick={() => setShowNotesSheet(false)} style={{ border: "none", background: "transparent", fontWeight: 900, color: "#64748b" }}>
+                      Close
+                    </button>
+                  </div>
+                  <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.18em", textTransform: "uppercase", color: "#94a3b8" }}>Case Notes</div>
+                      <textarea
+                        value={formData.caseText}
+                        onChange={(e) => patch({ caseText: e.target.value })}
+                        rows={6}
+                        style={{ marginTop: 8, width: "100%", borderRadius: 16, border: "1px solid #e2e8f0", padding: 12, fontSize: 14, boxSizing: "border-box" }}
+                        placeholder="Symptoms, observations, clinical narrative…"
+                      />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.18em", textTransform: "uppercase", color: "#94a3b8" }}>Mental</div>
+                      <textarea
+                        value={formData.mind || ""}
+                        onChange={(e) => patch({ mind: e.target.value })}
+                        rows={4}
+                        style={{ marginTop: 8, width: "100%", borderRadius: 16, border: "1px solid #e2e8f0", padding: 12, fontSize: 14, boxSizing: "border-box" }}
+                        placeholder="Anxieties, fears, disposition…"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showFollowUpSheet && (
+              <div role="dialog" aria-modal="true" data-testid="followup-sheet" style={{ position: "fixed", inset: 0, zIndex: 70 }}>
+                <div onClick={() => setShowFollowUpSheet(false)} style={{ position: "absolute", inset: 0, background: "rgba(15, 23, 42, 0.45)" }} />
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    borderTopLeftRadius: 24,
+                    borderTopRightRadius: 24,
+                    background: "#fff",
+                    padding: 16,
+                    boxShadow: "0 -16px 40px rgba(15, 23, 42, 0.18)",
+                    maxHeight: "calc(var(--app-vh, 1vh) * 100 - 80px)",
+                    overflow: "auto",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                    <div style={{ fontSize: 14, fontWeight: 900, color: "#0f172a" }}>Follow-up</div>
+                    <button type="button" onClick={() => setShowFollowUpSheet(false)} style={{ border: "none", background: "transparent", fontWeight: 900, color: "#64748b" }}>
+                      Close
+                    </button>
+                  </div>
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.18em", textTransform: "uppercase", color: "#94a3b8" }}>Quick intervals</div>
+                    <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {[
+                        { label: "1W", days: 7 },
+                        { label: "2W", days: 14 },
+                        { label: "6W", days: 42 },
+                        { label: "1M", days: 30 },
+                        { label: "3M", days: 90 },
+                      ].map((chip) => (
+                        <button
+                          key={chip.label}
+                          type="button"
+                          onClick={() => {
+                            haptic("tap");
+                            const next = new Date();
+                            next.setDate(next.getDate() + chip.days);
+                            patch({ formFollowUpDate: next.toISOString().split("T")[0] });
+                            setMobileStage("followup");
+                            setShowFollowUpSheet(false);
+                          }}
+                          style={{ minHeight: 44, padding: "8px 16px", borderRadius: 16, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900, fontSize: 13, color: "#0f172a" }}
+                          className="sakhi-tap sakhi-focus-ring"
+                        >
+                          {chip.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 14 }}>
+                      <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.18em", textTransform: "uppercase", color: "#94a3b8" }}>Custom date</div>
+                      <input
+                        type="date"
+                        value={(formData.formFollowUpDate || "").slice(0, 10)}
+                        onChange={(e) => patch({ formFollowUpDate: e.target.value })}
+                        style={{ marginTop: 8, width: "100%", minHeight: 48, borderRadius: 16, border: "1px solid #e2e8f0", padding: "0 12px", fontSize: 14, boxSizing: "border-box" }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showTemplatesSheet && (
+              <div role="dialog" aria-modal="true" data-testid="rx-templates-sheet" style={{ position: "fixed", inset: 0, zIndex: 70 }}>
+                <div onClick={() => setShowTemplatesSheet(false)} style={{ position: "absolute", inset: 0, background: "rgba(15, 23, 42, 0.45)" }} />
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    borderTopLeftRadius: 24,
+                    borderTopRightRadius: 24,
+                    background: "#fff",
+                    padding: 16,
+                    boxShadow: "0 -16px 40px rgba(15, 23, 42, 0.18)",
+                    maxHeight: "calc(var(--app-vh, 1vh) * 100 - 80px)",
+                    overflow: "auto",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                    <div style={{ fontSize: 14, fontWeight: 900, color: "#0f172a" }}>Prescription Templates</div>
+                    <button type="button" onClick={() => setShowTemplatesSheet(false)} style={{ border: "none", background: "transparent", fontWeight: 900, color: "#64748b" }}>
+                      Close
+                    </button>
+                  </div>
+
+                  <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+                    <div>
+                      <div className="sakhi-micro">Save current as template</div>
+                      <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+                        <input
+                          value={templateNameDraft}
+                          onChange={(e) => setTemplateNameDraft(e.target.value)}
+                          placeholder="Template name (e.g., Chronic cough follow-up)"
+                          className="sakhi-input sakhi-focus-ring"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const meds = (formData.medicines || [])
+                              .filter((m) => (m.name || "").trim().length > 0)
+                              .map((m: any) => ({ name: m.name, potency: m.potency, dosage: m.dosage, duration: m.duration, notes: m.notes || "" }));
+                            if (meds.length === 0) {
+                              alert("Add at least one remedy to save a template.");
+                              return;
+                            }
+                            const name = (templateNameDraft || "").trim() || `Template (${meds.length} remedies)`;
+                            upsertRxTemplate({ id: crypto.randomUUID(), name, pinned: true, medicines: meds });
+                            setRxTemplatesVersion((v) => v + 1);
+                            setTemplateNameDraft("");
+                            haptic("success");
+                          }}
+                          className="sakhi-btn-primary sakhi-tap sakhi-focus-ring"
+                        >
+                          Pin Template
+                        </button>
+                      </div>
+                    </div>
+
+                    {pinnedTemplates.length > 0 && (
+                      <div>
+                        <div className="sakhi-micro">Pinned</div>
+                        <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+                          {pinnedTemplates.map((t) => (
+                            <div key={t.id} className="rounded-3xl border border-slate-200 bg-white p-3" style={{ display: "grid", gap: 10 }}>
+                              <div style={{ display: "flex", alignItems: "start", justifyContent: "space-between", gap: 12 }}>
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontWeight: 900, fontSize: 14, color: "#0f172a" }} className="truncate">{t.name}</div>
+                                  <div className="sakhi-caption" style={{ marginTop: 2 }}>{t.medicines.length} remedies</div>
+                                </div>
+                                <div style={{ display: "flex", gap: 8 }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      haptic("tap");
+                                      togglePinTemplate(t.id, false);
+                                      setRxTemplatesVersion((v) => v + 1);
+                                    }}
+                                    className="sakhi-tap sakhi-focus-ring"
+                                    style={{ minHeight: 40, padding: "8px 10px", borderRadius: 14, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900, fontSize: 12 }}
+                                  >
+                                    Unpin
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      haptic("tap");
+                                      deleteRxTemplate(t.id);
+                                      setRxTemplatesVersion((v) => v + 1);
+                                    }}
+                                    className="sakhi-tap sakhi-focus-ring"
+                                    style={{ minHeight: 40, padding: "8px 10px", borderRadius: 14, border: "1px solid #fee2e2", background: "#fff1f2", color: "#be123c", fontWeight: 900, fontSize: 12 }}
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  haptic("success");
+                                  patch({
+                                    medicines: t.medicines.map((m: any) => ({
+                                      id: crypto.randomUUID(),
+                                      name: m.name,
+                                      potency: m.potency || remedyDefaults.potency,
+                                      dosage: m.dosage || remedyDefaults.dosage,
+                                      duration: m.duration || remedyDefaults.duration,
+                                      notes: m.notes || "",
+                                    })),
+                                  });
+                                  setShowTemplatesSheet(false);
+                                  setMobileStage("remedy");
+                                  window.scrollTo({ top: 0, behavior: "instant" as any });
+                                }}
+                                className="sakhi-btn-secondary sakhi-tap sakhi-focus-ring"
+                              >
+                                Use Template
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {recentTemplates.length > 0 && (
+                      <div>
+                        <div className="sakhi-micro">Recent</div>
+                        <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+                          {recentTemplates.slice(0, 6).map((t) => (
+                            <div key={t.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-3" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontWeight: 900, fontSize: 14, color: "#0f172a" }} className="truncate">{t.name}</div>
+                                <div className="sakhi-caption" style={{ marginTop: 2 }}>{t.medicines.length} remedies</div>
+                              </div>
+                              <div style={{ display: "flex", gap: 8 }}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    haptic("tap");
+                                    togglePinTemplate(t.id, true);
+                                    setRxTemplatesVersion((v) => v + 1);
+                                  }}
+                                  className="sakhi-tap sakhi-focus-ring"
+                                  style={{ minHeight: 40, padding: "8px 10px", borderRadius: 14, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900, fontSize: 12 }}
+                                >
+                                  Pin
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    haptic("success");
+                                    patch({
+                                      medicines: t.medicines.map((m: any) => ({
+                                        id: crypto.randomUUID(),
+                                        name: m.name,
+                                        potency: m.potency || remedyDefaults.potency,
+                                        dosage: m.dosage || remedyDefaults.dosage,
+                                        duration: m.duration || remedyDefaults.duration,
+                                        notes: m.notes || "",
+                                      })),
+                                    });
+                                    setShowTemplatesSheet(false);
+                                    setMobileStage("remedy");
+                                  }}
+                                  className="sakhi-tap sakhi-focus-ring"
+                                  style={{ minHeight: 40, padding: "8px 10px", borderRadius: 14, border: "1px solid #e2e8f0", background: "#0f172a", color: "#fff", fontWeight: 900, fontSize: 12 }}
+                                >
+                                  Use
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
 
         {showLetterPad && (
           <div className="print-only">

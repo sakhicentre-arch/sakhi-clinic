@@ -16,9 +16,10 @@ import { useQueueStore, QueueEntry } from "../store/queueStore";
 import { useUIStore } from "../store/uiStore";
 import { normalizePatientPhone } from "../utils/whatsapp";
 import { getAllPatientsFromDB, db } from "../services/db";
-import { SplitPane } from "../components/layout/LayoutPrimitives";
+import { PullToRefreshScrollRegion, SplitPane } from "../components/layout/LayoutPrimitives";
 import { generateWhatsAppLink } from "../utils/whatsapp";
 import { MobileCard, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
+import { haptic } from "../utils/haptics";
 import {
   Users, Clock, CheckCircle2, AlertCircle, Plus, Search,
   ChevronRight, Phone, Calendar, Activity, TrendingUp,
@@ -1069,6 +1070,7 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
   const [activeQueueId, setActiveQueueId] = useState<string | null>(null);
   const queue = useQueueStore((s) => s.queue);
   const [isMobile, setIsMobile] = useState(false);
+  const setStatus = useQueueStore((s) => s.setStatus);
 
   const loadPatients = usePatientStore((s) => s.loadPatients);
   const loadConsultations = useConsultationStore((s) => s.loadConsultations);
@@ -1128,27 +1130,307 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
     </SplitPane>
   );
 
+  const MobileTodayCommandCenter = () => {
+    const patients = usePatientStore((s) => s.patients);
+    const consultations = useConsultationStore((s) => s.consultations);
+    const activeClinic = useUIStore((s) => s.activeClinic);
+    const [showAdd, setShowAdd] = useState(false);
+    const addRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+      const h = (e: MouseEvent) => {
+        if (addRef.current && !addRef.current.contains(e.target as Node)) setShowAdd(false);
+      };
+      document.addEventListener("mousedown", h);
+      return () => document.removeEventListener("mousedown", h);
+    }, []);
+
+    const nextEntry = useMemo(() => {
+      if (activeEntry && activeEntry.status !== "done") return activeEntry;
+      return queue.find((e) => e.status === "waiting") || null;
+    }, [queue, activeEntry]);
+
+    const heroPatient = nextEntry ? patients.find((p) => p.id === nextEntry.patientId) : null;
+
+    const heroPatientConsults = useMemo(() => {
+      if (!heroPatient) return [];
+      return [...consultations.filter((c) => c.patientId === heroPatient.id)]
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }, [consultations, heroPatient]);
+
+    const lastConsult = heroPatientConsults[0] || null;
+
+    const waitingCount = useMemo(() => queue.filter((e) => e.status === "waiting").length, [queue]);
+    const doneCount = useMemo(() => queue.filter((e) => e.status === "done").length, [queue]);
+
+    const startHeroConsultation = () => {
+      if (!nextEntry) return;
+      haptic("tap");
+      setStatus(nextEntry.queueId, "in-progress");
+      goToConsultation(nextEntry.patientId, nextEntry.appointmentId);
+    };
+
+    return (
+      <ResponsiveContainer
+        style={{
+          ...commonShellStyle,
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+          padding: "16px 16px 24px",
+        }}
+      >
+        {/* Hero: Now Serving */}
+        <MobileCard style={{ padding: 16, borderRadius: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.18em", color: "#64748b", textTransform: "uppercase" }}>
+                Now Serving
+              </div>
+              <div style={{ marginTop: 8, fontSize: 20, fontWeight: 900, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {heroPatient?.name || (nextEntry ? nextEntry.patientName : "Queue empty")}
+              </div>
+              {heroPatient && (
+                <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8, color: "#64748b", fontSize: 13, fontWeight: 700 }}>
+                  <span>{heroPatient.age ? `${heroPatient.age}Y` : "—"} · {heroPatient.gender || "—"}</span>
+                  <span style={{ color: "#94a3b8" }}>·</span>
+                  <span>{activeClinic}</span>
+                </div>
+              )}
+            </div>
+            <div style={{ flexShrink: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "#94a3b8", textAlign: "right" }}>Waiting</div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: "#0D7377", textAlign: "right" }}>{waitingCount}</div>
+            </div>
+          </div>
+
+          {lastConsult && (
+            <div style={{ marginTop: 12, borderTop: "1px solid #eef2f6", paddingTop: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 900, color: "#94a3b8", letterSpacing: "0.12em", textTransform: "uppercase" }}>Last Visit</div>
+              <div style={{ marginTop: 8, fontSize: 13, fontWeight: 800, color: "#0f172a", lineHeight: 1.4 }}>
+                {lastConsult.chiefComplaint || lastConsult.caseText?.slice(0, 90) || "No complaint recorded"}
+              </div>
+              <div style={{ marginTop: 8, fontSize: 12, color: "#94a3b8", fontWeight: 700 }}>
+                {fmtDate(lastConsult.date)} · {daysAgo(lastConsult.date)} days ago
+              </div>
+            </div>
+          )}
+
+          <button
+            data-testid={nextEntry ? `mobile-now-serving-start-${nextEntry.queueId}` : "mobile-now-serving-start-disabled"}
+            onClick={startHeroConsultation}
+            disabled={!nextEntry}
+            style={{
+              marginTop: 16,
+              width: "100%",
+              minHeight: 56,
+              borderRadius: 18,
+              border: "none",
+              background: nextEntry ? "#0D7377" : "#e2e8f0",
+              color: nextEntry ? "#fff" : "#64748b",
+              fontSize: 15,
+              fontWeight: 900,
+              letterSpacing: "-0.2px",
+              cursor: nextEntry ? "pointer" : "default",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              touchAction: "manipulation",
+            }}
+            className="sakhi-tap sakhi-focus-ring"
+          >
+            <Stethoscope size={18} /> Start Consultation
+          </button>
+        </MobileCard>
+
+        {/* Queue strip */}
+        <MobileCard style={{ padding: 16, borderRadius: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 900, color: "#0f172a" }}>Queue</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <span style={{ fontSize: 11, fontWeight: 900, color: "#0D7377", background: "#f0fdfd", border: "1px solid #99f6e4", padding: "4px 10px", borderRadius: 999 }}>
+                {waitingCount} waiting
+              </span>
+              <span style={{ fontSize: 11, fontWeight: 900, color: "#16a34a", background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "4px 10px", borderRadius: 999 }}>
+                {doneCount} seen
+              </span>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, WebkitOverflowScrolling: "touch" }}>
+            {queue.length === 0 ? (
+              <div style={{ padding: "10px 4px", fontSize: 12, color: "#94a3b8", fontWeight: 700 }}>
+                No patients in queue.
+              </div>
+            ) : (
+              queue.map((entry) => {
+                const isActive = entry.queueId === activeQueueId;
+                const chipPatient = patients.find((p) => p.id === entry.patientId) || null;
+                const av = avatarColor(chipPatient?.gender || "");
+                const chipTone =
+                  entry.status === "done"
+                    ? { bg: "#f0fdf4", border: "#bbf7d0", text: "#166534" }
+                    : entry.status === "in-progress"
+                      ? { bg: "#f0fdfd", border: "#99f6e4", text: "#0D7377" }
+                      : { bg: "#fff", border: "#e2e8f0", text: "#0f172a" };
+                return (
+                  <button
+                    key={entry.queueId}
+                    type="button"
+                    onClick={() => entry.status !== "done" && setActiveQueueId(entry.queueId)}
+                    style={{
+                      flex: "0 0 auto",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "8px 16px",
+                      borderRadius: 16,
+                      border: `2px solid ${isActive ? "#0D7377" : chipTone.border}`,
+                      background: isActive ? "#f0fdfd" : chipTone.bg,
+                      color: chipTone.text,
+                      cursor: entry.status === "done" ? "default" : "pointer",
+                      minHeight: 48,
+                      minWidth: 180,
+                      maxWidth: 240,
+                      boxSizing: "border-box",
+                      touchAction: "manipulation",
+                      textAlign: "left",
+                    }}
+                    className="sakhi-tap sakhi-focus-ring"
+                  >
+                    <div
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: 999,
+                        background: av.bg,
+                        border: `1.5px solid ${av.border}`,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 13,
+                        fontWeight: 900,
+                        color: av.text,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {getInitials(entry.patientName)}
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {entry.patientName}
+                      </div>
+                      <div style={{ marginTop: 2, fontSize: 11, fontWeight: 800, color: "#64748b" }}>
+                        <StatusChip status={entry.status} />
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </MobileCard>
+
+        {/* Floating Action Button: add walk-in */}
+        <div
+          ref={addRef}
+          style={{
+            position: "fixed",
+            right: 16,
+            bottom: "calc(env(safe-area-inset-bottom, 0px) + 96px)",
+            zIndex: 1100,
+          }}
+        >
+          <button
+            type="button"
+            data-testid="mobile-fab-add-walkin"
+            onClick={async () => {
+              haptic("tap");
+              try {
+                await usePatientStore.getState().loadPatients();
+              } catch (err) {
+                console.error("[TodayPage] loadPatients failed", err);
+              }
+              setShowAdd((s) => !s);
+            }}
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 20,
+              border: "none",
+              background: "#0D7377",
+              color: "#fff",
+              boxShadow: "0 12px 28px rgba(15, 23, 42, 0.18)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              touchAction: "manipulation",
+            }}
+            aria-label="Add walk-in patient"
+            className="sakhi-tap sakhi-focus-ring"
+          >
+            <Plus size={22} />
+          </button>
+          {showAdd && (
+            <div style={{ position: "absolute", right: 0, bottom: 64, width: 320, maxWidth: "calc(100vw - 32px)" }}>
+              <AddToQueueDropdown onAdd={(patientId) => {
+                // delegate to QueuePanel handler logic by reusing existing function semantics
+                // We call addToQueue through the store by letting QueuePanel handle the heavy lifting,
+                // but here we keep the old dropdown UI and reuse existing add-to-queue behavior via QueuePanel's handler.
+                // The QueuePanel's handler depends on local vars, so we emulate by selecting and opening the desktop list.
+                // Instead, keep behavior simple: selecting a patient in dropdown will add via QueuePanel logic in store.
+                // The AddToQueueDropdown already calls onAdd(patientId) only.
+                const qp = (useQueueStore.getState() as any);
+                const consultationsStore = useConsultationStore.getState();
+                const patientsStore = usePatientStore.getState();
+                let p = patientsStore.patients.find((x: any) => x.id === patientId) || null;
+                (async () => {
+                  if (!p) {
+                    try {
+                      const fromDb = await db.patients.get(patientId);
+                      if (fromDb && !(fromDb as any).deletedAt) p = fromDb as any;
+                    } catch {}
+                  }
+                  if (!p) return;
+                  const patientConsults = consultationsStore.consultations.filter((c: any) => c.patientId === patientId);
+                  const pendingAmount = patientConsults
+                    .filter((c: any) => c.paymentStatus === "pending" && (c.fee || 0) > 0)
+                    .reduce((s: number, c: any) => s + (c.fee || 0), 0);
+                  const today = todayStr();
+                  const missedFollowUp = !!((p as any).nextFollowUpDate && (p as any).nextFollowUpDate < today);
+                  qp.addToQueue({
+                    patientId: (p as any).id,
+                    appointmentId: "",
+                    patientName: (p as any).name,
+                    clinic: activeClinic,
+                    alerts: {
+                      hasPendingPayment: pendingAmount > 0,
+                      pendingAmount,
+                      isFirstVisit: patientConsults.length === 0,
+                      missedFollowUp,
+                    },
+                  });
+                  setShowAdd(false);
+                })();
+              }} onClose={() => setShowAdd(false)} />
+            </div>
+          )}
+        </div>
+      </ResponsiveContainer>
+    );
+  };
+
   const mobileLayout = (
-    <ResponsiveContainer
-      style={{
-        ...commonShellStyle,
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
-        padding: "8px 0",
+    <PullToRefreshScrollRegion
+      data-testid="today-pull-to-refresh"
+      onRefresh={async () => {
+        await Promise.all([loadPatients(), loadConsultations(), loadAppointments()]);
       }}
     >
-      <QueuePanel
-        isMobile
-        activeQueueId={activeQueueId}
-        onSelect={(entry) => setActiveQueueId(entry.queueId)}
-        goToConsultation={goToConsultation}
-      />
-      <ActivePatientPanel isMobile entry={activeEntry} goToConsultation={goToConsultation} />
-      <MobileCard elevated={false} style={{ padding: 0 }}>
-        <StatsPanel isMobile goToConsultation={goToConsultation} />
-      </MobileCard>
-    </ResponsiveContainer>
+      <MobileTodayCommandCenter />
+    </PullToRefreshScrollRegion>
   );
 
   return (

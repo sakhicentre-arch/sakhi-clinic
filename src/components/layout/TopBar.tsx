@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useUIStore } from "../../store/uiStore";
-import GlobalSearch from "../shared/GlobalSearch";
 import ClinicBadge from "../shared/ClinicBadge";
-import { Clock, Menu, X } from "lucide-react";
+import { Clock, Menu, Search, X } from "lucide-react";
 
 interface TopBarProps {
   onPatientSelect: (patientId: string) => void;
@@ -19,6 +18,7 @@ export default function TopBar({
 }: TopBarProps) {
   const activeClinic = useUIStore((s) => s.activeClinic);
   const draftStatus = useUIStore((s) => s.draftStatus);
+  const setGlobalSearchOpen = useUIStore((s) => s.setGlobalSearchOpen);
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
@@ -127,9 +127,74 @@ export default function TopBar({
 
         {!isMobile && <ClinicBadge />}
 
-        {!isMobile && <GlobalSearch onSelectPatient={onPatientSelect} />}
+        {!isMobile && (
+          <button
+            type="button"
+            onClick={() => setGlobalSearchOpen(true)}
+            className="sakhi-tap sakhi-focus-ring"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              background: "#f8fafc",
+              border: "1px solid #e2e8f0",
+              borderRadius: "14px",
+              padding: "10px 14px",
+              minWidth: 280,
+              maxWidth: 420,
+              cursor: "pointer",
+              color: "#0f172a",
+              fontWeight: 800,
+              boxShadow: "0 1px 0 rgba(15, 23, 42, 0.03) inset",
+            }}
+            aria-label="Open search (Ctrl or Command plus K)"
+          >
+            <Search size={16} color="#94a3b8" />
+            <span style={{ flex: 1, textAlign: "left", color: "#475569" }}>
+              Search patients, queue…
+            </span>
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 900,
+                color: "#64748b",
+                padding: "2px 8px",
+                borderRadius: 999,
+                border: "1px solid rgba(226, 232, 240, 0.9)",
+                background: "rgba(2, 6, 23, 0.02)",
+              }}
+            >
+              Ctrl K
+            </span>
+          </button>
+        )}
 
         <div style={{ flex: 1 }} />
+
+        {isMobile && (
+          <button
+            type="button"
+            onClick={() => setGlobalSearchOpen(true)}
+            aria-label="Search"
+            data-testid="topbar-search-button"
+            className="sakhi-tap sakhi-focus-ring"
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 12,
+              border: "1px solid #e2e8f0",
+              background: "#fff",
+              color: "#0f172a",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              boxShadow: "0 1px 0 rgba(15, 23, 42, 0.03) inset",
+            }}
+          >
+            <Search size={18} />
+          </button>
+        )}
 
         <div
           style={{

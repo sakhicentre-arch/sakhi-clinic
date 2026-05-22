@@ -63,10 +63,9 @@ export const ResponsiveContainer: React.FC<ResponsiveContainerProps> = ({
     ...(isMobile && style?.gridTemplateColumns
       ? { gridTemplateColumns: '1fr' }
       : {}),
-    // Ensure no overflow
+    // Ensure no overflow without masking layout issues
     minWidth: 0,
     width: '100%',
-    overflow: isMobile ? 'hidden' : style?.overflow,
   };
 
   return (
@@ -105,15 +104,11 @@ export const MobileCard: React.FC<MobileCardProps> = ({
   }, []);
 
   const cardStyle: React.CSSProperties = {
-    background: '#fff',
-    borderRadius: isMobile ? 14 : 16,
-    padding: isMobile ? 16 : 24,
-    border: '1px solid #e2e8f0',
-    boxShadow: elevated
-      ? isMobile
-        ? '0 2px 8px rgba(0,0,0,0.04)'
-        : '0 4px 12px rgba(0,0,0,0.06)'
-      : 'none',
+    background: 'var(--surface, #fff)',
+    borderRadius: isMobile ? 'var(--radius-3, 20px)' : 'var(--radius-3, 20px)',
+    padding: isMobile ? 'var(--space-3, 16px)' : 'var(--space-4, 24px)',
+    border: '1px solid var(--border, #e2e8f0)',
+    boxShadow: elevated ? 'var(--shadow-1, 0 2px 10px rgba(15, 23, 42, 0.06))' : 'none',
     width: '100%',
     minWidth: 0,
     ...style,
@@ -149,7 +144,7 @@ export const MobileSection: React.FC<ResponsiveContainerProps> = ({
   const sectionStyle: React.CSSProperties = {
     display: 'flex',
     flexDirection: 'column',
-    gap: isMobile ? 12 : 20,
+    gap: isMobile ? 'var(--space-3, 16px)' : 'var(--space-4, 24px)',
     width: '100%',
     minWidth: 0,
     ...style,
@@ -185,7 +180,7 @@ export const MobileField: React.FC<ResponsiveContainerProps> = ({
   const fieldStyle: React.CSSProperties = {
     display: 'flex',
     flexDirection: 'column',
-    gap: isMobile ? 6 : 8,
+    gap: isMobile ? 'var(--space-2, 8px)' : 'var(--space-2, 8px)',
     width: '100%',
     minWidth: 0,
     ...style,
@@ -238,7 +233,7 @@ export const ResponsiveGrid: React.FC<ResponsiveGridProps> = ({
   const gridStyle: React.CSSProperties = {
     display: 'grid',
     gridTemplateColumns: isMobile ? '1fr' : isTablet ? 'repeat(2, 1fr)' : `repeat(${columns}, 1fr)`,
-    gap: isMobile ? 12 : 16,
+    gap: isMobile ? 'var(--space-3, 16px)' : 'var(--space-3, 16px)',
     width: '100%',
     minWidth: 0,
     ...style,

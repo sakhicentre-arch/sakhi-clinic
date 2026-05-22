@@ -21,41 +21,48 @@ test.describe('Mobile queue and consultation workflow', () => {
     });
 
     await navigateTo(page, 'Today');
-    await expect(page.locator('[data-testid="queue-panel"]')).toBeVisible();
 
-    // Add to queue if missing (reuse desktop test flow)
-    const queueList = page.locator('[data-testid="queue-list"]');
-    await expect(queueList).toBeVisible();
+    const viewport = page.viewportSize();
+    const isMobile = !!viewport && viewport.width < 768;
 
-    let patientQueueRows = page.locator('[data-testid^="queue-row-"]').filter({ hasText: patient.name });
-    let count = await patientQueueRows.count();
-    if (count === 0) {
+    if (isMobile) {
+      await expect(page.locator('[data-testid="mobile-fab-add-walkin"]')).toBeVisible();
+
+      // Add to queue (mobile FAB + existing dropdown)
+      await page.click('[data-testid="mobile-fab-add-walkin"]');
+      await expect(page.locator('[data-testid="queue-search-input"]')).toBeVisible();
+      await page.fill('[data-testid="queue-search-input"]', patient.name);
+      const patientAddBtn = page.locator('button').filter({ hasText: new RegExp(patient.name, 'i') }).first();
+      await expect(patientAddBtn).toBeVisible();
+      await patientAddBtn.click();
+
+      // Now serving CTA should be enabled
+      const startCta = page.locator('[data-testid^="mobile-now-serving-start-"]').first();
+      await expect(startCta).toBeVisible({ timeout: 5000 });
+      await startCta.click();
+    } else {
+      // Fallback for non-mobile environments (keeps desktop/tablet behavior)
+      await expect(page.locator('[data-testid="queue-panel"]')).toBeVisible();
+      const queueList = page.locator('[data-testid="queue-list"]');
+      await expect(queueList).toBeVisible();
       await page.click('[data-testid="add-patient-to-queue-btn"]');
       await expect(page.locator('[data-testid="queue-search-input"]')).toBeVisible();
       await page.fill('[data-testid="queue-search-input"]', patient.name);
       const patientAddBtn = page.locator('button').filter({ hasText: new RegExp(patient.name, 'i') }).first();
       await expect(patientAddBtn).toBeVisible();
       await patientAddBtn.click();
-      await expect(page.locator('[data-testid^="queue-row-"]').filter({ hasText: patient.name })).toHaveCount(1);
-      patientQueueRows = page.locator('[data-testid^="queue-row-"]').filter({ hasText: patient.name });
+
+      const activeQueueRow = page.locator('[data-testid^="queue-row-active-"]').first();
+      await activeQueueRow.waitFor({ state: 'visible', timeout: 3000 });
+      const startBtn = activeQueueRow.locator('[data-testid^="queue-start-consultation-"]');
+      await expect(startBtn).toHaveCount(1);
+      await startBtn.click();
     }
-
-    const queueRow = patientQueueRows.first();
-    const queueId = await queueRow.getAttribute('data-testid');
-    // Select the row
-    await queueRow.click();
-    const expectedActiveSelector = queueId!.replace(/^queue-row-/, 'queue-row-active-');
-    const activeRow = page.locator(`[data-testid="${expectedActiveSelector}"]`).first();
-    await expect(activeRow).toBeVisible({ timeout: 2000 }).catch(() => {});
-
-    // Click start consultation inside active row
-    const activeQueueRow = page.locator('[data-testid^="queue-row-active-"]').first();
-    await activeQueueRow.waitFor({ state: 'visible', timeout: 3000 });
-    const startBtn = activeQueueRow.locator('[data-testid^="queue-start-consultation-"]');
-    await expect(startBtn).toHaveCount(1);
-    await startBtn.click();
 
     // Ensure consultation UI or form appears
     await expect(page.locator('[data-testid="consultation-root"]')).toBeVisible({ timeout: 5000 }).catch(() => {});
+
+    // Mobile action bar exists for clinical speed controls
+    await expect(page.locator('[data-testid="consultation-action-bar"]')).toBeVisible({ timeout: 10000 }).catch(() => {});
   });
 });

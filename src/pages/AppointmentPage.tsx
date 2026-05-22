@@ -1,50 +1,40 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { usePatientStore } from "../store/usePatientStore";
-import { normalizePatientPhone } from "../utils/whatsapp";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  generateWhatsAppLink,
+  normalizePatientPhone,
+} from "../utils/whatsapp";
+import useKeyboardInset from "../hooks/useKeyboardInset";
 import { useAppointmentStore } from "../store/useAppointmentStore";
-import { ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
+import { usePatientStore } from "../store/usePatientStore";
+import {
+  MobileCard,
+  MobileField,
+  MobileSection,
+  ResponsiveContainer,
+  ResponsiveGrid,
+} from "../components/layout/ResponsivePrimitives";
 
-// ============================================================
-// ICONS - PREMIUM MEDICAL SUITE
-// ============================================================
-import { 
-  Calendar, Clock, MapPin, Plus, CheckCircle, 
-  MessageSquare, Send, Zap, ChevronRight, User, Search, 
-  AlertCircle, Timer, ShieldCheck, LayoutGrid, Building2,
-  BellRing, UserCheck, ArrowRightCircle, Smartphone,
-  Stethoscope, RefreshCw, Layers
+import {
+  AlertCircle,
+  BellRing,
+  Building2,
+  Calendar,
+  Layers,
+  Search,
+  Send,
+  Smartphone,
+  Stethoscope,
 } from "lucide-react";
-
-/**
- * SAKHI HOMEOPATHIC CLINIC - SMART SCHEDULER (V35.0 PREMIUM REDESIGN)
- * -----------------------------------------------------------------------
- * PROTOCOL : SENIOR UI/UX REDESIGN | ZERO TRUNCATION
- * FEATURES : 1. V6.5 Walk-in Logic (Slot bypass & direct time injection).
- * 2. Sequential WhatsApp (2.5s delay sequencer).
- * 3. 2-Column Professional Clinical Branch Roster.
- * 4. ENHANCED VALIDATION & APPOINTMENT SPLITTING (V7.0)
- * -----------------------------------------------------------------------
- */
 
 type Props = {
   goToConsultation: (patientId: string, appointmentId: string) => void;
 };
 
-// ============================================================
-// VALIDATION UTILITIES (V7.0 ENHANCEMENT)
-// ============================================================
-
-/**
- * Parse time string "HH:MM" to minutes since midnight
- */
 const timeToMinutes = (time: string): number => {
   const [h, m] = time.split(":").map(Number);
   return h * 60 + m;
 };
 
-/**
- * Check if a given date is in the past
- */
 const isPastDate = (dateStr: string): boolean => {
   const selectedDate = new Date(dateStr);
   const today = new Date();
@@ -53,115 +43,185 @@ const isPastDate = (dateStr: string): boolean => {
   return selectedDate < today;
 };
 
-/**
- * Check if a given date + time is in the past (COMPREHENSIVE CHECK)
- */
 const isPastDateTime = (dateStr: string, timeStr: string): boolean => {
   if (!dateStr || !timeStr) return false;
-  
   const [hours, minutes] = timeStr.split(":").map(Number);
   const selectedDateTime = new Date(dateStr);
   selectedDateTime.setHours(hours, minutes, 0, 0);
-  
   const now = new Date();
   return selectedDateTime < now;
 };
 
-/**
- * Validate if time falls within clinic's operating hours
- */
-const isValidClinicTime = (clinic: "Dabholi" | "City Light", time: string): boolean => {
+const isValidClinicTime = (
+  clinic: "Dabholi" | "City Light",
+  time: string,
+): boolean => {
   const mins = timeToMinutes(time);
-  
-  if (clinic === "Dabholi") {
-    // 11:00 - 14:00
-    return mins >= 11 * 60 && mins < 14 * 60;
-  } else {
-    // 14:30 - 18:30
-    return mins >= 14 * 60 + 30 && mins < 18 * 60 + 30;
-  }
+  if (clinic === "Dabholi") return mins >= 11 * 60 && mins < 14 * 60;
+  return mins >= 14 * 60 + 30 && mins < 18 * 60 + 30;
 };
 
-/**
- * Check if a slot is already booked
- */
-const isSlotBooked = (date: string, time: string, clinic: "Dabholi" | "City Light", appointments: any[]): boolean => {
-  return appointments.some(
-    (a) => a.date === date && a.time === time && a.clinic === clinic && a.type === "scheduled"
+const isSlotBooked = (
+  date: string,
+  time: string,
+  clinic: "Dabholi" | "City Light",
+  appointments: any[],
+): boolean =>
+  appointments.some(
+    (a) =>
+      a.date === date &&
+      a.time === time &&
+      a.clinic === clinic &&
+      a.type === "scheduled",
   );
-};
+
+function formatLocalDate(date: Date): string {
+  return date.toISOString().split("T")[0];
+}
+
+function formatTimeLabel(time: string): string {
+  // "13:10" -> "1:10 PM"
+  const [h, m] = time.split(":").map(Number);
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function getClinicHoursLabel(clinic: "Dabholi" | "City Light"): string {
+  return clinic === "Dabholi" ? "11:00–14:00" : "14:30–18:30";
+}
+
+function generateSlotsFor(clinicType: "Dabholi" | "City Light"): string[] {
+  const slots: string[] = [];
+  let start: number;
+  let end: number;
+
+  if (clinicType === "Dabholi") {
+    start = 11 * 60;
+    end = 14 * 60;
+  } else {
+    start = 14 * 60 + 30;
+    end = 18 * 60 + 30;
+  }
+
+  for (let t = start; t < end; t += 10) {
+    const h = Math.floor(t / 60);
+    const m = t % 60;
+    slots.push(`${h}:${m.toString().padStart(2, "0")}`);
+  }
+  return slots;
+}
 
 export default function AppointmentPage({ goToConsultation }: Props) {
-  // ================= STORE LINKAGE =================
   const patients = usePatientStore((s) => s.patients);
   const addAppointment = useAppointmentStore((s) => s.addAppointment);
   const appointments = useAppointmentStore((s) => s.appointments);
   const startConsultation = useAppointmentStore((s) => s.startConsultation);
   const markArrived = useAppointmentStore((s) => s.markArrived);
-  const markDone = useAppointmentStore((s) => s.markDone);
   const markReminderSent = useAppointmentStore((s) => s.markReminderSent);
   const loadAppointments = useAppointmentStore((s) => s.loadAppointments);
 
-  // ================= INITIAL LOAD =================
-  useEffect(() => {
-    loadAppointments();
-  }, [loadAppointments]);
-
-  // ================= COMPONENT STATE =================
   const [selectedPatientId, setSelectedPatientId] = useState("");
   const [clinic, setClinic] = useState<"Dabholi" | "City Light">("Dabholi");
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(formatLocalDate(new Date()));
   const [time, setTime] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedUpcomingDate, setSelectedUpcomingDate] = useState("");
   const [isMobile, setIsMobile] = useState(false);
 
+  const { insetPx: keyboardInsetPx, isOpen: isKeyboardOpen } = useKeyboardInset();
+
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 768px)');
+    loadAppointments();
+  }, [loadAppointments]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
     const update = () => setIsMobile(mq.matches);
     update();
-    mq.addEventListener('change', update);
-    return () => mq.removeEventListener('change', update);
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
   }, []);
 
-  // ================= SLOT GENERATOR (TOTAL INTEGRITY) =================
-  const generateSlotsFor = (clinicType: "Dabholi" | "City Light") => {
-    const slots: string[] = [];
-    let start, end;
+  const slots = useMemo(() => generateSlotsFor(clinic), [clinic]);
+  const todayStr = formatLocalDate(new Date());
 
-    if (clinicType === "Dabholi") {
-      start = 11 * 60; // 11:00 AM
-      end = 14 * 60;   // 02:00 PM
-    } else {
-      start = 14 * 60 + 30; // 02:30 PM
-      end = 18 * 60 + 30;   // 06:30 PM
+  const filteredPatients = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return patients;
+    return patients.filter((p) => p.name.toLowerCase().includes(q));
+  }, [patients, searchTerm]);
+
+  const todayAppointments = useMemo(
+    () => appointments.filter((a) => a.date === todayStr),
+    [appointments, todayStr],
+  );
+  const upcomingAppointments = useMemo(
+    () => appointments.filter((a) => a.date > todayStr),
+    [appointments, todayStr],
+  );
+
+  const uniqueUpcomingDates = useMemo(
+    () => Array.from(new Set(upcomingAppointments.map((a) => a.date))).sort(),
+    [upcomingAppointments],
+  );
+
+  useEffect(() => {
+    if (uniqueUpcomingDates.length > 0 && selectedUpcomingDate === "") {
+      setSelectedUpcomingDate(uniqueUpcomingDates[0]);
     }
+  }, [selectedUpcomingDate, uniqueUpcomingDates]);
 
-    for (let t = start; t < end; t += 10) {
-      const h = Math.floor(t / 60);
-      const m = t % 60;
-      slots.push(`${h}:${m.toString().padStart(2, "0")}`);
-    }
-    return slots;
-  };
+  const filteredUpcomingAppointments = useMemo(() => {
+    if (!selectedUpcomingDate) return upcomingAppointments;
+    return upcomingAppointments.filter((a) => a.date === selectedUpcomingDate);
+  }, [selectedUpcomingDate, upcomingAppointments]);
 
-  const slots = generateSlotsFor(clinic);
+  const todayDabholi = useMemo(
+    () => todayAppointments.filter((a) => a.clinic === "Dabholi"),
+    [todayAppointments],
+  );
+  const todayCity = useMemo(
+    () => todayAppointments.filter((a) => a.clinic === "City Light"),
+    [todayAppointments],
+  );
+  const futureDabholi = useMemo(
+    () => upcomingAppointments.filter((a) => a.clinic === "Dabholi"),
+    [upcomingAppointments],
+  );
+  const futureCity = useMemo(
+    () => upcomingAppointments.filter((a) => a.clinic === "City Light"),
+    [upcomingAppointments],
+  );
 
-  // ================= WHATSAPP ENGINE (SEQUENTIAL SEQUENCER) =================
+  const mobileActionBarHeightPx = 152;
+  const mobileActionBarBottom = useMemo(() => {
+    if (!isMobile) return "0px";
+    if (isKeyboardOpen) return `calc(${keyboardInsetPx}px + 12px)`;
+    // Keep a clear separation above BottomNav to avoid any hit-test/overlap on small devices.
+    return "calc(80px + env(safe-area-inset-bottom, 0px) + 24px)";
+  }, [isKeyboardOpen, isMobile, keyboardInsetPx]);
+
+  const showMobileActionBar = isMobile && Boolean(selectedPatientId);
+
   const openReminder = (appt: any) => {
     const patient = patients.find((p) => p.id === appt.patientId);
     if (!patient) return;
     const phone = normalizePatientPhone(patient);
     if (!phone) return;
-    const msg = `Reminder – Sakhi Clinic\n\nDear ${patient.name},\n\nThis is a reminder for your appointment today.\n\n⏰ ${appt.time}\n🏥 ${appt.clinic}\n\nPlease arrive on time 🙏`;
+    const msg =
+      `Reminder – Sakhi Clinic\n\n` +
+      `Dear ${patient.name},\n\n` +
+      `This is a reminder for your appointment today.\n\n` +
+      `⏰ ${appt.time}\n🏥 ${appt.clinic}\n\n` +
+      `Please arrive on time 🙏`;
     const link = generateWhatsAppLink(phone, msg);
     if (link) window.open(link, "sakhi_whatsapp_window");
     markReminderSent(appt.id);
   };
 
-  // 🔥 V6.5 Logic: Sequential blast with 2.5s delay
   const sendAllReminders = () => {
-    const today = new Date().toISOString().split("T")[0];
+    const today = formatLocalDate(new Date());
     const list = appointments.filter((a) => a.date === today && !a.reminderSent);
     if (list.length === 0) return alert("Notice: No clinical reminders pending for today.");
 
@@ -171,40 +231,30 @@ export default function AppointmentPage({ goToConsultation }: Props) {
         if (!patient) return;
         const phone = normalizePatientPhone(patient);
         if (!phone) return;
-        const msg = `Reminder – Sakhi Clinic\n\nDear ${patient.name},\n\nYour appointment is today at ${appt.time}.\n🏥 ${appt.clinic}\n\nPlease arrive on time 🙏`;
+        const msg =
+          `Reminder – Sakhi Clinic\n\n` +
+          `Dear ${patient.name},\n\n` +
+          `Your appointment is today at ${appt.time}.\n` +
+          `🏥 ${appt.clinic}\n\n` +
+          `Please arrive on time 🙏`;
         const link = generateWhatsAppLink(phone, msg);
         if (link) window.open(link, "sakhi_whatsapp_window");
         markReminderSent(appt.id);
-      }, index * 2500); 
+      }, index * 2500);
     });
   };
 
-  // ================= BOOKING ACTIONS =================
   const handleAdd = async () => {
     const patient = patients.find((p) => p.id === selectedPatientId);
     if (!patient) return alert("Notice: Patient selection required.");
     if (!date || !time) return alert("Notice: Date and Time selection required.");
 
-    // ✅ VALIDATION 1: Check if date is in the past
-    if (isPastDate(date)) {
-      return alert("❌ Cannot book past appointment");
-    }
-
-    // ✅ VALIDATION 1B: Check if date + time is in the past (COMPREHENSIVE)
-    if (isPastDateTime(date, time)) {
-      return alert("❌ Cannot book past time slot");
-    }
-
-    // ✅ VALIDATION 2: Check if time is valid for clinic
+    if (isPastDate(date)) return alert("❌ Cannot book past appointment");
+    if (isPastDateTime(date, time)) return alert("❌ Cannot book past time slot");
     if (!isValidClinicTime(clinic, time)) {
-      const hours = clinic === "Dabholi" ? "11:00 - 14:00" : "14:30 - 18:30";
-      return alert(`⏰ Invalid time for ${clinic}\n\nOperating hours: ${hours}`);
+      return alert(`⏰ Invalid time for ${clinic}\n\nOperating hours: ${getClinicHoursLabel(clinic)}`);
     }
-
-    // ✅ VALIDATION 3: Check if slot is already booked
-    if (isSlotBooked(date, time, clinic, appointments)) {
-      return alert("⚠️ This slot is already booked");
-    }
+    if (isSlotBooked(date, time, clinic, appointments)) return alert("⚠️ This slot is already booked");
 
     const success = await addAppointment({
       id: Date.now().toString(),
@@ -219,88 +269,114 @@ export default function AppointmentPage({ goToConsultation }: Props) {
 
     if (success) {
       const phone = normalizePatientPhone(patient);
-      const msg = `Sakhi Clinic\n\nDear ${patient.name},\n\nAppointment confirmed.\n📅 ${date}\n⏰ ${time}\n🏥 ${clinic}\n\nThank you 🙏`;
+      const msg =
+        `Sakhi Clinic\n\n` +
+        `Dear ${patient.name},\n\n` +
+        `Appointment confirmed.\n` +
+        `📅 ${date}\n` +
+        `⏰ ${time}\n` +
+        `🏥 ${clinic}\n\n` +
+        `Thank you 🙏`;
       if (phone) window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`);
       alert("Appointment Secured ✅");
     }
   };
 
-  // 🔥 V6.5 CRITICAL WALK-IN LOGIC (BYPASS SLOT CHECK)
   const handleWalkIn = async () => {
     const patient = patients.find((p) => p.id === selectedPatientId);
     if (!patient) return alert("Clinical Notice: No patient selected for immediate queue.");
 
-    const todayStr = new Date().toISOString().split("T")[0];
     const now = new Date();
     const currentTimeStr = `${now.getHours()}:${now.getMinutes().toString().padStart(2, "0")}`;
-
     await addAppointment({
       id: Date.now().toString(),
       patientId: patient.id,
       patientName: patient.name,
       clinic,
       date: todayStr,
-      time: currentTimeStr, 
+      time: currentTimeStr,
       type: "walk-in",
       status: "arrived",
     });
-
     alert(`Priority Walk-in registered at ${currentTimeStr} ✅`);
   };
 
-  // ================= UI RENDERERS =================
   const renderSlot = (slot: string, appt: any) => {
     const isWalkIn = appt?.type === "walk-in";
     const status = appt?.status || "available";
 
     const config = {
-      booked: { bg: "#fffbeb", border: "#fef3c7", icon: "#b45309", label: "Scheduled" },
-      arrived: { bg: "#eff6ff", border: "#dbeafe", icon: "#1e40af", label: "Arrived" },
-      "in-progress": { bg: "#fff1f2", border: "#ffe4e6", icon: "#b91c1c", label: "Consulting" },
-      done: { bg: "#f0fdf4", border: "#dcfce7", icon: "#15803d", label: "Completed" },
-      available: { bg: "#ffffff", border: "#f1f5f9", icon: "#94a3b8", label: "Empty Slot" }
-    }[status];
+      booked: { bg: "#fffbeb", border: "#fef3c7", ink: "#92400e", label: "Scheduled" },
+      arrived: { bg: "#eff6ff", border: "#dbeafe", ink: "#1e40af", label: "Arrived" },
+      "in-progress": { bg: "#fff1f2", border: "#ffe4e6", ink: "#b91c1c", label: "Consulting" },
+      done: { bg: "#f0fdf4", border: "#dcfce7", ink: "#15803d", label: "Completed" },
+      available: { bg: "#ffffff", border: "#e2e8f0", ink: "#64748b", label: "Empty Slot" },
+    } as const;
+
+    const c = (config as any)[status] || config.available;
 
     return (
-      <div key={appt?.id || slot} data-testid="appointment-slot-card" data-appointment-id={appt?.id} style={{ 
-        border: `1.5px solid ${config.border}`, padding: "18px", marginBottom: "12px", 
-        background: config.bg, borderRadius: "18px", display: "flex", 
-        justifyContent: "space-between", alignItems: "center",
-        boxShadow: appt ? "0 2px 10px rgba(0,0,0,0.02)" : "none",
-        transition: "all 0.2s"
-      }}>
-        <div style={{ display: "flex", gap: "20px", alignItems: "center" }}>
-          <div style={{ textAlign: "center", minWidth: "65px", paddingRight: "15px", borderRight: `2px solid ${config.border}` }}>
-            <b style={{ fontSize: "16px", color: "#1e293b", display: "block" }}>{appt ? appt.time : slot}</b>
-            <span style={{ fontSize: "9px", color: config.icon, fontWeight: "900", textTransform: "uppercase" }}>{isWalkIn ? "WALK-IN" : "SLOT"}</span>
+      <div
+        key={appt?.id || slot}
+        data-testid="appointment-slot-card"
+        data-appointment-id={appt?.id}
+        className="flex items-center justify-between border p-4"
+        style={{ borderColor: c.border, background: c.bg, borderRadius: "var(--radius-3)" }}
+      >
+        <div className="flex min-w-0 items-center gap-4">
+          <div className="min-w-[72px] border-r pr-4 text-center" style={{ borderColor: c.border }}>
+            <div className="text-[14px] font-black text-slate-900">
+              {appt ? formatTimeLabel(appt.time) : formatTimeLabel(slot)}
+            </div>
+            <div className="sakhi-micro" style={{ color: c.ink }}>
+              {isWalkIn ? "WALK-IN" : "SLOT"}
+            </div>
           </div>
+
           {appt ? (
-            <div>
-              <span style={{ fontWeight: "800", fontSize: "16px", color: "#0f172a" }}>{appt.patientName}</span>
-              <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" }}>
-                <div style={{ height: "6px", width: "6px", borderRadius: "50%", background: config.icon }}></div>
-                <span style={{ fontSize: "11px", fontWeight: "800", color: config.icon, textTransform: "uppercase", letterSpacing: "0.5px" }}>{config.label}</span>
+            <div className="min-w-0">
+              <div className="truncate text-[14px] font-black text-slate-900">{appt.patientName}</div>
+              <div className="mt-1 inline-flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full" style={{ background: c.ink }} />
+                <span className="sakhi-micro" style={{ color: c.ink }}>
+                  {c.label}
+                </span>
               </div>
             </div>
           ) : (
-            <span style={{ color: "#94a3b8", fontSize: "14px", fontWeight: "600" }}>Open Appointment Slot</span>
+            <div className="sakhi-body text-slate-500">Open appointment slot</div>
           )}
         </div>
 
         {appt && (
-          <div style={{ display: "flex", gap: "10px" }}>
+          <div className="flex items-center gap-2">
             {appt.status === "booked" && (
-              <button onClick={() => markArrived(appt.id)} style={{ padding: "10px 16px", background: "#2563eb", color: "#fff", border: "none", borderRadius: "10px", cursor: "pointer", fontWeight: "800", fontSize: "12px" }}>Check-In</button>
-            )}
-            {appt.status !== "done" && (
-              <button onClick={() => {
-                startConsultation(appt.id);
-                goToConsultation(appt.patientId, appt.id);
-              }} style={{ padding: "10px 16px", background: "#0f172a", color: "#fff", border: "none", borderRadius: "10px", cursor: "pointer", fontWeight: "800", fontSize: "12px", display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Stethoscope size={14} /> Start Case
+              <button
+                type="button"
+                onClick={() => markArrived(appt.id)}
+                className="rounded-xl bg-slate-900 px-3 py-2 text-[12px] font-black text-white sakhi-tap sakhi-focus-ring"
+              >
+                Check-in
               </button>
             )}
-            <button onClick={() => openReminder(appt)} style={{ padding: "10px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", color: "#25d366" }}>
+            {appt.status !== "done" && (
+              <button
+                type="button"
+                onClick={() => {
+                  startConsultation(appt.id);
+                  goToConsultation(appt.patientId, appt.id);
+                }}
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-[12px] font-black text-white sakhi-tap sakhi-focus-ring"
+              >
+                <Stethoscope size={14} /> Start
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => openReminder(appt)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-emerald-700 sakhi-tap sakhi-focus-ring"
+              aria-label="Send WhatsApp reminder"
+            >
               <Smartphone size={18} />
             </button>
           </div>
@@ -309,368 +385,374 @@ export default function AppointmentPage({ goToConsultation }: Props) {
     );
   };
 
-  // ================= APPOINTMENT FILTERING (V7.0) =================
-  const todayStr = new Date().toISOString().split("T")[0];
-  
-  // Split appointments into today and upcoming
-  const todayAppointments = appointments.filter((a) => a.date === todayStr);
-  const upcomingAppointments = appointments.filter((a) => a.date > todayStr);
-  
-  // ================= UPCOMING DATE FILTERING (V7.2) =================
-  // Extract unique dates from upcoming appointments and sort them
-  const uniqueUpcomingDates = Array.from(
-    new Set(upcomingAppointments.map((a) => a.date))
-  ).sort();
-  
-  // Auto-select first upcoming date on initial load
-  useEffect(() => {
-    if (uniqueUpcomingDates.length > 0 && selectedUpcomingDate === "") {
-      setSelectedUpcomingDate(uniqueUpcomingDates[0]);
-    }
-  }, [uniqueUpcomingDates, selectedUpcomingDate]);
-  
-  // Filter upcoming appointments by selected date
-  const filteredUpcomingAppointments = selectedUpcomingDate
-    ? upcomingAppointments.filter((a) => a.date === selectedUpcomingDate)
-    : upcomingAppointments;
-  
-  // For past displays
-  const todayDabholi = todayAppointments.filter((a) => a.clinic === "Dabholi");
-  const todayCity = todayAppointments.filter((a) => a.clinic === "City Light");
-  const futureDabholi = upcomingAppointments.filter((a) => a.clinic === "Dabholi");
-  const futureCity = upcomingAppointments.filter((a) => a.clinic === "City Light");
-  
-  const filteredPatients = patients.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
-
-  const S = {
-    container: { display: "grid", gridTemplateColumns: isMobile ? "1fr" : "450px 1fr", gap: isMobile ? "20px" : "32px", padding: isMobile ? "20px" : "40px", backgroundColor: "#f4f7f9", minHeight: "100%", width: "100%", maxWidth: "100vw", minWidth: 0, overflowX: "hidden", fontFamily: "'Inter', sans-serif" } as React.CSSProperties,
-    card: { background: "#fff", borderRadius: "28px", padding: isMobile ? "24px" : "35px", boxShadow: "0 10px 30px rgba(0,0,0,0.03)", border: "1px solid #eef2f6", width: "100%", minWidth: 0 } as React.CSSProperties,
-    label: { fontSize: "11px", fontWeight: "900", color: "#94a3b8", textTransform: "uppercase" as "uppercase", display: "block", marginBottom: "8px", letterSpacing: "1px" } as React.CSSProperties,
-    input: { width: "100%", padding: "16px", borderRadius: "14px", border: "1.5px solid #e2e8f0", marginBottom: "16px", outline: "none", fontSize: "15px", backgroundColor: "#fcfdfe" } as React.CSSProperties,
-    btnPrimary: { width: "100%", padding: "18px", background: "#2563eb", color: "#fff", border: "none", borderRadius: "16px", fontWeight: "800", cursor: "pointer", marginBottom: "12px", boxShadow: "0 10px 20px rgba(37, 99, 235, 0.2)" } as React.CSSProperties
-  };
-
   return (
-    <ResponsiveContainer style={S.container}>
-      <style>{`
-        ::-webkit-scrollbar { width: 5px; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        .input-focus:focus { border-color: #2563eb !important; background: #fff !important; box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.05) !important; }
-      `}</style>
-
-      {/* ================= LEFT PANEL: CONTROL CONSOLE ================= */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-        <div data-testid="appointment-scheduling-form" style={S.card}>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "30px" }}>
-             <div style={{ background: "#eff6ff", padding: "12px", borderRadius: "14px" }}>
-               <Calendar size={24} color="#2563eb" />
-             </div>
-             <h2 style={{ margin: 0, fontSize: "24px", fontWeight: "900", color: "#0f172a" }}>Scheduling Hub</h2>
-          </div>
-
-          <div style={{ position: "relative", marginBottom: "20px" }}>
-             <input data-testid="appointment-patient-search-input" className="input-focus" style={{...S.input, paddingLeft: '48px', marginBottom: 0}} placeholder="Find in Registry..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-             <Search size={20} style={{ position: "absolute", left: "16px", top: "16px" }} color="#94a3b8" />
-          </div>
-
-          <label style={S.label}>Patient Database Link</label>
-          <select data-testid="appointment-patient-select" className="input-focus" style={S.input} value={selectedPatientId} onChange={(e) => setSelectedPatientId(e.target.value)}>
-            <option value="">Select from Registry</option>
-            {filteredPatients.slice(0, 25).map((p) => <option key={p.id} value={p.id}>{p.name} ({(p as any).phone || "000"})</option>)}
-          </select>
-
-          <label style={S.label}>Clinic Branch Selection</label>
-          <select data-testid="appointment-clinic-select" className="input-focus" style={S.input} value={clinic} onChange={(e) => setClinic(e.target.value as any)}>
-            <option value="Dabholi">🏥 Dabholi (11:00 - 14:00)</option>
-            <option value="City Light">🏥 City Light (14:30 - 18:30)</option>
-          </select>
-
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.2fr 0.8fr", gap: "12px", marginBottom: "25px" }}>
-            <div>
-              <label style={S.label}>Date</label>
-              <input data-testid="appointment-date-input" className="input-focus" style={{...S.input, marginBottom: 0, borderColor: isPastDate(date) ? "#ef4444" : "#e2e8f0"}} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-              {isPastDate(date) && (
-                <div style={{ fontSize: "11px", color: "#ef4444", fontWeight: "700", marginTop: "6px", display: "flex", alignItems: "center", gap: "4px" }}>
-                  <AlertCircle size={14} /> Cannot book past dates
-                </div>
-              )}
+    <ResponsiveContainer
+      className="grid grid-cols-1 gap-4 p-4 md:gap-6 md:p-6 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] lg:gap-8 lg:p-8"
+      style={{
+        gridTemplateColumns: "minmax(0,420px) minmax(0,1fr)",
+        paddingBottom: showMobileActionBar ? `calc(${mobileActionBarHeightPx}px + 24px)` : undefined,
+      }}
+    >
+      <MobileSection style={{ paddingBottom: showMobileActionBar ? `calc(${mobileActionBarHeightPx}px + 24px)` : undefined }}>
+        <MobileCard data-testid="appointment-scheduling-form">
+          <div className="flex items-center gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <Calendar size={22} className="text-slate-700" />
             </div>
-            <div>
-              <label style={S.label}>Time Slot</label>
-              <select data-testid="appointment-time-select" className="input-focus" style={{...S.input, marginBottom: 0}} value={time} onChange={(e) => setTime(e.target.value)}>
-                <option value="">Select Time</option>
-                {slots.map((s) => {
-                  const isBooked = isSlotBooked(date, s, clinic, appointments);
-                  const isValid = isValidClinicTime(clinic, s);
-                  const todayStr = new Date().toISOString().split("T")[0];
-                  const isPastTime = date === todayStr && isPastDateTime(date, s);
-                  const isDisabled = isBooked || isPastTime;
-                  
-                  return (
-                    <option 
-                      key={s} 
-                      value={s} 
-                      disabled={isDisabled}
-                      style={{
-                        color: isDisabled ? "#d1d5db" : "#1f2937",
-                        fontWeight: isDisabled ? "normal" : "500"
-                      }}
-                    >
-                      {s} {isBooked ? "✖ Booked" : isPastTime ? "⏱ Past" : "✔ Available"}
-                    </option>
-                  );
-                })}
-              </select>
-              {!isValidClinicTime(clinic, time) && time && (
-                <div style={{ fontSize: "11px", color: "#f97316", fontWeight: "700", marginTop: "6px", display: "flex", alignItems: "center", gap: "4px" }}>
-                  <AlertCircle size={14} /> Outside clinic hours
-                </div>
-              )}
+            <div className="min-w-0">
+              <div className="sakhi-title">Scheduling</div>
+              <div className="sakhi-caption">Fast booking, walk-ins, reminders</div>
             </div>
           </div>
 
-          <button data-testid="appointment-submit-btn" onClick={handleAdd} style={S.btnPrimary}>Secure Appointment Slot</button>
-          <button data-testid="appointment-walkin-btn" onClick={handleWalkIn} style={{ ...S.btnPrimary, background: "#f8fafc", color: "#0f172a", border: "1.5px solid #e2e8f0", boxShadow: "none" }}>+ Emergency Walk-In Bypass</button>
-        </div>
-
-        {/* OPERATIONS CONSOLE (V6.5 Sequencer Intact) */}
-        <div style={S.card}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "20px" }}>
-            <BellRing size={20} color="#f59e0b" />
-            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "900", color: "#0f172a" }}>Clinic Command</h3>
-          </div>
-          <button onClick={sendAllReminders} style={{ width: "100%", padding: "18px", background: "#25d366", color: "#fff", border: "none", borderRadius: "16px", fontWeight: "900", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "12px", boxShadow: "0 6px 15px rgba(37, 211, 102, 0.2)" }}>
-            <Send size={22} /> Blast Sequential Reminders
-          </button>
-          
-          <div style={{ marginTop: "30px", padding: "20px", background: "#f8fafc", borderRadius: "18px", border: "1px solid #f1f5f9" }}>
-            <p style={{ ...S.label, marginBottom: "15px", color: "#64748b" }}>Registry Forecast</p>
-            <div style={{ display: "grid", gap: "15px" }}>
-               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: "13px", fontWeight: "800", color: "#1e293b" }}>Dabholi AM</span>
-                  <span style={{ fontSize: "11px", fontWeight: "900", background: "#eff6ff", color: "#2563eb", padding: "4px 10px", borderRadius: "30px" }}>{futureDabholi.length} SESSIONS</span>
-               </div>
-               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: "13px", fontWeight: "800", color: "#1e293b" }}>City Light PM</span>
-                  <span style={{ fontSize: "11px", fontWeight: "900", background: "#f0fdf4", color: "#16a34a", padding: "4px 10px", borderRadius: "30px" }}>{futureCity.length} SESSIONS</span>
-               </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ================= RIGHT PANEL: BRANCH ROSTER ================= */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-        {/* ========== TODAY'S APPOINTMENTS (HIGHLIGHTED) ========== */}
-        {todayAppointments.length > 0 && (
-          <div style={{ background: "linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)", borderRadius: "28px", padding: "35px", border: "2px solid #fcd34d", boxShadow: "0 10px 30px rgba(252, 211, 77, 0.2)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
-              <div>
-                <h2 style={{ margin: 0, fontSize: "28px", fontWeight: "950", color: "#92400e", letterSpacing: "-1px" }}>🌅 Today's Appointments</h2>
-                <p style={{ margin: "8px 0 0 0", color: "#b45309", fontSize: "14px", fontWeight: "600" }}>{todayStr}</p>
+          <div className="mt-4 grid gap-4">
+            <MobileField>
+              <div className="relative">
+                <Search size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  data-testid="appointment-patient-search-input"
+                  className="sakhi-input sakhi-tap"
+                  style={{ paddingLeft: 44 }}
+                  placeholder="Find in registry…"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
               </div>
-              <div style={{ background: "#f59e0b", color: "#fff", padding: "8px 16px", borderRadius: "20px", fontWeight: "900", fontSize: "18px" }}>
-                {todayAppointments.length}
-              </div>
-            </div>
+            </MobileField>
 
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "32px" }}>
-              {/* TODAY - DABHOLI */}
-              <div style={{ background: "#fff", borderRadius: "20px", padding: "20px", border: "2px solid #fcd34d" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" }}>
-                  <div style={{ background: "#2563eb", padding: "8px", borderRadius: "8px" }}>
-                    <Layers size={16} color="#fff" />
-                  </div>
-                  <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "900", color: "#1e3a8a" }}>Dabholi (11:00-14:00)</h3>
-                </div>
-                <div style={{ maxHeight: "45vh", overflowY: "auto", padding: "5px" }}>
-                  {todayDabholi.length > 0 ? (
-                    todayDabholi.map((appt) => renderSlot(appt.time, appt))
-                  ) : (
-                    <div style={{ padding: "20px", textAlign: "center", color: "#94a3b8", fontSize: "13px", fontWeight: "600" }}>
-                      ✓ No appointments scheduled
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* TODAY - CITY LIGHT */}
-              <div style={{ background: "#fff", borderRadius: "20px", padding: "20px", border: "2px solid #fcd34d" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" }}>
-                  <div style={{ background: "#16a34a", padding: "8px", borderRadius: "8px" }}>
-                    <Layers size={16} color="#fff" />
-                  </div>
-                  <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "900", color: "#166534" }}>City Light (14:30-18:30)</h3>
-                </div>
-                <div style={{ maxHeight: "45vh", overflowY: "auto", padding: "5px" }}>
-                  {todayCity.length > 0 ? (
-                    todayCity.map((appt) => renderSlot(appt.time, appt))
-                  ) : (
-                    <div style={{ padding: "20px", textAlign: "center", color: "#94a3b8", fontSize: "13px", fontWeight: "600" }}>
-                      ✓ No appointments scheduled
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ========== UPCOMING APPOINTMENTS ========== */}
-        {upcomingAppointments.length > 0 && (
-          <div style={{ ...S.card, background: "#f8fafc", padding: "35px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "30px" }}>
-              <div>
-                <h2 style={{ margin: 0, fontSize: "24px", fontWeight: "950", color: "#0f172a", letterSpacing: "-1px" }}>📅 Upcoming Appointments</h2>
-                <p style={{ margin: "8px 0 0 0", color: "#64748b", fontSize: "13px", fontWeight: "600" }}>Next {upcomingAppointments.length} scheduled sessions</p>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <p style={S.label}>Future Bookings</p>
-                <p style={{ margin: 0, fontWeight: "950", fontSize: "20px", color: "#0f172a" }}>{upcomingAppointments.length}</p>
-              </div>
-            </div>
-
-            {/* DATE FILTER DROPDOWN */}
-            <div style={{ marginBottom: "24px" }}>
-              <label style={S.label}>Filter by Date</label>
-              <select 
-                className="input-focus" 
-                style={{...S.input, marginBottom: 0}} 
-                value={selectedUpcomingDate} 
-                onChange={(e) => setSelectedUpcomingDate(e.target.value)}
+            <MobileField>
+              <div className="sakhi-label">Patient</div>
+              <select
+                data-testid="appointment-patient-select"
+                className="sakhi-input sakhi-tap"
+                value={selectedPatientId}
+                onChange={(e) => setSelectedPatientId(e.target.value)}
               >
-                <option value="">All Upcoming Dates</option>
-                {uniqueUpcomingDates.map((d) => {
-                  const dateObj = new Date(d);
-                  const formatted = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-                  const count = upcomingAppointments.filter((a) => a.date === d).length;
-                  return (
-                    <option key={d} value={d}>
-                      {formatted} ({count} appointment{count !== 1 ? 's' : ''})
-                    </option>
-                  );
-                })}
+                <option value="">Select from Registry</option>
+                {filteredPatients.slice(0, 25).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({(p as any).phone || "000"})
+                  </option>
+                ))}
               </select>
+            </MobileField>
+
+            <MobileField>
+              <div className="sakhi-label">Clinic</div>
+              <select
+                data-testid="appointment-clinic-select"
+                className="sakhi-input sakhi-tap"
+                value={clinic}
+                onChange={(e) => setClinic(e.target.value as any)}
+              >
+                <option value="Dabholi">Dabholi (11:00 - 14:00)</option>
+                <option value="City Light">City Light (14:30 - 18:30)</option>
+              </select>
+              <div className="sakhi-caption mt-2">Hours: {getClinicHoursLabel(clinic)}</div>
+            </MobileField>
+
+            <ResponsiveGrid columns={2}>
+              <MobileField>
+                <div className="sakhi-label">Date</div>
+                <input
+                  data-testid="appointment-date-input"
+                  className="sakhi-input sakhi-tap"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  style={{ borderColor: isPastDate(date) ? "#ef4444" : undefined }}
+                />
+                {isPastDate(date) && (
+                  <div className="mt-2 flex items-center gap-2 text-[12px] font-extrabold text-red-600">
+                    <AlertCircle size={14} /> Past date not allowed
+                  </div>
+                )}
+              </MobileField>
+              <MobileField>
+                <div className="sakhi-label">Time</div>
+                <select
+                  data-testid="appointment-time-select"
+                  className="sakhi-input sakhi-tap"
+                  value={time}
+                  onChange={(e) => setTime(e.target.value)}
+                >
+                  <option value="">Select Time</option>
+                  {slots.map((s) => {
+                    const isBooked = isSlotBooked(date, s, clinic, appointments);
+                    const isPastTime = date === todayStr && isPastDateTime(date, s);
+                    const isDisabled = isBooked || isPastTime;
+                    return (
+                      <option key={s} value={s} disabled={isDisabled}>
+                        {formatTimeLabel(s)}
+                        {isBooked ? " — Booked" : isPastTime ? " — Past" : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+              </MobileField>
+            </ResponsiveGrid>
+
+            {!isMobile && (
+              <div className="grid gap-3">
+                <button type="button" data-testid="appointment-submit-btn" onClick={handleAdd} className="sakhi-btn-primary sakhi-tap sakhi-focus-ring">
+                  Secure Appointment Slot
+                </button>
+                <button type="button" data-testid="appointment-walkin-btn" onClick={handleWalkIn} className="sakhi-btn-secondary sakhi-tap sakhi-focus-ring">
+                  Emergency Walk-In Bypass
+                </button>
+              </div>
+            )}
+          </div>
+        </MobileCard>
+
+        <MobileCard elevated={false}>
+          <div className="flex items-center gap-2">
+            <BellRing size={18} className="text-amber-600" />
+            <div className="sakhi-title">Clinic Command</div>
+          </div>
+
+          <button
+            type="button"
+            onClick={sendAllReminders}
+            className="mt-4 w-full border border-emerald-200 bg-emerald-600 px-4 py-4 text-[14px] font-black text-white shadow-sm sakhi-tap sakhi-focus-ring"
+            style={{ borderRadius: "var(--radius-3)" }}
+          >
+            <span className="inline-flex items-center justify-center gap-2">
+              <Send size={18} /> Blast Sequential Reminders
+            </span>
+          </button>
+
+          <div className="mt-4 border border-slate-200 bg-slate-50 p-4" style={{ borderRadius: "var(--radius-3)" }}>
+            <div className="sakhi-label mb-3">Registry Forecast</div>
+            <div className="grid gap-3">
+              <div className="flex items-center justify-between">
+                <span className="sakhi-body">Dabholi AM</span>
+                <span className="sakhi-pill">{futureDabholi.length} sessions</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="sakhi-body">City Light PM</span>
+                <span className="sakhi-pill">{futureCity.length} sessions</span>
+              </div>
+            </div>
+          </div>
+        </MobileCard>
+      </MobileSection>
+
+      {showMobileActionBar && (
+        <div
+          aria-label="Appointment actions"
+          style={{
+            position: "fixed",
+            left: 16,
+            right: 16,
+            bottom: mobileActionBarBottom,
+            zIndex: 1100,
+          }}
+        >
+          <div className="grid gap-2 border border-slate-200 bg-white/90 p-3 shadow-lg backdrop-blur" style={{ borderRadius: "var(--radius-4)" }}>
+            <button
+              type="button"
+              data-testid="appointment-submit-btn"
+              onClick={handleAdd}
+              className="sakhi-btn-primary sakhi-tap sakhi-focus-ring"
+            >
+              Secure Appointment Slot
+            </button>
+            <button
+              type="button"
+              data-testid="appointment-walkin-btn"
+              onClick={handleWalkIn}
+              className="sakhi-btn-secondary sakhi-tap sakhi-focus-ring"
+            >
+              Emergency Walk-In Bypass
+            </button>
+          </div>
+        </div>
+      )}
+
+      <MobileSection style={{ paddingBottom: showMobileActionBar ? `calc(${mobileActionBarHeightPx}px + 24px)` : undefined }}>
+        {uniqueUpcomingDates.length > 0 && (
+          <MobileCard elevated={false}>
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="sakhi-title">Upcoming</div>
+                <div className="sakhi-caption">Next scheduled appointments</div>
+              </div>
+              <div className="inline-flex items-center gap-2">
+                <div className="sakhi-label">Date</div>
+                <select
+                  className="sakhi-input sakhi-tap"
+                  style={{ width: 160 }}
+                  value={selectedUpcomingDate}
+                  onChange={(e) => setSelectedUpcomingDate(e.target.value)}
+                >
+                  {uniqueUpcomingDates.map((d) => (
+                    <option key={d} value={d}>
+                      {new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
-            {/* FILTERED APPOINTMENTS LIST */}
-            <div style={{ maxHeight: "50vh", overflowY: "auto", padding: "5px" }}>
+            <div className="mt-4 grid gap-3">
               {filteredUpcomingAppointments.length > 0 ? (
-                filteredUpcomingAppointments.map((appt) => {
-                  const patient = patients.find((p) => p.id === appt.patientId);
-                  const statusConfig = {
-                    booked: { bg: "#fffbeb", border: "#fef3c7", icon: "#b45309", label: "Scheduled" },
-                    arrived: { bg: "#eff6ff", border: "#dbeafe", icon: "#1e40af", label: "Arrived" },
-                    "in-progress": { bg: "#fff1f2", border: "#ffe4e6", icon: "#b91c1c", label: "Consulting" },
-                    done: { bg: "#f0fdf4", border: "#dcfce7", icon: "#15803d", label: "Completed" },
-                  }[appt.status] || { bg: "#f9fafb", border: "#e5e7eb", icon: "#6b7280", label: "Pending" };
-
-                  return (
-                    <div 
-                      key={appt.id} 
-                      style={{ 
-                        border: `1.5px solid ${statusConfig.border}`, 
-                        padding: "16px", 
-                        marginBottom: "12px", 
-                        background: statusConfig.bg, 
-                        borderRadius: "14px", 
-                        display: "flex", 
-                        justifyContent: "space-between", 
-                        alignItems: "center",
-                        transition: "all 0.2s"
-                      }}
-                    >
-                      <div style={{ display: "flex", gap: "15px", alignItems: "center", flex: 1 }}>
-                        <div style={{ textAlign: "center", minWidth: "55px", paddingRight: "12px", borderRight: `2px solid ${statusConfig.border}` }}>
-                          <b style={{ fontSize: "14px", color: "#1e293b", display: "block" }}>{appt.time}</b>
-                          <span style={{ fontSize: "9px", color: statusConfig.icon, fontWeight: "900", textTransform: "uppercase" }}>{appt.clinic}</span>
-                        </div>
-                        <div>
-                          <span style={{ fontWeight: "800", fontSize: "14px", color: "#0f172a" }}>{patient?.name || appt.patientName}</span>
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" }}>
-                            <div style={{ height: "5px", width: "5px", borderRadius: "50%", background: statusConfig.icon }}></div>
-                            <span style={{ fontSize: "10px", fontWeight: "800", color: statusConfig.icon, textTransform: "uppercase", letterSpacing: "0.5px" }}>{statusConfig.label}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div style={{ fontSize: "12px", color: "#64748b", fontWeight: "600", minWidth: "80px", textAlign: "right" }}>
-                        {new Date(appt.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                filteredUpcomingAppointments.map((appt) => (
+                  <div
+                    key={appt.id}
+                    className="flex items-center justify-between gap-4 border border-slate-200 bg-white p-4"
+                    style={{ borderRadius: "var(--radius-3)" }}
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-[14px] font-black text-slate-900">{appt.patientName}</div>
+                      <div className="mt-1 flex items-center gap-2 text-[12px] font-bold text-slate-600">
+                        <span className="sakhi-pill" style={{ padding: "4px 8px" }}>
+                          {formatTimeLabel(appt.time)}
+                        </span>
+                        <span className="sakhi-pill" style={{ padding: "4px 8px" }}>
+                          {appt.clinic}
+                        </span>
                       </div>
                     </div>
-                  );
-                })
+                    <button
+                      type="button"
+                      onClick={() => openReminder(appt)}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-emerald-700 sakhi-tap sakhi-focus-ring"
+                      aria-label="Send WhatsApp reminder"
+                    >
+                      <Smartphone size={18} />
+                    </button>
+                  </div>
+                ))
               ) : (
-                <div style={{ padding: "30px", textAlign: "center", color: "#94a3b8", fontSize: "14px", fontWeight: "600" }}>
-                  ✓ No appointments scheduled for {selectedUpcomingDate ? new Date(selectedUpcomingDate).toLocaleDateString() : "upcoming dates"}
-                </div>
+                <div className="sakhi-caption">No appointments scheduled for this date.</div>
               )}
             </div>
-          </div>
+          </MobileCard>
         )}
 
-        {/* ROSTER VIEW: Selected Date */}
-        <div style={{ ...S.card, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "30px 40px" }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: "28px", fontWeight: "950", color: "#0f172a", letterSpacing: "-1px" }}>Roster: {new Date(date).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</h2>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px" }}>
-              <Building2 size={16} color="#64748b" />
-              <p style={{ margin: 0, color: "#64748b", fontSize: "15px", fontWeight: "600" }}>Live Multi-Branch Roster — Sakhi Clinic Network</p>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: "15px" }}>
-            <div style={{ textAlign: "right" }}>
-              <p style={S.label}>Total Active Cases</p>
-              <p style={{ margin: 0, fontWeight: "950", fontSize: "20px", color: "#0f172a" }}>{appointments.filter(a => a.date === date).length}</p>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "32px" }}>
-          {/* BRANCH 1: DABHOLI */}
-          <div style={{ background: "transparent" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "20px", paddingLeft: "10px" }}>
-              <div style={{ background: "#2563eb", padding: "8px", borderRadius: "10px" }}>
-                <Layers size={18} color="#fff" />
+        <MobileCard>
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="sakhi-title">Roster</div>
+              <div className="sakhi-caption">
+                {new Date(date).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
               </div>
-              <h3 style={{ margin: 0, fontSize: "20px", fontWeight: "900", color: "#1e3a8a" }}>Dabholi Branch</h3>
-              <span style={{ fontSize: "10px", fontWeight: "900", color: "#2563eb", background: "#eff6ff", padding: "4px 10px", borderRadius: "30px" }}>MORNING SESSIONS</span>
+              <div className="mt-2 flex items-center gap-2 text-slate-600">
+                <Building2 size={16} className="text-slate-400" />
+                <div className="sakhi-caption">Live multi-branch roster</div>
+              </div>
             </div>
-            <div style={{ maxHeight: "70vh", overflowY: "auto", padding: "5px" }}>
-              {generateSlotsFor("Dabholi").map((slot) => {
-                const appt = appointments.find(a => a.date === date && a.time === slot && a.clinic === "Dabholi");
-                return renderSlot(slot, appt);
-              })}
-              {/* Emergency Queue (Walk-ins) logic restored */}
-              {appointments
-                .filter(a => a.date === date && a.clinic === "Dabholi" && a.type === "walk-in" && !generateSlotsFor("Dabholi").includes(a.time))
-                .map(appt => renderSlot(appt.time, appt))
-              }
-            </div>
+            <span className="sakhi-pill">{appointments.filter((a) => a.date === date).length} active</span>
           </div>
 
-          {/* BRANCH 2: CITY LIGHT */}
-          <div style={{ background: "transparent" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "20px", paddingLeft: "10px" }}>
-              <div style={{ background: "#16a34a", padding: "8px", borderRadius: "10px" }}>
-                <Layers size={18} color="#fff" />
+          {todayAppointments.length > 0 && (
+            <div className="mt-4 border border-amber-200 bg-amber-50 p-4" style={{ borderRadius: "var(--radius-3)" }}>
+              <div className="flex items-center justify-between">
+                <div className="sakhi-body">Today</div>
+                <span className="sakhi-pill">{todayAppointments.length}</span>
               </div>
-              <h3 style={{ margin: 0, fontSize: "20px", fontWeight: "900", color: "#166534" }}>City Light</h3>
-              <span style={{ fontSize: "10px", fontWeight: "900", color: "#16a34a", background: "#f0fdf4", padding: "4px 10px", borderRadius: "30px" }}>EVENING SESSIONS</span>
+              <div className="mt-3 grid gap-3">
+                <ResponsiveGrid columns={2}>
+                  <MobileCard elevated={false} style={{ borderColor: "#fde68a", background: "#ffffff" }}>
+                    <div className="flex items-center gap-2">
+                      <div className="rounded-xl bg-blue-600 p-2">
+                        <Layers size={16} className="text-white" />
+                      </div>
+                      <div className="sakhi-body">Dabholi</div>
+                    </div>
+                    <div className="mt-3 grid gap-3" style={{ maxHeight: "45vh", overflowY: "auto" }}>
+                      {todayDabholi.length > 0 ? (
+                        todayDabholi.map((appt) => renderSlot(appt.time, appt))
+                      ) : (
+                        <div className="sakhi-caption">No appointments scheduled.</div>
+                      )}
+                    </div>
+                  </MobileCard>
+
+                  <MobileCard elevated={false} style={{ borderColor: "#fde68a", background: "#ffffff" }}>
+                    <div className="flex items-center gap-2">
+                      <div className="rounded-xl bg-emerald-600 p-2">
+                        <Layers size={16} className="text-white" />
+                      </div>
+                      <div className="sakhi-body">City Light</div>
+                    </div>
+                    <div className="mt-3 grid gap-3" style={{ maxHeight: "45vh", overflowY: "auto" }}>
+                      {todayCity.length > 0 ? (
+                        todayCity.map((appt) => renderSlot(appt.time, appt))
+                      ) : (
+                        <div className="sakhi-caption">No appointments scheduled.</div>
+                      )}
+                    </div>
+                  </MobileCard>
+                </ResponsiveGrid>
+              </div>
             </div>
-            <div style={{ maxHeight: "70vh", overflowY: "auto", padding: "5px" }}>
-              {generateSlotsFor("City Light").map((slot) => {
-                const appt = appointments.find(a => a.date === date && a.time === slot && a.clinic === "City Light");
-                return renderSlot(slot, appt);
-              })}
-              {/* Emergency Queue (Walk-ins) logic restored */}
-              {appointments
-                .filter(a => a.date === date && a.clinic === "City Light" && a.type === "walk-in" && !generateSlotsFor("City Light").includes(a.time))
-                .map(appt => renderSlot(appt.time, appt))
-              }
-            </div>
+          )}
+
+          <div className="mt-4">
+            <ResponsiveGrid columns={2}>
+              <div>
+                <div className="flex items-center gap-3">
+                  <div className="rounded-xl bg-blue-600 p-2">
+                    <Layers size={16} className="text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="sakhi-body">Dabholi</div>
+                    <div className="sakhi-caption">Morning sessions</div>
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-3" style={{ maxHeight: "70vh", overflowY: "auto" }}>
+                  {generateSlotsFor("Dabholi").map((slot) => {
+                    const appt = appointments.find(
+                      (a) => a.date === date && a.time === slot && a.clinic === "Dabholi",
+                    );
+                    return renderSlot(slot, appt);
+                  })}
+                  {appointments
+                    .filter(
+                      (a) =>
+                        a.date === date &&
+                        a.clinic === "Dabholi" &&
+                        a.type === "walk-in" &&
+                        !generateSlotsFor("Dabholi").includes(a.time),
+                    )
+                    .map((appt) => renderSlot(appt.time, appt))}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center gap-3">
+                  <div className="rounded-xl bg-emerald-600 p-2">
+                    <Layers size={16} className="text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="sakhi-body">City Light</div>
+                    <div className="sakhi-caption">Evening sessions</div>
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-3" style={{ maxHeight: "70vh", overflowY: "auto" }}>
+                  {generateSlotsFor("City Light").map((slot) => {
+                    const appt = appointments.find(
+                      (a) => a.date === date && a.time === slot && a.clinic === "City Light",
+                    );
+                    return renderSlot(slot, appt);
+                  })}
+                  {appointments
+                    .filter(
+                      (a) =>
+                        a.date === date &&
+                        a.clinic === "City Light" &&
+                        a.type === "walk-in" &&
+                        !generateSlotsFor("City Light").includes(a.time),
+                    )
+                    .map((appt) => renderSlot(appt.time, appt))}
+                </div>
+              </div>
+            </ResponsiveGrid>
           </div>
-        </div>
-      </div>
-      </ResponsiveContainer>
+        </MobileCard>
+      </MobileSection>
+    </ResponsiveContainer>
   );
 }

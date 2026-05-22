@@ -25,7 +25,7 @@ import { usePatientStore } from "../store/usePatientStore";
 import { useConsultationStore } from "../store/useConsultationStore";
 import { useUIStore } from "../store/uiStore";
 import { usePatientSearch } from "../hooks/usePatientSearch";
-import { SplitPane, ScrollRegion } from "../components/layout/LayoutPrimitives";
+import { PullToRefreshScrollRegion, SplitPane, ScrollRegion } from "../components/layout/LayoutPrimitives";
 import { normalizePatientPhone } from "../utils/whatsapp";
 import { addPatient as saveNewPatient, updatePatient as saveUpdatedPatient, deletePatient as removePatient } from "../services/patientService";
 import type { Consultation, Report } from "../types/models";
@@ -97,30 +97,21 @@ function LoadingScreen() {
   return (
     <div
       style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        height: "100vh",
-        flexDirection: "column",
-        gap: "16px",
+        padding: "24px",
         background: "#f8fafc",
-        fontFamily: "system-ui, sans-serif",
       }}
     >
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      <div
-        style={{
-          width: "44px",
-          height: "44px",
-          border: "4px solid #e2e8f0",
-          borderTop: "4px solid #2563eb",
-          borderRadius: "50%",
-          animation: "spin 0.8s linear infinite",
-        }}
-      />
-      <p style={{ color: "#64748b", fontWeight: 600, margin: 0 }}>
-        Loading Patients...
-      </p>
+      <div style={{ maxWidth: 920, margin: "0 auto" }}>
+        <div className="sakhi-skeleton" style={{ height: 14, width: "45%", marginBottom: 14 }} />
+        <div className="sakhi-skeleton" style={{ height: 52, borderRadius: 18, marginBottom: 12 }} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="sakhi-skeleton" style={{ height: 220, borderRadius: 20 }} />
+          <div className="sakhi-skeleton" style={{ height: 220, borderRadius: 20 }} />
+        </div>
+        <div style={{ marginTop: 12 }} className="sakhi-caption">
+          Loading patients…
+        </div>
+      </div>
     </div>
   );
 }
@@ -244,8 +235,17 @@ export default function PatientPage(
   // ✅ V43: Collapsible section state for left panel form
   const [showProfile, setShowProfile] = useState<boolean>(false);
   const [showHistory, setShowHistory] = useState<boolean>(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   const [formData, setFormData] = useState<FormData>(DEFAULT_FORM);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   // ─────────────────────────────────────────────────────────────────────────
   // ── FIX 2: handleOpenPatient — corrected parameter type ──────────────────
@@ -578,11 +578,19 @@ export default function PatientPage(
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <SplitPane style={S.page}>
+    <SplitPane axis={isMobile ? "vertical" : "horizontal"} style={{ ...S.page, overflow: isMobile ? "visible" : S.page.overflow }}>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
       {/* ── LEFT PANEL ────────────────────────────────────────────────── */}
-      <aside style={S.leftPanel}>
+      <aside
+        style={{
+          ...S.leftPanel,
+          width: isMobile ? "100%" : S.leftPanel.width,
+          minWidth: isMobile ? 0 : S.leftPanel.minWidth,
+          borderRight: isMobile ? "none" : S.leftPanel.borderRight,
+          borderBottom: isMobile ? "1px solid var(--border, #e2e8f0)" : "none",
+        }}
+      >
         {/* Registration Form */}
         {/* ── LAYOUT FIX 2: formHeader capped at 52vh, scrollable internally ── */}
         <div style={S.formHeader}>
@@ -837,7 +845,14 @@ export default function PatientPage(
 
         {/* Patient List */}
         {/* ── LAYOUT FIX 4: patientList flex: 1, minHeight: 0, overflowY: auto ── */}
-        <ScrollRegion data-testid="patient-list" className="custom-scroll" style={S.patientList}>
+        <PullToRefreshScrollRegion
+          data-testid="patient-list"
+          className="custom-scroll"
+          style={S.patientList}
+          onRefresh={async () => {
+            await Promise.all([loadPatients(), loadConsultations()]);
+          }}
+        >
           {(filteredPatients?.length ?? 0) === 0 && (
             <div style={S.emptyList}>
               {searchTerm
@@ -907,11 +922,11 @@ export default function PatientPage(
               </div>
             );
           })}
-        </ScrollRegion>
+        </PullToRefreshScrollRegion>
       </aside>
 
       {/* ── RIGHT PANEL ───────────────────────────────────────────────── */}
-      <ScrollRegion className="custom-scroll" style={S.rightPanel}>
+      <ScrollRegion className="custom-scroll" style={{ ...S.rightPanel, padding: isMobile ? "16px" : S.rightPanel.padding }}>
         {!selectedPatient ? (
           <EmptySelect />
         ) : (

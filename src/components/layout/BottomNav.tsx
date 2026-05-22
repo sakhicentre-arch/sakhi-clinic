@@ -4,14 +4,15 @@ import { ActivePage } from '../../store/uiStore';
 interface Props {
   onNavigate: (page: ActivePage) => void;
   isMobile?: boolean;
+  onOpenSearch?: () => void;
 }
 
-export default function BottomNav({ onNavigate, isMobile = false }: Props) {
+export default function BottomNav({ onNavigate, isMobile = false, onOpenSearch }: Props) {
   if (!isMobile) {
     return null;
   }
 
-  const labels = ['Today', 'Patients', 'Consult', 'Appt', 'More'];
+  const labels = ['Today', 'Patients', 'Consult', 'Appt', 'Search'];
   const testIds = [
     'bottom-nav-today-button',
     'bottom-nav-patients-button',
@@ -35,10 +36,10 @@ export default function BottomNav({ onNavigate, isMobile = false }: Props) {
         gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
         gap: '8px',
         alignItems: 'center',
-        background: '#ffffff',
-        borderTop: '1px solid #e5e7eb',
+        background: 'var(--surface, #ffffff)',
+        borderTop: '1px solid var(--border, #e2e8f0)',
         zIndex: 1200,
-        boxShadow: '0 -10px 30px rgba(15, 23, 42, 0.08)',
+        boxShadow: 'var(--shadow-2, 0 -10px 30px rgba(15, 23, 42, 0.10))',
         WebkitTapHighlightColor: 'transparent',
         touchAction: 'manipulation',
         userSelect: 'none',
@@ -52,12 +53,18 @@ export default function BottomNav({ onNavigate, isMobile = false }: Props) {
           type="button"
           data-testid={testIds[index]}
           aria-label={label}
-          onClick={() => onNavigate(['today', 'patients', 'consultation', 'appointments', 'dashboard'][index] as ActivePage)}
+          onClick={() => {
+            if (index === 4) {
+              onOpenSearch?.();
+              return;
+            }
+            onNavigate(['today', 'patients', 'consultation', 'appointments', 'dashboard'][index] as ActivePage);
+          }}
           style={{
             background: 'none',
             border: 'none',
-            padding: '14px 0',
-            borderRadius: 18,
+            padding: '16px 0',
+            borderRadius: 20,
             cursor: 'pointer',
             minWidth: 0,
             width: '100%',
@@ -72,6 +79,7 @@ export default function BottomNav({ onNavigate, isMobile = false }: Props) {
             backgroundColor: 'transparent',
             pointerEvents: 'auto',
           }}
+          className="sakhi-tap sakhi-focus-ring"
         >
           {label}
         </button>
