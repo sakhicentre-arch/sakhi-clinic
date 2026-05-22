@@ -2,6 +2,9 @@ import { defineConfig, devices } from '@playwright/test';
 
 const devServerURL = 'http://127.0.0.1:5173';
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || devServerURL;
+const preferredChannel =
+  process.env.SAKHI_PLAYWRIGHT_CHANNEL ||
+  (process.platform === 'win32' ? 'chrome' : undefined);
 
 export default defineConfig({
   testDir: './tests',
@@ -29,6 +32,7 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+    channel: preferredChannel,
     launchOptions: {
       args: ['--disable-gpu'],
     },
@@ -43,8 +47,16 @@ export default defineConfig({
       use: { ...devices['Pixel 5'], viewport: devices['Pixel 5'].viewport, isMobile: true },
     },
     {
-      name: 'small-android',
-      use: { viewport: { width: 360, height: 780 }, userAgent: 'Mozilla/5.0 (Linux; Android 10; Pixel 4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36', isMobile: true },
+      name: 'small-android-360x800',
+      use: { viewport: { width: 360, height: 800 }, userAgent: 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36', isMobile: true },
+    },
+    {
+      name: 'small-android-390x844',
+      use: { viewport: { width: 390, height: 844 }, userAgent: 'Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36', isMobile: true },
+    },
+    {
+      name: 'small-android-412x915',
+      use: { viewport: { width: 412, height: 915 }, userAgent: 'Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36', isMobile: true },
     },
   ],
 });

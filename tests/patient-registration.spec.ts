@@ -11,7 +11,7 @@ test('patient registration workflow', async ({ page }) => {
   await page.goto('/');
 
   // Navigate to the patient management page using the app navigation.
-  await page.click('button[aria-label="Patients"]');
+await page.click('[data-testid="bottom-nav-patients-button"]');
 
   // Verify the registration form is present.
   const registrationForm = page.locator('[data-testid="patient-registration-form"]');

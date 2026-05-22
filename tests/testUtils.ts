@@ -1,4 +1,4 @@
-import { expect, Page } from '@playwright/test';
+import { expect, Locator, Page } from '@playwright/test';
 
 export function formatLocalDate(date: Date) {
   return date.toLocaleDateString('en-CA');
@@ -22,15 +22,100 @@ export function generatePatientData(prefix: string) {
 
 export async function navigateTo(page: Page, section: 'Patients' | 'Appointments' | 'Today') {
   const selectorMap: Record<string, string> = {
-    Patients: 'button[aria-label="Patients"]',
-    Appointments: 'button[aria-label="Appointments"]',
-    Today: 'button[aria-label="Today"]',
+    Patients: '[data-testid="bottom-nav-patients-button"]',
+    Appointments: '[data-testid="bottom-nav-appointments-button"]',
+    Today: '[data-testid="bottom-nav-today-button"]',
   };
 
   const selector = selectorMap[section];
   const button = page.locator(selector).first();
-  await expect(button).toBeVisible();
+  await expect(button).toBeVisible({ timeout: 10000 });
+  await button.waitFor({ state: 'visible', timeout: 10000 });
   await button.click();
+}
+
+export async function assertNoHorizontalOverflow(page: Page) {
+  const overflow = await page.evaluate(() => {
+    return document.documentElement.scrollWidth - window.innerWidth;
+  });
+  expect(overflow).toBeLessThanOrEqual(0);
+}
+
+export async function assertMinTapTarget(locator: Locator, minSize = 44) {
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+  if (box) {
+    expect(box.width).toBeGreaterThanOrEqual(minSize);
+    expect(box.height).toBeGreaterThanOrEqual(minSize);
+  }
+}
+
+export async function assertVisibleInViewport(page: Page, selector: string) {
+  const visible = await page.evaluate((sel) => {
+    const element = document.querySelector(sel);
+    if (!element) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.top >= 0 && rect.left >= 0 && rect.right <= window.innerWidth + 1 && rect.bottom <= window.innerHeight + 1;
+  }, selector);
+  expect(visible).toBeTruthy();
+}
+
+export async function assertAppVhDefined(page: Page) {
+  const appVh = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--app-vh'));
+  expect(appVh.trim()).not.toBe('');
+}
+
+export async function assertNoOverflowContainers(page: Page) {
+  const violations = await page.evaluate(() => {
+    const candidates = Array.from(document.querySelectorAll('*')) as HTMLElement[];
+    return candidates.filter((elem) => {
+      const style = getComputedStyle(elem);
+      const overflowX = style.overflowX;
+      const overflowY = style.overflowY;
+      if (!['hidden', 'auto', 'scroll'].includes(overflowX) && !['hidden', 'auto', 'scroll'].includes(overflowY)) {
+        return false;
+      }
+      if (elem.clientWidth === 0 || elem.clientHeight === 0) return false;
+      const hasOverflowX = overflowX !== 'visible' && elem.scrollWidth > elem.clientWidth + 1;
+      const hasOverflowY = overflowY !== 'visible' && elem.scrollHeight > elem.clientHeight + 1;
+      return hasOverflowX || hasOverflowY;
+    }).map((elem) => {
+      const tag = elem.tagName.toLowerCase();
+      const id = elem.id ? `#${elem.id}` : '';
+      const classes = elem.className ? `.${String(elem.className).trim().replace(/\s+/g, '.')}` : '';
+      return `${tag}${id}${classes}`;
+    });
+  });
+  expect(violations).toEqual([]);
+}
+
+export async function assertNoFixedStickyOverlap(page: Page) {
+  const overlaps = await page.evaluate(() => {
+    const fixedSticky = Array.from(document.querySelectorAll('*')).filter((el) => {
+      const pos = getComputedStyle(el).position;
+      return pos === 'fixed' || pos === 'sticky';
+    }) as HTMLElement[];
+    const interactives = Array.from(document.querySelectorAll('button, a, input, select, textarea, [role="button"]')) as HTMLElement[];
+    const conflicts: string[] = [];
+    for (const fixed of fixedSticky) {
+      const fixedRect = fixed.getBoundingClientRect();
+      if (fixedRect.width === 0 || fixedRect.height === 0) continue;
+      for (const interactive of interactives) {
+        if (fixed.contains(interactive) || interactive.contains(fixed)) continue;
+        const rect = interactive.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        const intersects = !(rect.right <= fixedRect.left || rect.left >= fixedRect.right || rect.bottom <= fixedRect.top || rect.top >= fixedRect.bottom);
+        if (intersects) {
+          const tag = interactive.tagName.toLowerCase();
+          const id = interactive.id ? `#${interactive.id}` : '';
+          const dataset = (interactive as HTMLElement).dataset ? JSON.stringify((interactive as HTMLElement).dataset) : '';
+          conflicts.push(`${tag}${id} ${dataset} overlaps ${fixed.tagName.toLowerCase()} ${fixed.className}`);
+        }
+      }
+    }
+    return conflicts;
+  });
+  expect(overlaps).toEqual([]);
 }
 
 export async function registerPatient(page: Page, patientData: {

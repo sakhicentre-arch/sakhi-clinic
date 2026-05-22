@@ -9,10 +9,12 @@ import TodayPage from "./pages/TodayPage";
 import DashboardPage from "./pages/DashboardPage";
 import ReviewPage from "./pages/ReviewPage";
 import AppShell from "./components/layout/AppShell";
+import useSafeViewport from "./hooks/useSafeViewport";
 import { useUIStore, ActivePage } from "./store/uiStore";
 import TrashPage from "./pages/TrashPage";
 
 export default function App() {
+  useSafeViewport();
   const isReviewPath = window.location.pathname === "/review";
 
   const [page, setPage] = useState(isReviewPath ? "review" : "today");

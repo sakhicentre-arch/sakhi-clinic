@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import useSafeViewport from '../../hooks/useSafeViewport';
 
 interface LayoutProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
@@ -26,18 +27,23 @@ export function AppViewportFrame({
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
+  useSafeViewport();
+
   return (
     <main
       className={className}
       style={{
         marginLeft: isMobile ? 0 : '64px',
-        minHeight: 'calc(100vh - 59px)',
+        minHeight: 'calc(var(--app-vh, 1vh) * 100 - 59px)',
         width: isMobile ? '100%' : 'calc(100% - 64px)',
         minWidth: 0,
         display: 'flex',
         flexDirection: 'column',
         background: '#f8fafc',
-        paddingBottom: isMobile ? 'calc(56px + env(safe-area-inset-bottom))' : 0,
+        paddingTop: isMobile ? 'env(safe-area-inset-top, 0px)' : 0,
+        paddingBottom: isMobile ? 'calc(80px + env(safe-area-inset-bottom, 0px))' : 0,
+        overflowX: 'hidden',
+        boxSizing: 'border-box',
         ...style,
       }}
       {...props}

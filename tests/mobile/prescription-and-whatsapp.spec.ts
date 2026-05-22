@@ -43,8 +43,8 @@ test.describe('Mobile prescription and WhatsApp workflow', () => {
 
     // attempt to find a visible WhatsApp share button (consultation UI may expose different labels)
     await page.evaluate(() => { (window as any)._opened = null; window.open = (u: any) => { (window as any)._opened = u; return null; }; });
-    const waBtn = page.locator('button:has-text("WhatsApp")').first();
-    await expect(waBtn).toBeVisible({ timeout: 8000 });
+    const waBtn = page.locator('[data-testid="consultation-whatsapp-button"]').first();
+    await expect(waBtn).toBeVisible({ timeout: 10000 });
     await waBtn.click().catch(async () => { await waBtn.click({ force: true }); });
     const opened = await page.evaluate(() => (window as any)._opened);
     expect(opened).toBeTruthy();

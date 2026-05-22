@@ -63,7 +63,7 @@ export default function AppShell({
       )}
       <UpdateBanner />
       <AppViewportFrame>{children}</AppViewportFrame>
-      <BottomNav onNavigate={handleNavigate} isMobile={isMobile} />
+      {isMobile && <BottomNav onNavigate={handleNavigate} isMobile={isMobile} />}
     </>
   );
 }

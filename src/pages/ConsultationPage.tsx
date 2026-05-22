@@ -404,6 +404,35 @@ const medSelectStyle: React.CSSProperties = {
   fontWeight: 600, color: "#0f172a", outline: "none", flex: 1, minWidth: 120,
 };
 
+const MobileSection: React.FC<{
+  title: string;
+  subtitle?: string;
+  testId?: string;
+  children: React.ReactNode;
+}> = ({ title, subtitle, testId, children }) => (
+  <section data-testid={testId} className="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+    <div className="mb-3">
+      <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
+      {subtitle && <p className="mt-1 text-xs text-slate-500">{subtitle}</p>}
+    </div>
+    <div className="space-y-4">{children}</div>
+  </section>
+);
+
+const MobileField: React.FC<{
+  label: string;
+  optional?: boolean;
+  children: React.ReactNode;
+}> = ({ label, optional, children }) => (
+  <div className="min-w-0 space-y-2">
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</span>
+      {optional && <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Optional</span>}
+    </div>
+    {children}
+  </div>
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // COLLAPSIBLE PANEL
 // ─────────────────────────────────────────────────────────────────────────────
@@ -605,6 +634,16 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const [showPrintMenu, setShowPrintMenu] = useState(false);
   const [draftAutoSaveStatus, setDraftAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [draftRecovered, setDraftRecovered] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
 
   const { consultations, loading, saving, editingId, formData, patient, learnedPatterns, loadError } = state;
   const previousConsultation = consultations[0];
@@ -1066,395 +1105,350 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
   if (mode === "quick") {
     return (
-      <div style={{ background: "#f1f5f9", minHeight: "100vh", fontFamily: "'Lora', serif" }}>
-        <style>{customCSS + quickCSS}</style>
+      <div data-testid="consultation-root" className="min-h-screen bg-slate-50 text-slate-900">
+        <style>{customCSS}</style>
 
-        {/* TOP BAR */}
-        <div style={quickTopBarStyle}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            {onFinish && (
-              <button onClick={onFinish} style={quickIconBtnStyle} title="Back">←</button>
-            )}
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 18, color: "#0f172a" }}>{patient?.name || patientName}</div>
-              <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600, marginTop: 1 }}>
-                {patient?.gender} · {patient?.age} Yrs · {consultations.length} visits
-                {isFirstVisit && <span style={{ color: "#7c3aed", marginLeft: 8 }}>🆕 First Visit</span>}
-                {/* ✅ V1A: DRAFT AUTO-SAVE STATUS */}
-                {draftAutoSaveStatus !== "idle" && (
-                  <span style={{ color: draftAutoSaveStatus === "saving" ? "#f59e0b" : "#16a34a", marginLeft: 8, fontSize: 11 }}>
-                    {draftAutoSaveStatus === "saving" ? "💾 saving..." : "✓ saved"}
-                  </span>
+        <div className="sticky top-0 z-30 border-b border-slate-200 bg-slate-900/95 px-4 py-3 backdrop-blur-sm">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              {onFinish && (
+                <button
+                  type="button"
+                  onClick={onFinish}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-800 text-white shadow-sm ring-1 ring-white/10"
+                  title="Back"
+                >
+                  ←
+                </button>
+              )}
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">Consultation</p>
+                <h1 className="truncate text-lg font-semibold text-white">{patient?.name || patientName || "Patient"}</h1>
+                <p className="mt-1 text-sm text-slate-300">
+                  {patient?.gender || "—"} · {patient?.age ?? "?"} yrs · {consultations.length} visits
+                  {isFirstVisit && (
+                    <span className="ml-2 inline-flex rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-100">
+                      First visit
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleAskReview}
+                className="rounded-2xl bg-amber-500 px-4 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-amber-400/30"
+              >
+                ⭐ Review
+              </button>
+              <button
+                type="button"
+                onClick={handleWhatsAppShare}
+                className="rounded-2xl bg-emerald-500 px-4 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-emerald-400/30"
+              >
+                📲 WA Rx
+              </button>
+              <button
+                type="button"
+                onClick={handleWhatsAppBill}
+                className="rounded-2xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-emerald-500/30"
+              >
+                💰 Bill
+              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowPrintMenu((v) => !v)}
+                  className="rounded-2xl bg-slate-800/80 px-4 py-2 text-xs font-semibold text-white shadow-sm"
+                >
+                  🖨️ Print ▾
+                </button>
+                {showPrintMenu && (
+                  <div className="absolute right-0 top-full z-40 mt-2 w-48 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl">
+                    <button onClick={handlePrintRx} className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-900 hover:bg-slate-50">📋 Prescription</button>
+                    <button onClick={() => { setShowSticker(true); setShowPrintMenu(false); }} className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-900 hover:bg-slate-50">🏷️ Sticker</button>
+                    <button onClick={() => { handlePrintLetter(); setShowPrintMenu(false); }} className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-900 hover:bg-slate-50">📄 Certificate</button>
+                  </div>
                 )}
               </div>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {/* Mode toggle inline */}
-            <div style={{ display: "flex", gap: 0, border: "1.5px solid rgba(255,255,255,0.3)", borderRadius: 8, overflow: "hidden", marginRight: 4 }}>
-              <button style={{ padding: "6px 14px", border: "none", background: "rgba(255,255,255,0.15)", color: "#fff", fontWeight: 800, fontSize: 11, cursor: "default" }}>⚡ Quick</button>
-              <button onClick={() => setMode("classic")} style={{ padding: "6px 14px", border: "none", borderLeft: "1px solid rgba(255,255,255,0.2)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>📋 Classic</button>
-            </div>
-            <button onClick={handleAskReview} style={{ ...quickActionBtnStyle, background: "#f59e0b" }}>⭐ Review</button>
-            {/* Print dropdown */}
-            <div style={{ position: "relative" }}>
-              <button
-                onClick={() => setShowPrintMenu((v) => !v)}
-                style={{ ...quickActionBtnStyle, background: "rgba(255,255,255,0.18)" }}
-              >
-                🖨️ Print ▾
-              </button>
-              {showPrintMenu && (
-                <div style={{ position: "absolute", top: "110%", right: 0, background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 200, minWidth: 160, overflow: "hidden" }}>
-                  <button onClick={handlePrintRx} style={printMenuItemStyle}>📋 Prescription</button>
-                  <button onClick={() => { setShowSticker(true); setShowPrintMenu(false); }} style={printMenuItemStyle}>🏷️ Sticker</button>
-                  <button onClick={() => { handlePrintLetter(); setShowPrintMenu(false); }} style={printMenuItemStyle}>📄 Certificate</button>
-                </div>
-              )}
-            </div>
-            <button onClick={handleWhatsAppShare} style={{ ...quickActionBtnStyle, background: "#22c55e" }}>📲 WA Rx</button>
-            <button onClick={handleWhatsAppBill} style={{ ...quickActionBtnStyle, background: "#16a34a" }}>💰 Bill</button>
-          </div>
         </div>
 
-        {/* BODY */}
-        <div style={quickBodyStyle}>
-          {/* LEFT: MAIN FORM */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
-
-            {/* Chief Complaint */}
-            <div style={qCardStyle}>
-              <div style={qCardTitleStyle}>Chief Complaint *</div>
-              <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
-                <select value={(formData as any).language || "en-IN"} onChange={(e) => patch({ language: e.target.value } as any)}
-                  style={{ padding: "6px 10px", fontSize: 12, background: "#f8fafc", border: "1.5px solid #e2e8f0", borderRadius: 8, fontWeight: 600, color: "#475569", cursor: "pointer" }}>
-                  <option value="en-IN">English</option>
-                  <option value="hi-IN">Hindi</option>
-                  <option value="gu-IN">Gujarati</option>
-                </select>
-                <DictationButton lang={lang} onText={(spoken) => patch({ chiefComplaint: formData.chiefComplaint ? formData.chiefComplaint + " " + spoken : spoken })} />
-                {/* Smart Templates inline */}
-                <div style={{ display: "flex", gap: 6, marginLeft: 4 }}>
-                  {Object.entries(TEMPLATE_META).map(([key, meta]) => (
-                    <button key={key} onClick={() => applyTemplate(key)}
-                      style={{ padding: "5px 10px", borderRadius: 8, border: `1.5px solid ${meta.border}`, background: meta.color, cursor: "pointer", fontWeight: 700, fontSize: 11, color: "#1e293b" }}>
-                      {meta.emoji} {meta.label}
-                    </button>
-                  ))}
+        <main className="mx-auto max-w-6xl px-4 pb-44 pt-4 sm:px-6 xl:px-8">
+          <div className="space-y-4">
+            <MobileSection title="Chief Complaint" subtitle="Capture the patient's primary issue" testId="section-chief-complaint">
+              <div className="space-y-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap gap-2">
+                    <select
+                      value={(formData as any).language || "en-IN"}
+                      onChange={(e) => patch({ language: e.target.value } as any)}
+                      className="rounded-2xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 outline-none"
+                    >
+                      <option value="en-IN">English</option>
+                      <option value="hi-IN">Hindi</option>
+                      <option value="gu-IN">Gujarati</option>
+                    </select>
+                    <DictationButton lang={lang} onText={(spoken) => patch({ chiefComplaint: formData.chiefComplaint ? formData.chiefComplaint + " " + spoken : spoken })} />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(TEMPLATE_META).map(([key, meta]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => applyTemplate(key)}
+                        className="rounded-2xl border px-3 py-2 text-xs font-semibold text-slate-900"
+                        style={{ borderColor: meta.border, backgroundColor: meta.color }}
+                      >
+                        {meta.emoji} {meta.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+                <SmartInput
+                  multiline
+                  rows={2}
+                  style={{ width: "100%", padding: 16, borderRadius: 20, border: "1.5px solid #e2e8f0", background: "#f8fafc", fontSize: 14 }}
+                  value={formData.chiefComplaint}
+                  onChange={(val) => patch({ chiefComplaint: val })}
+                  suggestions={SUGGESTIONS.chiefComplaint}
+                  placeholder="Type or speak complaint..."
+                />
               </div>
-              <SmartInput multiline rows={2} style={INPUT} value={formData.chiefComplaint}
-                onChange={(val) => patch({ chiefComplaint: val })}
-                suggestions={SUGGESTIONS.chiefComplaint} placeholder="Type or speak complaint..." />
-            </div>
+            </MobileSection>
 
-            {/* Case Notes */}
-            <div style={qCardStyle}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <div style={qCardTitleStyle}>Case Notes</div>
-                <DictationButton lang={lang} onText={(spoken) => patch({ caseText: formData.caseText ? formData.caseText + " " + spoken : spoken })} />
-              </div>
-              <textarea style={{ ...INPUT, resize: "vertical" }} rows={3} value={formData.caseText}
-                onChange={(e) => patch({ caseText: e.target.value })} placeholder="Symptoms, observations, history..." />
-            </div>
-
-            {/* MEDICINE SECTION */}
-            <div style={qCardStyle}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <div style={qCardTitleStyle}>💊 Medicines</div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {last && (last.medicines?.length || 0) > 0 && (
-                    <button onClick={() => patch({ medicines: [...(last.medicines || [])] })}
-                      style={{ padding: "6px 14px", borderRadius: 8, border: "1.5px solid #bbf7d0", background: "#f0fdf4", color: "#16a34a", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
-                      🔁 Repeat Last
-                    </button>
-                  )}
-                  <button onClick={() => patch({ medicines: [] })}
-                    style={{ padding: "6px 14px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: "#fff", color: "#64748b", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
-                    🔄 Clear
+            <MobileSection title="Prescription & Remedies" subtitle="Mobile-first remedy cards" testId="section-prescription">
+              <div className="flex flex-wrap gap-2">
+                {last && (last.medicines?.length || 0) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => patch({ medicines: [...(last.medicines || [])] })}
+                    className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700"
+                  >
+                    🔁 Repeat Last
                   </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => patch({ medicines: [] })}
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                >
+                  🔄 Clear
+                </button>
+              </div>
+
+              {formData.medicines.length === 0 ? (
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+                  No medicines added yet. Add one to begin.
                 </div>
-              </div>
-
-              {/* Column headers */}
-              <div style={{ display: "flex", gap: 8, padding: "4px 12px", marginBottom: 4 }}>
-                <div style={medHeaderStyle}>Remedy</div>
-                <div style={{ ...medHeaderStyle, maxWidth: 80 }}>Potency</div>
-                <div style={medHeaderStyle}>Dosage</div>
-                <div style={{ ...medHeaderStyle, maxWidth: 100 }}>Duration</div>
-                <div style={{ ...medHeaderStyle, maxWidth: 140 }}>Notes</div>
-                <div style={{ width: 32 }} />
-              </div>
-
-              {formData.medicines.length === 0 && (
-                <div style={{ textAlign: "center", padding: "20px 0", color: "#94a3b8", fontSize: 13, fontStyle: "italic" }}>
-                  No medicines added. Click "＋ Add Medicine" below.
+              ) : (
+                <div className="space-y-3">
+                  {formData.medicines.map((med, idx) => (
+                    <div
+                      key={med.id ?? idx}
+                      data-testid={`medicine-card-${idx}`}
+                      className="rounded-3xl border border-slate-200 bg-slate-50 p-4 shadow-sm"
+                    >
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0 space-y-3">
+                          <MobileField label={`Remedy ${idx + 1}`}>
+                            <SmartInput
+                              value={med.name || ""}
+                              onChange={(value) => updateMedRow(idx, { ...med, name: value })}
+                              suggestions={COMMON_REMEDIES}
+                              placeholder="Remedy name"
+                              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
+                            />
+                          </MobileField>
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <MobileField label="Potency">
+                              <select
+                                value={med.potency || "30C"}
+                                onChange={(e) => updateMedRow(idx, { ...med, potency: e.target.value })}
+                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
+                              >
+                                {POTENCIES.map((p) => (
+                                  <option key={p} value={p}>{p}</option>
+                                ))}
+                              </select>
+                            </MobileField>
+                            <MobileField label="Dosage">
+                              <select
+                                value={med.dosage || "1-1-1"}
+                                onChange={(e) => updateMedRow(idx, { ...med, dosage: e.target.value })}
+                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
+                              >
+                                {DOSAGE_PRESETS.map((d) => (
+                                  <option key={d} value={d}>{d}</option>
+                                ))}
+                              </select>
+                            </MobileField>
+                            <MobileField label="Duration">
+                              <select
+                                value={med.duration || "5 Days"}
+                                onChange={(e) => updateMedRow(idx, { ...med, duration: e.target.value })}
+                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
+                              >
+                                {DURATIONS.map((d) => (
+                                  <option key={d} value={d}>{d}</option>
+                                ))}
+                              </select>
+                            </MobileField>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => deleteMedRow(idx)}
+                          className="mt-1 h-10 w-10 flex-shrink-0 rounded-2xl bg-rose-50 text-rose-600 shadow-sm"
+                          title="Remove remedy"
+                          aria-label="Remove remedy"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <MobileField label="Notes" optional>
+                        <textarea
+                          className="w-full rounded-3xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
+                          rows={2}
+                          value={med.notes || ""}
+                          onChange={(e) => updateMedRow(idx, { ...med, notes: e.target.value })}
+                          placeholder="Instruction or note"
+                        />
+                      </MobileField>
+                    </div>
+                  ))}
                 </div>
               )}
 
-              {formData.medicines.map((med, idx) => (
-                <QuickMedRow
-                  key={idx}
-                  med={med}
-                  index={idx}
-                  onUpdate={updateMedRow}
-                  onDelete={deleteMedRow}
-                  onEnter={handleMedEnter}
-                  isLast={idx === formData.medicines.length - 1}
-                  autoFocusInput={focusMedIndex === idx}
-                />
-              ))}
-
-              <button onClick={() => addMedRow()}
-                style={{ width: "100%", padding: "10px", borderRadius: 10, border: "2px dashed #bfdbfe", background: "#eff6ff", color: "#2563eb", fontWeight: 800, fontSize: 13, cursor: "pointer", marginTop: 8 }}>
-                ＋ Add Medicine
+              <button
+                type="button"
+                data-testid="medicine-add-button"
+                onClick={() => addMedRow()}
+                className="w-full rounded-3xl border border-dashed border-sky-300 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-700"
+                aria-label="Add medicine"
+              >
+                ＋ Add medicine
               </button>
 
-              {/* AI suggestions inline */}
               {remedySuggestions.length > 0 && (
-                <div style={{ marginTop: 12, padding: "10px 14px", background: "#f0fdf4", borderRadius: 10, border: "1px solid #bbf7d0" }}>
-                  <div style={{ fontSize: 10, fontWeight: 900, color: "#16a34a", textTransform: "uppercase", marginBottom: 8 }}>🤖 AI Suggestions</div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-slate-700">
+                  <p className="font-semibold text-emerald-700">🤖 AI Suggestions</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
                     {remedySuggestions.slice(0, 4).map((r, i) => (
-                      <button key={i}
-                        onClick={() => {
-                          const newMed: Medicine = { id: crypto.randomUUID(), name: r.name, potency: "30C", dosage: "1-1-1", duration: "5 Days", notes: "" };
-                          patch({ medicines: [...formData.medicines, newMed] });
-                        }}
-                        style={{ padding: "5px 12px", borderRadius: 20, border: "1.5px solid #bbf7d0", background: "#fff", color: "#0f172a", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
-                        title={r.reason}
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => patch({ medicines: [...formData.medicines, { id: crypto.randomUUID(), name: r.name, potency: "30C", dosage: "1-1-1", duration: "5 Days", notes: "" }] })}
+                        className="rounded-full border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-700"
                       >
-                        {r.name} <span style={{ fontSize: 10, color: "#16a34a" }}>+Add</span>
+                        {r.name} +Add
                       </button>
                     ))}
                   </div>
                 </div>
               )}
-            </div>
+            </MobileSection>
 
-            {/* STICKER NOTE */}
-            <div style={qCardStyle}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <div style={qCardTitleStyle}>🏷️ Bottle Label / Sticker Note</div>
-                <button onClick={() => setShowSticker(true)}
-                  style={{ padding: "6px 14px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer", color: "#0f172a" }}>
-                  Print Sticker
-                </button>
-              </div>
-              <textarea style={{ ...INPUT, background: "#fefce8", border: "1.5px solid #fde68a", resize: "none" }} rows={2}
-                value={dosageText || ""}
-                readOnly
-                placeholder="Auto-filled from medicine dosage instructions above..." />
-              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>Auto-generated from dosage fields. Edit dosage above to update.</div>
-            </div>
-
-            {/* ADVANCED COLLAPSIBLES */}
-            <CollapsiblePanel title="Physical Generals" emoji="🌡️">
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-                <Field label="Thermal">
-                  <select style={INPUT} value={formData.thermal || ""} onChange={(e) => patch({ thermal: e.target.value })}>
-                    <option value="">— Select —</option>
-                    <option value="Hot">Hot</option><option value="Cold">Cold</option><option value="Neutral">Neutral</option>
-                  </select>
-                </Field>
-                <Field label="Thirst">
-                  <select style={INPUT} value={formData.thirst || ""} onChange={(e) => patch({ thirst: e.target.value })}>
-                    <option value="">— Select —</option>
-                    <option value="Increased">Increased</option><option value="Decreased">Decreased</option><option value="Normal">Normal</option>
-                  </select>
-                </Field>
-                <Field label="Appetite">
-                  <select style={INPUT} value={formData.appetite || ""} onChange={(e) => patch({ appetite: e.target.value })}>
-                    <option value="">— Select —</option>
-                    <option value="Increased">Increased</option><option value="Decreased">Decreased</option><option value="Normal">Normal</option>
-                  </select>
-                </Field>
-                <Field label="Sleep">
-                  <select style={INPUT} value={formData.sleep || ""} onChange={(e) => patch({ sleep: e.target.value })}>
-                    <option value="">— Select —</option>
-                    <option value="Good">Good</option><option value="Disturbed">Disturbed</option><option value="Insomnia">Insomnia</option>
-                  </select>
-                </Field>
-                <Field label="Desire">
-                  <input style={INPUT} value={formData.desire || ""} onChange={(e) => patch({ desire: e.target.value })} placeholder="e.g. Sweets" />
-                </Field>
-                <Field label="Aversion">
-                  <input style={INPUT} value={formData.aversion || ""} onChange={(e) => patch({ aversion: e.target.value })} placeholder="e.g. Milk" />
-                </Field>
-                <Field label="Allergies">
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <input style={{ ...INPUT, flex: 1 }} value={formData.allergy || ""} onChange={(e) => patch({ allergy: e.target.value })} placeholder="Drug, food..." />
-                    <DictationButton lang={lang} onText={(spoken) => patch({ allergy: formData.allergy ? formData.allergy + " " + spoken : spoken })} />
-                  </div>
-                </Field>
-                <Field label="Miasm">
-                  <input style={INPUT} value={formData.miasm || ""} onChange={(e) => patch({ miasm: e.target.value })} />
-                </Field>
-                <Field label="Case Type">
-                  <select style={INPUT} value={formData.caseType || "chronic"} onChange={(e) => patch({ caseType: e.target.value as any })}>
-                    <option value="chronic">Chronic</option>
-                    <option value="acute">Acute</option>
-                  </select>
-                </Field>
-              </div>
-            </CollapsiblePanel>
-
-            <CollapsiblePanel title="Mentals & Mind" emoji="🧠">
-              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                <Field label="Mental & Emotional State">
-                  <HybridField fieldKey="mind" value={formData.mind || ""} onChange={(val) => patch({ mind: val })} lang={lang} options={MIND_OPTIONS} placeholder="Anxieties, fears, disposition..." rows={2} />
-                </Field>
-                <Field label="Generals">
-                  <HybridField fieldKey="generals" value={formData.generals || ""} onChange={(val) => patch({ generals: val })} lang={lang} options={GENERALS_OPTIONS} placeholder="Constitutional symptoms..." rows={2} />
-                </Field>
-              </div>
-            </CollapsiblePanel>
-
-            <CollapsiblePanel title="Modalities & Dynamics" emoji="⚙️">
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                <Field label="Sensation">
-                  <HybridField fieldKey="sensation" value={formData.sensation || ""} onChange={(val) => patch({ sensation: val })} lang={lang} options={SENSATION_OPTIONS} placeholder="e.g. Burning, stitching..." rows={1} />
-                </Field>
-                <Field label="Onset / Causation"><input style={INPUT} value={formData.onset || ""} onChange={(e) => patch({ onset: e.target.value })} /></Field>
-                <Field label="Time Modalities"><input style={INPUT} value={formData.timeModal || ""} onChange={(e) => patch({ timeModal: e.target.value })} /></Field>
-                <Field label="Periodicity"><input style={INPUT} value={formData.periodicity || ""} onChange={(e) => patch({ periodicity: e.target.value })} /></Field>
-              </div>
-            </CollapsiblePanel>
-
-            <CollapsiblePanel title="Medical History" emoji="📋">
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <Field label="Family History">
-                  <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
-                    <DictationButton lang={lang} onText={(spoken) => patch({ familyHistory: formData.familyHistory ? formData.familyHistory + " " + spoken : spoken })} />
-                  </div>
-                  <textarea style={INPUT} rows={2} value={formData.familyHistory || ""} onChange={(e) => patch({ familyHistory: e.target.value })} placeholder="Hereditary conditions..." />
-                </Field>
-                <Field label="Past Medical History">
-                  <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
-                    <DictationButton lang={lang} onText={(spoken) => patch({ pastHistory: formData.pastHistory ? formData.pastHistory + " " + spoken : spoken })} />
-                  </div>
-                  <textarea style={INPUT} rows={2} value={formData.pastHistory || ""} onChange={(e) => patch({ pastHistory: e.target.value })} placeholder="Previous illnesses..." />
-                </Field>
-                <Field label="Surgical History">
-                  <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
-                    <DictationButton lang={lang} onText={(spoken) => patch({ surgicalHistory: formData.surgicalHistory ? formData.surgicalHistory + " " + spoken : spoken })} />
-                  </div>
-                  <textarea style={INPUT} rows={2} value={formData.surgicalHistory || ""} onChange={(e) => patch({ surgicalHistory: e.target.value })} placeholder="Surgeries, dates..." />
-                </Field>
-              </div>
-            </CollapsiblePanel>
-
-            <CollapsiblePanel title="AI Insights & Timeline" emoji="🤖">
-              {remedySuggestions.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={subHeaderStyle}>Materia Medica Matches</div>
-                  {remedySuggestions.map((r, i) => (
-                    <div key={i} style={patternRowStyle}>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span style={{ fontWeight: 800, color: "#1e3a8a" }}>{r.name}</span>
-                        <span style={{ fontSize: 9, fontWeight: 900, color: "#fff", background: "#10b981", padding: "2px 6px", borderRadius: 4, textTransform: "uppercase" }}>{r.score > 5 ? "High" : "Possible"}</span>
-                      </div>
-                      <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>{r.reason}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div style={subHeaderStyle}>Timeline</div>
-              {consultations.slice(0, 5).map((c) => (
-                <div key={c.id} style={{ padding: "8px 0", borderBottom: "1px solid #f1f5f9" }}>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>{new Date(c.date).toLocaleDateString("en-IN")}</div>
-                  <div style={{ fontSize: 12, color: "#64748b" }}>{c.outcome} · {c.medicines[0]?.name || "Observation"}</div>
-                </div>
-              ))}
-              {consultations.length === 0 && <p style={emptyTextStyle}>First visit.</p>}
-            </CollapsiblePanel>
-
-          </div>
-
-          {/* RIGHT: STICKY SUMMARY PANEL */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* Last visit */}
-            {last && (
-              <div style={{ ...qCardStyle, background: "linear-gradient(135deg, #f0fdf4 0%, #eff6ff 100%)", border: "1.5px solid #bbf7d0" }}>
-                <div style={qCardTitleStyle}>Last Visit</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: 12, color: "#64748b" }}>Date</span>
-                    <span style={{ fontSize: 12, fontWeight: 700 }}>{lastVisitDate}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: 12, color: "#64748b" }}>Outcome</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: lastOutcome === ConsultationOutcome.IMPROVED ? "#16a34a" : lastOutcome === ConsultationOutcome.WORSE ? "#dc2626" : "#475569" }}>{lastOutcome}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: 12, color: "#64748b" }}>Medicine</span>
-                    <span style={{ fontSize: 12, fontWeight: 700 }}>{lastMedicine || (lastHasMeds ? "—" : "Observation")}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Outcome */}
-            <div style={qCardStyle}>
-              <div style={qCardTitleStyle}>Outcome</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <MobileSection title="Outcome & Follow-up" subtitle="Quick action and billing" testId="section-outcome">
+              <div className="grid gap-2 sm:grid-cols-2">
                 {Object.values(ConsultationOutcome).map((o) => (
-                  <button key={o}
+                  <button
+                    key={o}
+                    type="button"
                     onClick={() => patch({ outcome: o })}
-                    style={{
-                      padding: "8px 12px", borderRadius: 10, border: "2px solid",
-                      borderColor: formData.outcome === o ? "#2d6a4f" : "#e2e8f0",
-                      background: formData.outcome === o ? "#2d6a4f" : "#fff",
-                      color: formData.outcome === o ? "#fff" : "#475569",
-                      fontWeight: 700, fontSize: 12, cursor: "pointer", textAlign: "left",
-                    }}
-                  >{o}</button>
+                    className={`rounded-2xl px-3 py-3 text-left text-sm font-semibold ${formData.outcome === o ? "bg-slate-900 text-white" : "bg-white text-slate-700 border border-slate-200"}`}
+                  >
+                    {o}
+                  </button>
                 ))}
               </div>
-            </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <MobileField label="Next follow-up">
+                  <input
+                    type="datetime-local"
+                    value={formData.formFollowUpDate}
+                    onChange={(e) => patch({ formFollowUpDate: e.target.value })}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
+                  />
+                </MobileField>
+                <MobileField label="Fee (₹)">
+                  <input
+                    type="number"
+                    value={formData.fee || ""}
+                    onChange={(e) => patch({ fee: Number(e.target.value) })}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
+                    placeholder="Amount"
+                  />
+                </MobileField>
+                <MobileField label="Payment status">
+                  <select
+                    value={formData.paymentStatus || "pending"}
+                    onChange={(e) => patch({ paymentStatus: e.target.value as PaymentStatus })}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
+                  >
+                    <option value="pending">⏳ Pending</option>
+                    <option value="paid">✅ Paid</option>
+                  </select>
+                </MobileField>
+              </div>
+            </MobileSection>
 
-            {/* Fee */}
-            <div style={qCardStyle}>
-              <div style={qCardTitleStyle}>💰 Fee & Payment</div>
-              <Field label="Fee (₹)">
-                <input type="number" style={INPUT} value={formData.fee || ""} onChange={(e) => patch({ fee: Number(e.target.value) })} placeholder="Enter amount" />
-              </Field>
-              <Field label="Status">
-                <select style={INPUT} value={formData.paymentStatus || "pending"} onChange={(e) => patch({ paymentStatus: e.target.value as PaymentStatus })}>
-                  <option value="pending">⏳ Pending</option>
-                  <option value="paid">✅ Paid</option>
-                </select>
-              </Field>
-            </div>
+            <MobileSection title="Consultation Notes" subtitle="Keep narrative and mental state together" testId="section-notes">
+              <MobileField label="Case Notes">
+                <textarea
+                  className="w-full rounded-3xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
+                  rows={4}
+                  value={formData.caseText}
+                  onChange={(e) => patch({ caseText: e.target.value })}
+                  placeholder="Symptoms, observations, history..."
+                />
+              </MobileField>
+              <MobileField label="Mental / Generals">
+                <HybridField fieldKey="mind" value={formData.mind || ""} onChange={(val) => patch({ mind: val })} lang={lang} options={MIND_OPTIONS} placeholder="Anxieties, fears, disposition..." rows={2} />
+              </MobileField>
+            </MobileSection>
+          </div>
+        </main>
 
-            {/* Follow-up */}
-            <div style={qCardStyle}>
-              <div style={qCardTitleStyle}>📅 Follow-up</div>
-              <input type="datetime-local" style={INPUT} value={formData.formFollowUpDate} onChange={(e) => patch({ formFollowUpDate: e.target.value })} />
-            </div>
-
-            {/* Save button */}
-            <button onClick={handleSave} disabled={saving}
-              style={{ padding: "16px", background: saving ? "#94a3b8" : "#0f172a", color: "#fff", border: "none", borderRadius: 14, fontWeight: 800, fontSize: 15, cursor: saving ? "not-allowed" : "pointer", boxShadow: "0 8px 20px rgba(15,23,42,0.15)", transition: "0.2s" }}>
-              {saving ? "Saving..." : isEditing ? "✅ Update Record" : "✅ Save & Finalize"}
+        <div
+          className="sticky bottom-0 inset-x-0 z-50 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur-sm"
+          style={{
+            boxShadow: "0 -10px 30px rgba(15, 23, 42, 0.09)",
+            paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
+            marginTop: "24px",
+          }}
+        >
+          <div className="mx-auto flex max-w-6xl flex-wrap gap-3">
+            <button
+              type="button"
+              data-testid="consultation-save-button"
+              onClick={handleSave}
+              disabled={saving}
+              className={`flex-1 rounded-3xl px-5 py-3 text-sm font-semibold text-white shadow-sm ${saving ? "bg-slate-400 cursor-not-allowed" : "bg-slate-900 hover:bg-slate-800"}`}
+              aria-label="Save consultation"
+            >
+              {saving ? "Saving..." : isEditing ? "✅ Update Record" : "✅ Save"}
             </button>
-
-            {/* Clinical memory */}
-            {(frequentRemedies.length > 0 || lastRemedies.length > 0) && (
-              <div style={{ ...qCardStyle, background: "linear-gradient(180deg, #fdf4ff 0%, #fff 100%)", borderColor: "#e9d5ff" }}>
-                <div style={{ ...qCardTitleStyle, color: "#7c3aed" }}>💊 Clinical Memory</div>
-                {frequentRemedies.slice(0, 3).map(([name, count], i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid #f3e8ff" }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "#1e3a8a" }}>{name}</span>
-                    <span style={{ fontSize: 10, fontWeight: 800, color: "#7c3aed", background: "#f3e8ff", padding: "1px 6px", borderRadius: 8 }}>{count}×</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <button
+              type="button"
+              data-testid="consultation-whatsapp-button"
+              onClick={handleWhatsAppShare}
+              className="rounded-3xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-600"
+            >
+              WA Rx
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPrintMenu((v) => !v)}
+              className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-900 shadow-sm hover:bg-slate-50"
+            >
+              Print
+            </button>
           </div>
         </div>
 
-        {/* PRINT AREAS */}
         {showLetterPad && (
           <div className="print-only">
             <LetterPad patient={patient} consultation={printableConsultation} />
@@ -1477,7 +1471,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <div style={containerStyle}>
+    <div style={{ ...containerStyle, padding: isMobile ? "16px 20px" : "24px 40px" }}>
       <style>{customCSS}</style>
 
       {modeToggle}
@@ -1500,8 +1494,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
         </div>
       </header>
 
-      <div style={contentGridStyle}>
-        <main style={formPanelStyle}>
+      <div style={{ ...contentGridStyle, gridTemplateColumns: isMobile ? "1fr" : "1fr 340px" }}>
+        <main style={{ ...formPanelStyle, minHeight: isMobile ? "auto" : "calc(100vh - 220px)" }}>
           <div style={outcomeGridStyle}>
             {Object.values(ConsultationOutcome).map((o) => (
               <button key={o} className={`btn-outcome ${formData.outcome === o ? "active" : ""}`} onClick={() => patch({ outcome: o })}>{o}</button>

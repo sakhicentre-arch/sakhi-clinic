@@ -9,7 +9,7 @@ test('duplicate patient validation workflow', async ({ page }) => {
 
   // Open the application and navigate to the patient management page.
   await page.goto('/');
-  await page.click('button[aria-label="Patients"]');
+  await page.click('[data-testid="bottom-nav-patients-button"]');
 
   // Register the first patient.
   await page.fill('[data-testid="patient-name-input"]', firstPatientName);

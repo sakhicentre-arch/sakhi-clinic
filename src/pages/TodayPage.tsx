@@ -18,6 +18,7 @@ import { normalizePatientPhone } from "../utils/whatsapp";
 import { getAllPatientsFromDB, db } from "../services/db";
 import { SplitPane } from "../components/layout/LayoutPrimitives";
 import { generateWhatsAppLink } from "../utils/whatsapp";
+import { MobileCard, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
 import {
   Users, Clock, CheckCircle2, AlertCircle, Plus, Search,
   ChevronRight, Phone, Calendar, Activity, TrendingUp,
@@ -251,10 +252,11 @@ function AddToQueueDropdown({ onAdd, onClose }:
 
 // ─── LEFT PANEL: Queue ────────────────────────────────────────────
 
-function QueuePanel({ activeQueueId, onSelect, goToConsultation }:
+function QueuePanel({ activeQueueId, onSelect, goToConsultation, isMobile = false }:
   { activeQueueId: string | null;
     onSelect: (entry: QueueEntry) => void;
-    goToConsultation: (patientId: string, appointmentId: string) => void }) {
+    goToConsultation: (patientId: string, appointmentId: string) => void;
+    isMobile?: boolean }) {
 
   const queue = useQueueStore((s) => s.queue);
   const addToQueue = useQueueStore((s) => s.addToQueue);
@@ -339,9 +341,19 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation }:
   return (
     <div
       data-testid="queue-panel"
-      style={{ width: "280px", flexShrink: 0, background: "#fff",
-      borderRight: "1px solid #f1f5f9", display: "flex", flexDirection: "column",
-      height: "100%" }}>
+      style={{
+        width: isMobile ? "100%" : "280px",
+        maxWidth: "100%",
+        flexShrink: 0,
+        minWidth: 0,
+        background: "#fff",
+        borderRight: isMobile ? "none" : "1px solid #f1f5f9",
+        borderBottom: isMobile ? "1px solid #f1f5f9" : "none",
+        display: "flex",
+        flexDirection: "column",
+        height: isMobile ? "auto" : "100%",
+        boxSizing: "border-box",
+      }}>
 
       {/* Header */}
       <div style={{ padding: "20px 16px 14px", borderBottom: "1px solid #f1f5f9" }}>
@@ -512,9 +524,10 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation }:
 
 // ─── CENTER PANEL: Active Patient ────────────────────────────────
 
-function ActivePatientPanel({ entry, goToConsultation }:
+function ActivePatientPanel({ entry, goToConsultation, isMobile = false }:
   { entry: QueueEntry | null;
-    goToConsultation: (patientId: string, appointmentId: string) => void }) {
+    goToConsultation: (patientId: string, appointmentId: string) => void;
+    isMobile?: boolean }) {
 
   const patients = usePatientStore((s) => s.patients);
   const consultations = useConsultationStore((s) => s.consultations);
@@ -539,9 +552,20 @@ function ActivePatientPanel({ entry, goToConsultation }:
   // Empty state
   if (!entry || !patient) {
     return (
-      <div style={{ flex: 1, display: "flex", flexDirection: "column",
-        alignItems: "center", justifyContent: "center", padding: "40px",
-        background: "#f8fafc" }}>
+      <div
+        style={{
+          flex: isMobile ? "none" : 1,
+          width: isMobile ? "100%" : "auto",
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: isMobile ? "28px 16px" : "40px",
+          background: "#f8fafc",
+          boxSizing: "border-box",
+        }}
+      >
         <div style={{ width: 80, height: 80, borderRadius: "50%",
           background: "#f0fdfd", border: "2px solid #99f6e4",
           display: "flex", alignItems: "center", justifyContent: "center",
@@ -563,7 +587,17 @@ function ActivePatientPanel({ entry, goToConsultation }:
   const av = avatarColor(patient.gender);
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", background: "#f8fafc", padding: "24px" }}>
+    <div
+      style={{
+        flex: isMobile ? "none" : 1,
+        width: isMobile ? "100%" : "auto",
+        minWidth: 0,
+        overflowY: isMobile ? "visible" : "auto",
+        background: "#f8fafc",
+        padding: isMobile ? "16px" : "24px",
+        boxSizing: "border-box",
+      }}
+    >
 
       {/* Patient Header Card */}
       <div style={{ background: "#fff", borderRadius: "20px",
@@ -710,7 +744,14 @@ function ActivePatientPanel({ entry, goToConsultation }:
       </div>
 
       {/* Quick Stats Row */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr",
+          gap: "12px",
+          minWidth: 0,
+        }}
+      >
         <div style={{ background: "#fff", borderRadius: "14px",
           border: "1px solid #f1f5f9", padding: "14px 16px" }}>
           <div style={{ fontSize: "11px", fontWeight: 700, color: "#94a3b8",
@@ -783,8 +824,9 @@ function ActivePatientPanel({ entry, goToConsultation }:
 
 // ─── RIGHT PANEL: Stats + Follow-ups + Appointments ───────────────
 
-function StatsPanel({ goToConsultation }:
-  { goToConsultation: (patientId: string, appointmentId: string) => void }) {
+function StatsPanel({ goToConsultation, isMobile = false }:
+  { goToConsultation: (patientId: string, appointmentId: string) => void;
+    isMobile?: boolean }) {
 
   const consultations = useConsultationStore((s) => s.consultations);
   const patients = usePatientStore((s) => s.patients);
@@ -866,9 +908,21 @@ function StatsPanel({ goToConsultation }:
   };
 
   return (
-    <div style={{ width: "260px", flexShrink: 0, background: "#f8fafc",
-      borderLeft: "1px solid #f1f5f9", overflowY: "auto",
-      display: "flex", flexDirection: "column", gap: "0" }}>
+    <div
+      style={{
+        width: isMobile ? "100%" : "260px",
+        maxWidth: "100%",
+        flexShrink: 0,
+        minWidth: 0,
+        background: isMobile ? "transparent" : "#f8fafc",
+        borderLeft: isMobile ? "none" : "1px solid #f1f5f9",
+        overflowY: isMobile ? "visible" : "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: "0",
+        boxSizing: "border-box",
+      }}
+    >
 
       {/* Stats */}
       <div style={{ padding: "16px 14px 10px" }}>
@@ -1014,6 +1068,7 @@ function StatsPanel({ goToConsultation }:
 export default function TodayPage({ goToConsultation }: TodayPageProps) {
   const [activeQueueId, setActiveQueueId] = useState<string | null>(null);
   const queue = useQueueStore((s) => s.queue);
+  const [isMobile, setIsMobile] = useState(false);
 
   const loadPatients = usePatientStore((s) => s.loadPatients);
   const loadConsultations = useConsultationStore((s) => s.loadConsultations);
@@ -1025,6 +1080,14 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
     loadConsultations();
     loadAppointments();
   }, [loadPatients, loadConsultations, loadAppointments]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   // Auto-select first waiting patient if nothing selected
   useEffect(() => {
@@ -1039,32 +1102,64 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
     [queue, activeQueueId]
   );
 
-  return (
-    <SplitPane style={{ display: "flex", height: "100%", overflow: "hidden",
-      background: "#f8fafc", fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif", width: "100%" }}>
+  const commonShellStyle: React.CSSProperties = {
+    background: "#f8fafc",
+    fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif",
+    width: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  };
 
-      {/* LEFT: Queue */}
+  const desktopLayout = (
+    <SplitPane
+      style={{
+        ...commonShellStyle,
+        display: "flex",
+        height: "100%",
+      }}
+    >
       <QueuePanel
         activeQueueId={activeQueueId}
         onSelect={(entry) => setActiveQueueId(entry.queueId)}
         goToConsultation={goToConsultation}
       />
+      <ActivePatientPanel entry={activeEntry} goToConsultation={goToConsultation} />
+      <StatsPanel goToConsultation={goToConsultation} />
+    </SplitPane>
+  );
 
-      {/* CENTER: Active Patient */}
-      <ActivePatientPanel
-        entry={activeEntry}
+  const mobileLayout = (
+    <ResponsiveContainer
+      style={{
+        ...commonShellStyle,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        padding: "8px 0",
+      }}
+    >
+      <QueuePanel
+        isMobile
+        activeQueueId={activeQueueId}
+        onSelect={(entry) => setActiveQueueId(entry.queueId)}
         goToConsultation={goToConsultation}
       />
+      <ActivePatientPanel isMobile entry={activeEntry} goToConsultation={goToConsultation} />
+      <MobileCard elevated={false} style={{ padding: 0 }}>
+        <StatsPanel isMobile goToConsultation={goToConsultation} />
+      </MobileCard>
+    </ResponsiveContainer>
+  );
 
-      {/* RIGHT: Stats */}
-      <StatsPanel goToConsultation={goToConsultation} />
-
+  return (
+    <>
+      {isMobile ? mobileLayout : desktopLayout}
       <style>{`
         @keyframes pulse-dot {
           0%, 100% { opacity: 1; transform: scale(1); }
           50% { opacity: 0.5; transform: scale(0.8); }
         }
       `}</style>
-    </SplitPane>
+    </>
   );
 }

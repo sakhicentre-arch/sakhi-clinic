@@ -150,7 +150,7 @@ test('duplicate appointment slot prevention', async ({ page }) => {
   console.log('🔄 Performing persistence check after page reload...');
 
   await page.reload();
-  await page.click('button[aria-label="Appointments"]');
+  await page.click('[data-testid="bottom-nav-appointments-button"]');
   await expect(page.locator('[data-testid="appointment-scheduling-form"]')).toBeVisible();
 
   // Re-fill the form to see the disabled slot

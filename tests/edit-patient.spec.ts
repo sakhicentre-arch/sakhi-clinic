@@ -10,7 +10,7 @@ test('patient edit workflow', async ({ page }) => {
 
   // Open the application and navigate to the patient management screen.
   await page.goto('/');
-  await page.click('button[aria-label="Patients"]');
+  await page.click('[data-testid="bottom-nav-patients-button"]');
 
   // Create a new patient record.
   await page.fill('[data-testid="patient-name-input"]', originalPatientName);

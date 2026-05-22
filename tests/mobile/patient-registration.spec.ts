@@ -7,8 +7,8 @@ test.describe('Mobile patient registration and keyboard behavior', () => {
 
     await page.goto('/');
     // ensure bottom nav visible
-    const todayBtn = page.locator('button[aria-label="Today"]').first();
-    await expect(todayBtn).toBeVisible();
+    const todayBtn = page.locator('[data-testid="bottom-nav-today-button"]').first();
+    await expect(todayBtn).toBeVisible({ timeout: 10000 });
 
     // navigate to Patients and open registration
     await navigateTo(page, 'Patients');

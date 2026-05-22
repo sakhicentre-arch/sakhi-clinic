@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { usePatientStore } from "../store/usePatientStore";
 import { normalizePatientPhone } from "../utils/whatsapp";
 import { useAppointmentStore } from "../store/useAppointmentStore";
+import { ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
 
 // ============================================================
 // ICONS - PREMIUM MEDICAL SUITE
@@ -113,6 +114,15 @@ export default function AppointmentPage({ goToConsultation }: Props) {
   const [time, setTime] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedUpcomingDate, setSelectedUpcomingDate] = useState("");
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
 
   // ================= SLOT GENERATOR (TOTAL INTEGRITY) =================
   const generateSlotsFor = (clinicType: "Dabholi" | "City Light") => {
@@ -333,15 +343,15 @@ export default function AppointmentPage({ goToConsultation }: Props) {
   const filteredPatients = patients.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
   const S = {
-    container: { display: "grid", gridTemplateColumns: "450px 1fr", gap: "32px", padding: "40px", backgroundColor: "#f4f7f9", minHeight: "100vh", fontFamily: "'Inter', sans-serif" } as React.CSSProperties,
-    card: { background: "#fff", borderRadius: "28px", padding: "35px", boxShadow: "0 10px 30px rgba(0,0,0,0.03)", border: "1px solid #eef2f6" } as React.CSSProperties,
+    container: { display: "grid", gridTemplateColumns: isMobile ? "1fr" : "450px 1fr", gap: isMobile ? "20px" : "32px", padding: isMobile ? "20px" : "40px", backgroundColor: "#f4f7f9", minHeight: "100%", width: "100%", maxWidth: "100vw", minWidth: 0, overflowX: "hidden", fontFamily: "'Inter', sans-serif" } as React.CSSProperties,
+    card: { background: "#fff", borderRadius: "28px", padding: isMobile ? "24px" : "35px", boxShadow: "0 10px 30px rgba(0,0,0,0.03)", border: "1px solid #eef2f6", width: "100%", minWidth: 0 } as React.CSSProperties,
     label: { fontSize: "11px", fontWeight: "900", color: "#94a3b8", textTransform: "uppercase" as "uppercase", display: "block", marginBottom: "8px", letterSpacing: "1px" } as React.CSSProperties,
     input: { width: "100%", padding: "16px", borderRadius: "14px", border: "1.5px solid #e2e8f0", marginBottom: "16px", outline: "none", fontSize: "15px", backgroundColor: "#fcfdfe" } as React.CSSProperties,
     btnPrimary: { width: "100%", padding: "18px", background: "#2563eb", color: "#fff", border: "none", borderRadius: "16px", fontWeight: "800", cursor: "pointer", marginBottom: "12px", boxShadow: "0 10px 20px rgba(37, 99, 235, 0.2)" } as React.CSSProperties
   };
 
   return (
-    <div style={S.container}>
+    <ResponsiveContainer style={S.container}>
       <style>{`
         ::-webkit-scrollbar { width: 5px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
@@ -375,7 +385,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
             <option value="City Light">🏥 City Light (14:30 - 18:30)</option>
           </select>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: "12px", marginBottom: "25px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.2fr 0.8fr", gap: "12px", marginBottom: "25px" }}>
             <div>
               <label style={S.label}>Date</label>
               <input data-testid="appointment-date-input" className="input-focus" style={{...S.input, marginBottom: 0, borderColor: isPastDate(date) ? "#ef4444" : "#e2e8f0"}} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -464,7 +474,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "32px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "32px" }}>
               {/* TODAY - DABHOLI */}
               <div style={{ background: "#fff", borderRadius: "20px", padding: "20px", border: "2px solid #fcd34d" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" }}>
@@ -615,7 +625,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "32px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: "32px" }}>
           {/* BRANCH 1: DABHOLI */}
           <div style={{ background: "transparent" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "20px", paddingLeft: "10px" }}>
@@ -661,6 +671,6 @@ export default function AppointmentPage({ goToConsultation }: Props) {
           </div>
         </div>
       </div>
-    </div>
+      </ResponsiveContainer>
   );
 }

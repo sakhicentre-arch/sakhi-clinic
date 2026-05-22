@@ -46,9 +46,11 @@ export default function LeftNav({ onNavigate, isMobile = false, isOpen = false, 
       style={{
         position: "fixed",
         left: 0,
-        top: isMobile ? "59px" : "59px",
+        top: isMobile ? "calc(59px + env(safe-area-inset-top, 0px))" : "59px",
         width: isMobile ? "min(280px, 100%)" : "64px",
-        height: isMobile ? "calc(100vh - 59px)" : `calc(100vh - 59px)`,
+        height: isMobile
+          ? "calc(100vh - 59px - env(safe-area-inset-top, 0px))"
+          : "calc(100vh - 59px)",
         background: "#ffffff",
         borderRight: isMobile ? "none" : "1px solid #e2e8f0",
         boxShadow: isMobile ? "2px 0 24px rgba(15, 23, 42, 0.16)" : undefined,

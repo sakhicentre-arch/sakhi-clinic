@@ -264,6 +264,16 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
 
   const [showSticker, setShowSticker] = useState(false);
   const [showAI, setShowAI] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
 
   const { consultations, loading, saving, editingId, formData, patient, learnedPatterns } = state;
   const isEditing = editingId !== null;
@@ -427,11 +437,18 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
   if (loading) return <div style={loadingStyle}>Loading...</div>;
 
   return (
-    <div style={containerStyle}>
+    <div style={{ ...containerStyle, padding: isMobile ? "16px 20px" : "24px 32px" }}>
       <style>{css}</style>
 
       {/* ── Mode Toggle Bar ── */}
-      <div style={modeBarStyle}>
+      <div
+        style={{
+          ...modeBarStyle,
+          flexDirection: isMobile ? "column" : "row",
+          alignItems: isMobile ? "flex-start" : "center",
+          gap: isMobile ? 10 : 0,
+        }}
+      >
         <div style={modeToggleGroupStyle}>
           <button style={modeActiveBtnStyle} disabled>⚡ Quick Mode</button>
           <button style={modeInactiveBtnStyle} onClick={onSwitchMode}>📋 Classic Mode</button>
@@ -442,7 +459,13 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
       </div>
 
       {/* ── Patient Header ── */}
-      <div style={patientHeaderStyle}>
+      <div
+        style={{
+          ...patientHeaderStyle,
+          flexDirection: isMobile ? "column" : "row",
+          gap: isMobile ? 12 : 0,
+        }}
+      >
         <div>
           <h1 style={titleStyle}>{patient?.name || patientName}</h1>
           <div style={metaStyle}>
@@ -455,14 +478,14 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
             )}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", width: isMobile ? "100%" : "auto" }}>
           <button className="q-btn-secondary" onClick={() => setShowSticker(true)}>🏷️ Sticker</button>
           <button className="q-btn-secondary" onClick={handlePrintRx}>📋 Print Rx</button>
           <button className="q-btn-whatsapp" onClick={handleWhatsAppShare}>📲 WhatsApp</button>
         </div>
       </div>
 
-      <div style={bodyGridStyle}>
+      <div style={{ ...bodyGridStyle, gridTemplateColumns: isMobile ? "1fr" : "1fr 320px", minWidth: 0, width: "100%", boxSizing: "border-box" }}>
         {/* ── LEFT COLUMN ── */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
@@ -581,7 +604,7 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
 
           {/* Advanced Sections — Collapsible */}
           <CollapsiblePanel title="Physical Generals" emoji="🌡️">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, padding: "0 4px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr", gap: 12, padding: isMobile ? 0 : "0 4px", minWidth: 0 }}>
               <Field label="Thermal">
                 <select style={INPUT} value={formData.thermal || ""} onChange={(e) => patch({ thermal: e.target.value })}>
                   <option value="">— Select —</option>
@@ -624,7 +647,7 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
           </CollapsiblePanel>
 
           <CollapsiblePanel title="Mentals & Mind" emoji="🧠">
-            <div style={{ padding: "0 4px" }}>
+            <div style={{ padding: isMobile ? 0 : "0 4px" }}>
               <Field label="Mental & Emotional State">
                 <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
                   <DictationButton lang={lang} onText={(spoken) => patch({ mind: formData.mind ? formData.mind + " " + spoken : spoken })} />
@@ -638,7 +661,7 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
           </CollapsiblePanel>
 
           <CollapsiblePanel title="Modalities & Dynamics" emoji="⚙️">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, padding: "0 4px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12, padding: isMobile ? 0 : "0 4px", minWidth: 0 }}>
               <Field label="Sensation">
                 <input style={INPUT} value={formData.sensation || ""} onChange={(e) => patch({ sensation: e.target.value })} />
               </Field>
@@ -655,7 +678,7 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
           </CollapsiblePanel>
 
           <CollapsiblePanel title="Medical History" emoji="📋">
-            <div style={{ padding: "0 4px" }}>
+            <div style={{ padding: isMobile ? 0 : "0 4px" }}>
               <Field label="Allergies">
                 <input style={INPUT} value={formData.allergy || ""} onChange={(e) => patch({ allergy: e.target.value })} placeholder="Drug, food, environmental..." />
               </Field>

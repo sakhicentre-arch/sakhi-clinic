@@ -50,7 +50,8 @@ export default function TopBar({
           top: "3px",
           left: "0",
           right: "0",
-          height: "56px",
+          height: "calc(56px + env(safe-area-inset-top, 0px))",
+          paddingTop: "env(safe-area-inset-top, 0px)",
           background: "#fff",
           borderBottom: "1px solid #e2e8f0",
           display: "flex",
@@ -61,6 +62,7 @@ export default function TopBar({
           flexWrap: isMobile ? "wrap" : "nowrap",
           zIndex: 1000,
           boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)",
+          boxSizing: "border-box",
         }}
       >
         {isMobile && (
@@ -167,7 +169,7 @@ export default function TopBar({
       </div>
 
       {/* Spacer to prevent content from going under TopBar */}
-      <div style={{ height: "59px" }} />
+      <div style={{ height: "calc(59px + env(safe-area-inset-top, 0px))" }} />
     </>
   );
 }

@@ -124,9 +124,9 @@ export const useQueueStore = create<QueueStore>()(
     }),
     {
       name: "sakhi-queue",
-      // FIXED: createJSONStorage() returns correct PersistStorage type
+      // Use localStorage for queue state persistence across reloads and offline
       storage: createJSONStorage(() =>
-        typeof window !== "undefined" ? window.sessionStorage : sessionStorage
+        typeof window !== "undefined" ? window.localStorage : localStorage
       ),
     }
   )
