@@ -1,5 +1,7 @@
 import { Appointment, AppointmentStatus, db } from "./db";
 import { broadcastSyncEvent } from "./syncService";
+import { getDeviceId } from "../utils/deviceId";
+import { enqueueOutbox } from "./outboxService";
 
 const nowIso = () => new Date().toISOString();
 const todayDateString = (): string => new Date().toISOString().slice(0, 10);
@@ -15,6 +17,9 @@ const withMetadata = (appointment: Appointment): Appointment => {
     ...appointment,
     createdAt: appointment.createdAt || timestamp,
     updatedAt: timestamp,
+    version: typeof appointment.version === "number" ? appointment.version + 1 : 1,
+    deviceId: appointment.deviceId || getDeviceId(),
+    syncStatus: appointment.syncStatus || "local",
   };
 };
 
@@ -100,7 +105,21 @@ export const appointmentService = {
         throw new Error("[AppointmentService] Appointment with this ID already exists");
       }
 
-      await db.appointments.add(withMetadata(appointment));
+      const created = withMetadata(appointment);
+      await db.transaction("rw", [db.appointments, db.syncOutbox], async () => {
+        await db.appointments.add(created);
+        try {
+          await enqueueOutbox({
+            entityType: "appointment",
+            entityId: created.id,
+            operationType: "create",
+            payload: created,
+            version: created.version || 1,
+          });
+        } catch (err) {
+          console.warn("[AppointmentService] outbox enqueue failed:", err);
+        }
+      });
       broadcastSyncEvent({ type: "appointment:created", payload: { id: appointment.id } });
       return true;
     } catch (error) {
@@ -126,7 +145,20 @@ export const appointmentService = {
         if (duplicate) throw new Error("[AppointmentService] Slot already booked");
       }
 
-      await db.appointments.put(updated);
+      await db.transaction("rw", [db.appointments, db.syncOutbox], async () => {
+        await db.appointments.put(updated);
+        try {
+          await enqueueOutbox({
+            entityType: "appointment",
+            entityId: id,
+            operationType: "update",
+            payload: updated,
+            version: updated.version || 1,
+          });
+        } catch (err) {
+          console.warn("[AppointmentService] outbox enqueue failed:", err);
+        }
+      });
       broadcastSyncEvent({ type: "appointment:updated", payload: { id } });
       return true;
     } catch (error) {
@@ -140,7 +172,21 @@ export const appointmentService = {
       if (!id) throw new Error("[AppointmentService] deleteAppointment requires id");
       const existing = await this.getById(id);
       if (!existing) throw new Error("[AppointmentService] Appointment not found");
-      await db.appointments.update(id, { deletedAt: Date.now(), updatedAt: nowIso() });
+      const deletedAt = Date.now();
+      await db.transaction("rw", [db.appointments, db.syncOutbox], async () => {
+        await db.appointments.update(id, { deletedAt, updatedAt: nowIso() });
+        try {
+          await enqueueOutbox({
+            entityType: "appointment",
+            entityId: id,
+            operationType: "delete",
+            payload: { id, deletedAt },
+            version: typeof (existing as any).version === "number" ? (existing as any).version + 1 : 1,
+          });
+        } catch (err) {
+          console.warn("[AppointmentService] outbox enqueue failed:", err);
+        }
+      });
       broadcastSyncEvent({ type: "appointment:deleted", payload: { id } });
       return true;
     } catch (error) {
@@ -158,7 +204,21 @@ export const appointmentService = {
       if (!id) throw new Error("[AppointmentService] updateStatus requires id");
       const existing = await this.getById(id);
       if (!existing) throw new Error("[AppointmentService] Appointment not found");
-      await db.appointments.update(id, { status, updatedAt: nowIso() });
+      const updated = withMetadata({ ...existing, status });
+      await db.transaction("rw", [db.appointments, db.syncOutbox], async () => {
+        await db.appointments.put(updated);
+        try {
+          await enqueueOutbox({
+            entityType: "appointment",
+            entityId: id,
+            operationType: "update",
+            payload: updated,
+            version: updated.version || 1,
+          });
+        } catch (err) {
+          console.warn("[AppointmentService] outbox enqueue failed:", err);
+        }
+      });
       broadcastSyncEvent({ type: "appointment:updated", payload: { id } });
       return true;
     } catch (error) {

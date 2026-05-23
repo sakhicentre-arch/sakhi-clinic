@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Patient, PatientId } from '../types/models';
-import { db, getAllPatientsFromDB } from '../services/db';
+import { patientRepository } from '../repositories/patientRepository';
 import { subscribeToSync } from '../services/syncService';
 
 interface PatientState {
@@ -25,7 +25,7 @@ export const usePatientStore = create<PatientState>()((set, get) => ({
 
   loadPatients: async () => {
     try {
-      const list = await getAllPatientsFromDB();
+      const list = await patientRepository.list();
       // Merge canonical DB results with any existing transient-only patients
       const existing = get().patients || [];
       const byId = new Map<string, any>();
@@ -66,7 +66,7 @@ if (typeof window !== "undefined") {
     switch (message.type) {
       case "patient:created": {
         const patientId = String((message.payload as any).id || "");
-        const patient = await db.patients.get(patientId);
+        const patient = await patientRepository.getById(patientId);
         if (patient && !patient.deletedAt) {
           usePatientStore.setState((state) => {
             if (state.patients.some((p) => p.id === patient.id)) return {};
@@ -77,7 +77,7 @@ if (typeof window !== "undefined") {
       }
       case "patient:updated": {
         const patientId = String((message.payload as any).id || "");
-        const patient = await db.patients.get(patientId);
+        const patient = await patientRepository.getById(patientId);
         if (patient) {
           usePatientStore.setState((state) => {
             const existing = state.patients.some((p) => p.id === patientId);
@@ -100,7 +100,7 @@ if (typeof window !== "undefined") {
       }
       case "patient:restored": {
         const patientId = String((message.payload as any).id || "");
-        const patient = await db.patients.get(patientId);
+        const patient = await patientRepository.getById(patientId);
         if (patient && !patient.deletedAt) {
           usePatientStore.setState((state) => ({
             patients: state.patients.some((p) => p.id === patient.id)

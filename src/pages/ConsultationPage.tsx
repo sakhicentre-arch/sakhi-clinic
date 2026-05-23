@@ -643,6 +643,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const [draftAutoSaveStatus, setDraftAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [draftRecovered, setDraftRecovered] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [isTablet, setIsTablet] = useState(false);
   const keyboard = useKeyboardInset();
   const [mobileStage, setMobileStage] = useState<"complaint" | "exam" | "remedy" | "followup">("complaint");
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
@@ -656,11 +657,19 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const setQueueStatus = useQueueStore((s) => s.setStatus);
 
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 768px)');
-    const update = () => setIsMobile(mq.matches);
+    const mqMobile = window.matchMedia('(max-width: 768px)');
+    const mqTablet = window.matchMedia('(min-width: 769px) and (max-width: 1024px)');
+    const update = () => {
+      setIsMobile(mqMobile.matches);
+      setIsTablet(mqTablet.matches);
+    };
     update();
-    mq.addEventListener('change', update);
-    return () => mq.removeEventListener('change', update);
+    mqMobile.addEventListener('change', update);
+    mqTablet.addEventListener('change', update);
+    return () => {
+      mqMobile.removeEventListener('change', update);
+      mqTablet.removeEventListener('change', update);
+    };
   }, []);
 
   useEffect(() => {
@@ -1266,6 +1275,23 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     const stageVisibleStyle = (stage: typeof mobileStage): React.CSSProperties =>
       !isMobile || mobileStage === stage ? { display: "block" } : { display: "none" };
 
+    const scrollToStageSection = (stage: typeof mobileStage) => {
+      const map: Record<typeof mobileStage, string> = {
+        complaint: '[data-testid="section-chief-complaint"]',
+        exam: '[data-testid="section-examination"]',
+        remedy: '[data-testid="section-prescription"]',
+        followup: '[data-testid="section-followup"]',
+      };
+      const sel = map[stage];
+      const el = document.querySelector(sel) as HTMLElement | null;
+      if (!el) return;
+      try {
+        el.scrollIntoView({ block: "start", behavior: "smooth" });
+      } catch {
+        el.scrollIntoView();
+      }
+    };
+
     const ChipSelect = ({
       value,
       onChange,
@@ -1282,6 +1308,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
       testId?: string;
     }) => {
       const current = value || "";
+      const chipFontSize = isMobile ? 11 : 12;
       return (
         <div
           className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]"
@@ -1293,10 +1320,10 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               type="button"
               onClick={() => { haptic("tap"); onChange(""); }}
               className={
-                "sakhi-tap sakhi-focus-ring sakhi-ripple flex-none rounded-2xl border px-3 py-2 text-[11px] font-extrabold " +
+                "sakhi-tap sakhi-focus-ring sakhi-ripple flex-none rounded-2xl border px-3 py-2 font-extrabold " +
                 (current === "" ? "border-slate-200 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700")
               }
-              style={{ minHeight: 40 }}
+              style={{ minHeight: 44, fontSize: chipFontSize }}
             >
               {emptyLabel}
             </button>
@@ -1307,10 +1334,10 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               type="button"
               onClick={() => { haptic("tap"); onChange(opt.value); }}
               className={
-                "sakhi-tap sakhi-focus-ring sakhi-ripple flex-none rounded-2xl border px-3 py-2 text-[11px] font-extrabold " +
+                "sakhi-tap sakhi-focus-ring sakhi-ripple flex-none rounded-2xl border px-3 py-2 font-extrabold " +
                 (current === opt.value ? "border-sky-200 bg-sky-50 text-sky-800" : "border-slate-200 bg-white text-slate-700")
               }
-              style={{ minHeight: 40 }}
+              style={{ minHeight: 44, fontSize: chipFontSize }}
             >
               {opt.label}
             </button>
@@ -1325,20 +1352,19 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
         <div
           data-testid="consultation-sticky-header"
-          className="sticky z-30 border-b border-slate-200 bg-white/92 px-4 py-3 backdrop-blur-sm"
+          className="sakhi-consult-header sticky z-30 px-4 py-3"
           style={{
             // AppShell TopBar is fixed; keep consultation header from sliding underneath it on scroll.
             top: "calc(59px + env(safe-area-inset-top, 0px))",
           }}
         >
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
+          <div className="sakhi-consult-header-inner flex items-center justify-between gap-3" style={!isMobile ? { paddingTop: 4, paddingBottom: 4 } : undefined}>
             <div className="flex items-center gap-3 min-w-0 flex-1">
               {onFinish && (
                 <button
                   type="button"
                   onClick={onFinish}
-                  className="sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple"
-                  style={{ width: 44, height: 44, borderRadius: 999, background: "rgba(2, 6, 23, 0.02)" }}
+                  className="sakhi-icon-action sakhi-tap sakhi-focus-ring sakhi-ripple"
                   title="Back"
                   aria-label="Back"
                 >
@@ -1412,8 +1438,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                   <button
                     type="button"
                     onClick={handleAskReview}
-                    className="sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
-                    style={{ width: 44, height: 44, borderRadius: 999, background: "rgba(245, 158, 11, 0.10)", borderColor: "rgba(245, 158, 11, 0.18)", color: "#92400e" }}
+                    className="sakhi-icon-action sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+                    data-tone="review"
                     aria-label="Review"
                     title="Review"
                   >
@@ -1423,8 +1449,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     type="button"
                     onClick={handleWhatsAppShare}
                     data-testid="consultation-whatsapp-button"
-                    className="sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
-                    style={{ width: 44, height: 44, borderRadius: 999, background: "rgba(34, 197, 94, 0.10)", borderColor: "rgba(34, 197, 94, 0.18)", color: "#166534" }}
+                    className="sakhi-icon-action sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+                    data-tone="whatsapp"
                     aria-label="WhatsApp prescription"
                     title="WhatsApp Rx"
                   >
@@ -1433,8 +1459,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                   <button
                     type="button"
                     onClick={handleWhatsAppBill}
-                    className="sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
-                    style={{ width: 44, height: 44, borderRadius: 999, background: "rgba(5, 150, 105, 0.10)", borderColor: "rgba(5, 150, 105, 0.18)", color: "#065f46" }}
+                    className="sakhi-icon-action sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+                    data-tone="bill"
                     aria-label="WhatsApp bill"
                     title="WhatsApp Bill"
                   >
@@ -1446,7 +1472,17 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                   <button
                     type="button"
                     onClick={handleAskReview}
-                    className="rounded-2xl bg-amber-500 px-4 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-amber-400/30"
+                    className="sakhi-tap sakhi-focus-ring"
+                    style={{
+                      minHeight: 44,
+                      padding: "0 var(--space-3)",
+                      borderRadius: 999,
+                      border: "1px solid rgba(245, 158, 11, 0.22)",
+                      background: "rgba(245, 158, 11, 0.10)",
+                      color: "#92400e",
+                      fontWeight: 950,
+                      fontSize: 12,
+                    }}
                   >
                     ⭐ Review
                   </button>
@@ -1454,14 +1490,34 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     type="button"
                     onClick={handleWhatsAppShare}
                     data-testid="consultation-whatsapp-button"
-                    className="rounded-2xl bg-emerald-500 px-4 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-emerald-400/30"
+                    className="sakhi-tap sakhi-focus-ring"
+                    style={{
+                      minHeight: 44,
+                      padding: "0 var(--space-3)",
+                      borderRadius: 999,
+                      border: "1px solid rgba(34, 197, 94, 0.22)",
+                      background: "rgba(34, 197, 94, 0.10)",
+                      color: "#166534",
+                      fontWeight: 950,
+                      fontSize: 12,
+                    }}
                   >
                     📲 WA Rx
                   </button>
                   <button
                     type="button"
                     onClick={handleWhatsAppBill}
-                    className="rounded-2xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-emerald-500/30"
+                    className="sakhi-tap sakhi-focus-ring"
+                    style={{
+                      minHeight: 44,
+                      padding: "0 var(--space-3)",
+                      borderRadius: 999,
+                      border: "1px solid rgba(5, 150, 105, 0.22)",
+                      background: "rgba(5, 150, 105, 0.10)",
+                      color: "#065f46",
+                      fontWeight: 950,
+                      fontSize: 12,
+                    }}
                   >
                     💰 Bill
                   </button>
@@ -1472,15 +1528,15 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowPrintMenu((v) => !v)}
-                  className={isMobile ? "sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple" : "rounded-2xl bg-slate-800/80 px-4 py-2 text-xs font-semibold text-white shadow-sm"}
+                  className={isMobile ? "sakhi-icon-action sakhi-tap sakhi-focus-ring sakhi-ripple" : "rounded-2xl bg-slate-800/80 px-4 py-2 text-xs font-semibold text-white shadow-sm"}
                   aria-label="Print"
                   title="Print"
-                  style={isMobile ? { width: 44, height: 44, borderRadius: 999, background: "rgba(2, 6, 23, 0.04)", borderColor: "rgba(2, 6, 23, 0.08)", color: "#0f172a" } : undefined}
+                  data-tone={isMobile ? "print" : undefined}
                 >
                   {isMobile ? "🖨️" : "🖨️ Print ▾"}
                 </button>
                 {showPrintMenu && (
-                  <div className="absolute right-0 top-full z-40 mt-2 w-48 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl">
+                  <div className="sakhi-menu-panel absolute right-0 top-full z-40 mt-2 w-48">
                     <button onClick={handlePrintRx} className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-900 hover:bg-slate-50">📋 Prescription</button>
                     <button onClick={() => { setShowSticker(true); setShowPrintMenu(false); }} className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-900 hover:bg-slate-50">🏷️ Sticker</button>
                     <button onClick={() => { handlePrintLetter(); setShowPrintMenu(false); }} className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-900 hover:bg-slate-50">📄 Certificate</button>
@@ -1490,14 +1546,9 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
             </div>
           </div>
 
-          {isMobile && (
-            <div className="mx-auto mt-3 max-w-6xl">
-              <div
-                data-testid="consultation-stage-strip"
-                className="sakhi-segmented"
-                role="tablist"
-                aria-label="Consultation stages"
-              >
+          <div className="sakhi-consult-header-inner mt-3">
+            {isMobile ? (
+              <div data-testid="consultation-stage-strip" className="sakhi-segmented" role="tablist" aria-label="Consultation stages">
                 {stageItems.map((item) => (
                   <button
                     key={item.id}
@@ -1519,8 +1570,33 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                   </button>
                 ))}
               </div>
-            </div>
-          )}
+            ) : (
+              <div
+                data-testid="consultation-stage-strip"
+                role="tablist"
+                aria-label="Consultation sections"
+                className="sakhi-tabstrip"
+              >
+                {stageItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="tab"
+                    aria-selected="false"
+                    data-testid={`consultation-stage-${item.id}`}
+                    onClick={() => {
+                      haptic("tap");
+                      scrollToStageSection(item.id);
+                    }}
+                    className="sakhi-tab sakhi-tap sakhi-focus-ring sakhi-ripple"
+                    style={isTablet ? { background: "rgba(2,6,23,0.02)" } : undefined}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <main
@@ -1533,7 +1609,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               : undefined,
           }}
         >
-          <div className="space-y-4">
+          <div className={isMobile ? "space-y-4" : "space-y-6"}>
             <div
               data-stage="complaint"
               className="sakhi-stage-pane"
@@ -1759,7 +1835,10 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                       key={med.id ?? idx}
                       data-testid={`medicine-card-${idx}`}
                       className="sakhi-surface"
-                      style={{ padding: "var(--space-3)", background: "var(--surface)" }}
+                      style={{
+                        padding: isMobile ? "var(--space-3)" : "var(--space-4)",
+                        background: "var(--surface)",
+                      }}
                     >
                       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0 space-y-3">
@@ -2189,22 +2268,13 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 left: 0,
                 right: 0,
                 bottom: `calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px))`,
-                padding: "var(--space-2) var(--space-3)",
-                background: "transparent",
                 zIndex: 50,
                 boxSizing: "border-box",
               }}
             >
-              <div style={{ maxWidth: 720, margin: "0 auto" }}>
+              <div className="sakhi-dock-inner" style={{ maxWidth: 720 }}>
                 <div
-                  className="sakhi-surface"
-                  style={{
-                    padding: "var(--space-2)",
-                    borderRadius: "var(--radius-4)",
-                    boxShadow: "var(--shadow-2)",
-                    background: "rgba(255,255,255,0.92)",
-                    backdropFilter: "blur(12px)",
-                  }}
+                  className="sakhi-dock-panel"
                 >
                   <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
                 <button
@@ -2216,32 +2286,28 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     patch({ medicines: next });
                     setMobileStage("remedy");
                   }}
-                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid var(--border)", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a", padding: "0 14px" }}
-                  className="sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+                  className="sakhi-dock-btn sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
                 >
                   + Remedy
                 </button>
                 <button
                   type="button"
                   onClick={() => { haptic("tap"); setShowNotesSheet(true); }}
-                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid var(--border)", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a", padding: "0 14px" }}
-                  className="sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+                  className="sakhi-dock-btn sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
                 >
                   Notes
                 </button>
                 <button
                   type="button"
                   onClick={() => { haptic("tap"); setShowFollowUpSheet(true); }}
-                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid var(--border)", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a", padding: "0 14px" }}
-                  className="sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+                  className="sakhi-dock-btn sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
                 >
                   Follow-up
                 </button>
                 <button
                   type="button"
                   onClick={() => { haptic("tap"); setShowTemplatesSheet(true); }}
-                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid var(--border)", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a", padding: "0 14px" }}
-                  className="sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+                  className="sakhi-dock-btn sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
                 >
                   Templates
                 </button>
@@ -2254,8 +2320,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     void saveAndMaybeToast({ next: shouldNext });
                   }}
                   disabled={saving}
-                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid rgba(13, 115, 119, 0.0)", background: "var(--brand)", color: "#fff", fontWeight: 950, fontSize: 12, opacity: saving ? 0.65 : 1, padding: "0 14px", boxShadow: "0 1px 0 rgba(255,255,255,0.14) inset" }}
-                  className="sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+                  className="sakhi-dock-cta sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+                  style={saving ? { opacity: 0.65 } : undefined}
                 >
                   {saving ? "Saving…" : (queue.some((e) => e.status === "waiting" && e.patientId !== patientId) ? "Save & Next" : "Save")}
                 </button>

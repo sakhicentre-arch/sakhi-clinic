@@ -4,6 +4,8 @@ import App from "./App";
 import { usePatientStore } from "./store/usePatientStore";
 import { initSyncService, notifyHydrationComplete, requestQueueSnapshot } from "./services/syncService";
 import { registerSW } from 'virtual:pwa-register';
+import { initAppLifecycleRuntime } from "./services/appLifecycleRuntimeService";
+import { logOperationalEvent } from "./services/operationalEventLogService";
 
 const root = ReactDOM.createRoot(document.getElementById("root")!);
 
@@ -25,8 +27,19 @@ const root = ReactDOM.createRoot(document.getElementById("root")!);
     await usePatientStore.getState().loadPatients();
     notifyHydrationComplete();
     requestQueueSnapshot();
+    await logOperationalEvent({
+      level: "info",
+      type: "app.hydration.complete",
+      message: "Initial hydration completed",
+    });
   } catch (err) {
     console.error('[main] Patient hydration failed:', err);
+    await logOperationalEvent({
+      level: "error",
+      type: "app.hydration.failure",
+      message: "Initial hydration failed",
+      data: { error: err instanceof Error ? err.message : String(err) },
+    }).catch(() => {});
   }
 
   root.render(
@@ -34,6 +47,14 @@ const root = ReactDOM.createRoot(document.getElementById("root")!);
       <App />
     </React.StrictMode>
   );
+
+  // Operational runtime integration: non-blocking lifecycle orchestration.
+  // Intentionally started after initial render to protect startup performance.
+  try {
+    window.setTimeout(() => initAppLifecycleRuntime(), 0);
+  } catch (err) {
+    console.warn("[main] initAppLifecycleRuntime failed", err);
+  }
 
   // Register service worker and surface update/offline lifecycle events
   try {

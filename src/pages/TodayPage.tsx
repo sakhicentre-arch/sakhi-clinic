@@ -15,7 +15,8 @@ import { useAppointmentStore } from "../store/useAppointmentStore";
 import { useQueueStore, QueueEntry } from "../store/queueStore";
 import { useUIStore } from "../store/uiStore";
 import { normalizePatientPhone } from "../utils/whatsapp";
-import { getAllPatientsFromDB, db } from "../services/db";
+import { patientRepository } from "../repositories/patientRepository";
+import { appointmentRepository } from "../repositories/appointmentRepository";
 import { PullToRefreshScrollRegion, SplitPane } from "../components/layout/LayoutPrimitives";
 import { openWhatsApp } from "../services/whatsappService";
 import { MobileCard, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
@@ -150,7 +151,7 @@ function AddToQueueDropdown({ onAdd, onClose }:
 
       try {
         // Query canonical DB for up-to-date results
-        const all = await getAllPatientsFromDB();
+        const all = await patientRepository.list();
         let filtered = all.filter((p) =>
           (p.name || '').toLowerCase().includes(t) || (p.phone || '').includes(t)
         ).slice(0, 8);
@@ -158,7 +159,9 @@ function AddToQueueDropdown({ onAdd, onClose }:
         // Fallback: if no patients found, try appointments (recent bookings)
         if (filtered.length === 0) {
           try {
-            const appts = await db.appointments.filter(a => !a.deletedAt && (a.patientName || '').toLowerCase().includes(t)).toArray();
+            const appts = (await appointmentRepository.list()).filter(
+              (a) => (a.patientName || "").toLowerCase().includes(t)
+            );
             const seen = new Set<string>();
             const fromAppts = appts.filter(a => {
               if (!a.patientId) return false;
@@ -185,12 +188,13 @@ function AddToQueueDropdown({ onAdd, onClose }:
   
 
   return (
-    <div style={{ position: "absolute", top: "calc(100% + 8px)", left: 0, right: 0,
-      background: "#fff", borderRadius: "16px", border: "1px solid #e2e8f0",
-      boxShadow: "0 20px 48px rgba(15,23,42,0.14)", zIndex: 200, overflow: "hidden" }}>
+    <div
+      className="sakhi-menu-panel"
+      style={{ position: "absolute", top: "calc(100% + 8px)", left: 0, right: 0, zIndex: 200 }}
+    >
       {/* Search */}
-      <div style={{ padding: "12px 14px", borderBottom: "1px solid #f1f5f9",
-        display: "flex", alignItems: "center", gap: "10px" }}>
+      <div style={{ padding: "var(--space-2) var(--space-3)", borderBottom: "1px solid rgba(226, 232, 240, 0.8)",
+        display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
         <Search size={14} color="#94a3b8" />
         <input
           ref={inputRef}
@@ -198,9 +202,9 @@ function AddToQueueDropdown({ onAdd, onClose }:
           onChange={e => setQ(e.target.value)}
           data-testid="queue-search-input"
           placeholder="Search patient…"
-          style={{ border: "none", outline: "none", fontSize: "14px",
-            fontFamily: "inherit", flex: 1, background: "transparent", color: "#0f172a" }} />
-        <button onClick={onClose} style={{ background: "none", border: "none",
+          style={{ border: "none", outline: "none", fontSize: 14,
+            fontFamily: "inherit", flex: 1, background: "transparent", color: "#0f172a", fontWeight: 700 }} />
+        <button onClick={onClose} className="sakhi-tap sakhi-focus-ring" style={{ background: "none", border: "none",
           cursor: "pointer", color: "#94a3b8", padding: 0 }}>
           <X size={14} />
         </button>
@@ -285,7 +289,7 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation, isMobile = fals
     const ensurePatient = async () => {
       if (p) return p;
       try {
-        const fromDb = await db.patients.get(patientId);
+        const fromDb = await patientRepository.getById(patientId);
         if (fromDb && !fromDb.deletedAt) {
           // update transient store for UI
           usePatientStore.setState((s) => ({ patients: [...s.patients, fromDb] }));
@@ -293,7 +297,11 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation, isMobile = fals
           return p;
         }
         // Fallback: find appointment with same patientId and use its name
-        const appt = (await db.appointments.get({ patientId } as any)) || null;
+        const appts = await appointmentRepository.listByPatient(patientId);
+        const appt =
+          appts
+            .slice()
+            .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))[0] || null;
         if (appt) {
           const pseudo = { id: appt.patientId, name: appt.patientName || '', phone: '' } as any;
           usePatientStore.setState((s) => ({ patients: [...s.patients, pseudo] }));
@@ -342,22 +350,24 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation, isMobile = fals
   return (
     <div
       data-testid="queue-panel"
+      className={isMobile ? "" : "sakhi-module"}
       style={{
         width: isMobile ? "100%" : "280px",
         maxWidth: "100%",
         flexShrink: 0,
         minWidth: 0,
-        background: "#fff",
-        borderRight: isMobile ? "none" : "1px solid #f1f5f9",
-        borderBottom: isMobile ? "1px solid #f1f5f9" : "none",
+        background: isMobile ? "transparent" : undefined,
+        borderRight: isMobile ? "none" : undefined,
+        borderBottom: isMobile ? "1px solid rgba(226, 232, 240, 0.8)" : "none",
         display: "flex",
         flexDirection: "column",
         height: isMobile ? "auto" : "100%",
+        overflow: "hidden",
         boxSizing: "border-box",
       }}>
 
       {/* Header */}
-      <div style={{ padding: "20px 16px 14px", borderBottom: "1px solid #f1f5f9" }}>
+      <div className={isMobile ? "" : "sakhi-module-header"} style={isMobile ? { padding: "20px 16px 14px", borderBottom: "1px solid rgba(226, 232, 240, 0.8)" } : undefined}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
           <div>
             <h2 style={{ margin: 0, fontSize: "15px", fontWeight: 900, color: "#0f172a" }}>
@@ -368,13 +378,11 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation, isMobile = fals
             </div>
           </div>
           <div style={{ display: "flex", gap: "6px" }}>
-            <span style={{ fontSize: "11px", fontWeight: 800, color: "#64748b",
-              background: "#f1f5f9", padding: "3px 8px", borderRadius: "8px" }}>
+            <span className="sakhi-pill" style={{ fontSize: 11, padding: "3px 8px", background: "rgba(2,6,23,0.02)" }}>
               {waiting} waiting
             </span>
             {done > 0 && (
-              <span style={{ fontSize: "11px", fontWeight: 800, color: "#16a34a",
-                background: "#f0fdf4", padding: "3px 8px", borderRadius: "8px" }}>
+              <span className="sakhi-pill" style={{ fontSize: 11, padding: "3px 8px", background: "rgba(22,163,74,0.08)", borderColor: "rgba(22,163,74,0.18)", color: "#166534" }}>
                 {done} done
               </span>
             )}
@@ -394,10 +402,11 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation, isMobile = fals
               }
               setShowAdd(s => !s);
             }}
+            className="sakhi-tap sakhi-focus-ring sakhi-ripple"
             style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center",
-              gap: "7px", padding: "9px", borderRadius: "10px",
-              background: "#0D7377", border: "none", cursor: "pointer",
-              color: "#fff", fontSize: "13px", fontWeight: 700, transition: "all 0.2s" }}>
+              gap: 7, minHeight: 48, borderRadius: "var(--radius-3)",
+              background: "var(--brand)", border: "1px solid rgba(13,115,119,0)",
+              cursor: "pointer", color: "#fff", fontSize: 13, fontWeight: 900, letterSpacing: "-0.2px" }}>
             <Plus size={15} />
             Add Patient to Queue
           </button>
@@ -408,7 +417,7 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation, isMobile = fals
       </div>
 
       {/* Queue list */}
-      <div data-testid="queue-list" style={{ flex: 1, overflowY: "auto", padding: "8px 8px" }}>
+      <div data-testid="queue-list" className={isMobile ? "" : "sakhi-module-body"} style={{ flex: 1, overflowY: "auto", padding: isMobile ? "8px 8px" : undefined }}>
         {queue.length === 0 ? (
           <div data-testid="queue-empty-state" style={{ padding: "40px 20px", textAlign: "center" }}>
             <div style={{ fontSize: "36px", marginBottom: "12px" }}>🏥</div>
@@ -427,11 +436,9 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation, isMobile = fals
                 key={entry.queueId}
                 data-testid={isActive ? `queue-row-active-${entry.queueId}` : `queue-row-${entry.queueId}`}
                 onClick={() => entry.status !== "done" && onSelect(entry)}
-                style={{ padding: "10px 10px", borderRadius: "12px", marginBottom: "4px",
-                  cursor: entry.status === "done" ? "default" : "pointer",
-                  background: isActive ? "#f0fdfd" : "transparent",
-                  border: `1.5px solid ${isActive ? "#0D7377" : "transparent"}`,
-                  transition: "all 0.15s ease", position: "relative" }}>
+                className="sakhi-row-card sakhi-tap"
+                data-active={String(isActive)}
+                style={{ cursor: entry.status === "done" ? "default" : "pointer", transition: "all 0.15s ease", position: "relative" }}>
 
                 <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
                   {/* Position number */}
@@ -471,17 +478,15 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation, isMobile = fals
                         <button
                           data-testid={`queue-move-up-${entry.queueId}`}
                           onClick={e => { e.stopPropagation(); moveUp(entry.queueId); }}
-                          style={{ background: "none", border: "1px solid #e2e8f0",
-                            borderRadius: "6px", cursor: "pointer", padding: "2px",
-                            color: "#94a3b8", display: "flex" }}>
+                          className="sakhi-mini-iconbtn sakhi-tap sakhi-focus-ring sakhi-ripple"
+                          style={{ cursor: "pointer" }}>
                           <ArrowUp size={11} />
                         </button>
                         <button
                           data-testid={`queue-move-down-${entry.queueId}`}
                           onClick={e => { e.stopPropagation(); moveDown(entry.queueId); }}
-                          style={{ background: "none", border: "1px solid #e2e8f0",
-                            borderRadius: "6px", cursor: "pointer", padding: "2px",
-                            color: "#94a3b8", display: "flex" }}>
+                          className="sakhi-mini-iconbtn sakhi-tap sakhi-focus-ring sakhi-ripple"
+                          style={{ cursor: "pointer" }}>
                           <ArrowDown size={11} />
                         </button>
                       </>
@@ -489,9 +494,8 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation, isMobile = fals
                     <button
                       data-testid={`queue-remove-${entry.queueId}`}
                       onClick={e => { e.stopPropagation(); removeFromQueue(entry.queueId); }}
-                      style={{ background: "none", border: "1px solid #e2e8f0",
-                        borderRadius: "6px", cursor: "pointer", padding: "2px",
-                        color: "#94a3b8", display: "flex" }}>
+                      className="sakhi-mini-iconbtn sakhi-tap sakhi-focus-ring sakhi-ripple"
+                      style={{ cursor: "pointer" }}>
                       <X size={11} />
                     </button>
                   </div>
@@ -506,11 +510,13 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation, isMobile = fals
                       setStatus(entry.queueId, "in-progress");
                       goToConsultation(entry.patientId, entry.appointmentId);
                     }}
-                    style={{ marginTop: "8px", marginLeft: "30px", width: "calc(100% - 30px)",
-                      padding: "7px", borderRadius: "8px", background: "#0D7377",
-                      border: "none", color: "#fff", fontSize: "12px", fontWeight: 700,
+                    className="sakhi-tap sakhi-focus-ring sakhi-ripple"
+                    style={{ marginTop: "var(--space-2)", marginLeft: "30px", width: "calc(100% - 30px)",
+                      minHeight: 44, borderRadius: "var(--radius-2)", background: "var(--brand)",
+                      border: "1px solid rgba(13, 115, 119, 0)",
+                      color: "#fff", fontSize: 12, fontWeight: 900,
                       cursor: "pointer", display: "flex", alignItems: "center",
-                      justifyContent: "center", gap: "6px" }}>
+                      justifyContent: "center", gap: 6, boxShadow: "0 1px 0 rgba(255,255,255,0.14) inset" }}>
                     <Stethoscope size={13} /> Start Consultation
                   </button>
                 )}
@@ -593,17 +599,17 @@ function ActivePatientPanel({ entry, goToConsultation, isMobile = false }:
         flex: isMobile ? "none" : 1,
         width: isMobile ? "100%" : "auto",
         minWidth: 0,
-        overflowY: isMobile ? "visible" : "auto",
-        background: "#f8fafc",
-        padding: isMobile ? "16px" : "24px",
+        overflowY: "hidden",
+        background: isMobile ? "#f8fafc" : undefined,
+        padding: 0,
         boxSizing: "border-box",
       }}
+      className={isMobile ? "" : "sakhi-module"}
     >
+      <div className={isMobile ? "" : "sakhi-module-body"} style={{ flex: 1, overflowY: isMobile ? "visible" : "auto", padding: isMobile ? "16px" : undefined }}>
 
       {/* Patient Header Card */}
-      <div style={{ background: "#fff", borderRadius: "20px",
-        border: "1px solid #e2e8f0", padding: "24px", marginBottom: "16px",
-        boxShadow: "0 4px 20px rgba(15,23,42,0.04)" }}>
+      <div className="sakhi-surface" style={{ padding: "var(--space-4)", marginBottom: "var(--space-3)", boxShadow: "var(--shadow-1)" }}>
 
         <div style={{ display: "flex", alignItems: "flex-start", gap: "18px" }}>
           {/* Avatar */}
@@ -745,34 +751,22 @@ function ActivePatientPanel({ entry, goToConsultation, isMobile = false }:
       </div>
 
       {/* Quick Stats Row */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr",
-          gap: "12px",
-          minWidth: 0,
-        }}
-      >
-        <div style={{ background: "#fff", borderRadius: "14px",
-          border: "1px solid #f1f5f9", padding: "14px 16px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr", gap: "var(--space-2)", minWidth: 0 }}>
+        <div className="sakhi-surface-flat" style={{ padding: "var(--space-3)" }}>
           <div style={{ fontSize: "11px", fontWeight: 700, color: "#94a3b8",
             textTransform: "uppercase", letterSpacing: "0.5px" }}>Visits</div>
           <div style={{ fontSize: "24px", fontWeight: 900, color: "#0f172a", marginTop: "4px" }}>
             {patientConsults.length}
           </div>
         </div>
-        <div style={{ background: "#fff", borderRadius: "14px",
-          border: "1px solid #f1f5f9", padding: "14px 16px" }}>
+        <div className="sakhi-surface-flat" style={{ padding: "var(--space-3)" }}>
           <div style={{ fontSize: "11px", fontWeight: 700, color: "#94a3b8",
             textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Paid</div>
           <div style={{ fontSize: "20px", fontWeight: 900, color: "#16a34a", marginTop: "4px" }}>
             {fmtCurrency(revenue.paid)}
           </div>
         </div>
-        <div style={{ background: revenue.pending > 0 ? "#fef2f2" : "#fff",
-          borderRadius: "14px",
-          border: `1px solid ${revenue.pending > 0 ? "#fecaca" : "#f1f5f9"}`,
-          padding: "14px 16px" }}>
+        <div className="sakhi-surface-flat" style={{ padding: "var(--space-3)", background: revenue.pending > 0 ? "rgba(239, 68, 68, 0.06)" : "var(--surface)" , borderColor: revenue.pending > 0 ? "rgba(239,68,68,0.18)" : "var(--border)" }}>
           <div style={{ fontSize: "11px", fontWeight: 700, color: "#94a3b8",
             textTransform: "uppercase", letterSpacing: "0.5px" }}>Pending</div>
           <div style={{ fontSize: "20px", fontWeight: 900,
@@ -784,17 +778,14 @@ function ActivePatientPanel({ entry, goToConsultation, isMobile = false }:
 
       {/* Case History Preview */}
       {patientConsults.length > 1 && (
-        <div style={{ background: "#fff", borderRadius: "20px",
-          border: "1px solid #e2e8f0", padding: "20px", marginTop: "16px" }}>
+        <div className="sakhi-surface-flat" style={{ padding: "var(--space-4)", marginTop: "var(--space-3)" }}>
           <div style={{ fontSize: "11px", fontWeight: 800, color: "#94a3b8",
             textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: "14px" }}>
             Visit History ({patientConsults.length} total)
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "220px", overflowY: "auto" }}>
             {patientConsults.slice(1, 6).map((c, i) => (
-              <div key={c.id || i} style={{ display: "flex", alignItems: "center",
-                gap: "12px", padding: "10px 12px", borderRadius: "10px",
-                background: "#f8fafc", border: "1px solid #f1f5f9" }}>
+              <div key={c.id || i} className="sakhi-surface-muted" style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 12px", borderRadius: "var(--radius-2)" }}>
                 <div style={{ width: 6, height: 6, borderRadius: "50%",
                   background: c.outcome === "Improved" ? "#16a34a" :
                     c.outcome === "Worse" ? "#ef4444" : "#94a3b8",
@@ -808,9 +799,7 @@ function ActivePatientPanel({ entry, goToConsultation, isMobile = false }:
                   {c.chiefComplaint || c.caseText?.slice(0, 50) || "—"}
                 </div>
                 {c.medicines?.[0]?.name && (
-                  <span style={{ fontSize: "11px", color: "#64748b", background: "#fff",
-                    border: "1px solid #e2e8f0", padding: "2px 8px", borderRadius: "6px",
-                    fontWeight: 700, flexShrink: 0 }}>
+                  <span className="sakhi-pill" style={{ fontSize: 11, padding: "2px 8px", background: "rgba(255,255,255,0.7)" }}>
                     {c.medicines[0].name}
                   </span>
                 )}
@@ -819,6 +808,7 @@ function ActivePatientPanel({ entry, goToConsultation, isMobile = false }:
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -910,20 +900,22 @@ function StatsPanel({ goToConsultation, isMobile = false }:
 
   return (
     <div
+      className={isMobile ? "" : "sakhi-module"}
       style={{
         width: isMobile ? "100%" : "260px",
         maxWidth: "100%",
         flexShrink: 0,
         minWidth: 0,
-        background: isMobile ? "transparent" : "#f8fafc",
-        borderLeft: isMobile ? "none" : "1px solid #f1f5f9",
-        overflowY: isMobile ? "visible" : "auto",
+        background: isMobile ? "transparent" : undefined,
+        borderLeft: isMobile ? "none" : undefined,
+        overflowY: "hidden",
         display: "flex",
         flexDirection: "column",
         gap: "0",
         boxSizing: "border-box",
       }}
     >
+      <div className={isMobile ? "" : "sakhi-module-body"} style={{ flex: 1, overflowY: isMobile ? "visible" : "auto", padding: isMobile ? undefined : undefined }}>
 
       {/* Stats */}
       <div style={{ padding: "16px 14px 10px" }}>
@@ -942,7 +934,7 @@ function StatsPanel({ goToConsultation, isMobile = false }:
 
       {/* Missed Follow-ups */}
       {missedFollowUps.length > 0 && (
-        <div style={{ padding: "14px 14px 10px", borderTop: "1px solid #f1f5f9" }}>
+        <div style={{ padding: "14px 14px 10px", borderTop: "1px solid rgba(226, 232, 240, 0.8)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "10px" }}>
             <Bell size={13} color="#f59e0b" />
             <div style={{ fontSize: "11px", fontWeight: 800, color: "#94a3b8",
@@ -1006,19 +998,18 @@ function StatsPanel({ goToConsultation, isMobile = false }:
           </span>
         </div>
 
-        {todayAppts.length === 0 ? (
+      {todayAppts.length === 0 ? (
           <div style={{ padding: "16px 0", textAlign: "center",
             fontSize: "12px", color: "#94a3b8", fontWeight: 600 }}>
             No appointments for today
           </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            {todayAppts.map(appt => {
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+          {todayAppts.map(appt => {
               const inQueue = isInQueue(appt.patientId);
               const statusColor = apptStatusColor(appt.status);
               return (
-                <div key={appt.id} style={{ padding: "10px 12px", borderRadius: "10px",
-                  background: "#fff", border: "1px solid #e2e8f0" }}>
+                <div key={appt.id} className="sakhi-surface-flat" style={{ padding: "10px 12px", borderRadius: "var(--radius-2)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between",
                     alignItems: "flex-start", gap: "8px", marginBottom: "6px" }}>
                     <div>
@@ -1040,6 +1031,7 @@ function StatsPanel({ goToConsultation, isMobile = false }:
 
                   {!inQueue && appt.status !== "done" && (
                     <button onClick={() => handleAddApptToQueue(appt)}
+                      className="sakhi-tap sakhi-focus-ring sakhi-ripple"
                       style={{ display: "flex", alignItems: "center", gap: "5px",
                         padding: "5px 10px", borderRadius: "7px", width: "100%",
                         justifyContent: "center", background: "#f0fdfd",
@@ -1059,6 +1051,7 @@ function StatsPanel({ goToConsultation, isMobile = false }:
             })}
           </div>
         )}
+      </div>
       </div>
     </div>
   );
@@ -1105,29 +1098,35 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
   );
 
   const commonShellStyle: React.CSSProperties = {
-    background: "#f8fafc",
-    fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif",
+    background: "var(--surface-muted)",
     width: "100%",
     minWidth: 0,
     boxSizing: "border-box",
   };
 
   const desktopLayout = (
-    <SplitPane
-      style={{
-        ...commonShellStyle,
-        display: "flex",
-        height: "100%",
-      }}
-    >
-      <QueuePanel
-        activeQueueId={activeQueueId}
-        onSelect={(entry) => setActiveQueueId(entry.queueId)}
-        goToConsultation={goToConsultation}
-      />
-      <ActivePatientPanel entry={activeEntry} goToConsultation={goToConsultation} />
-      <StatsPanel goToConsultation={goToConsultation} />
-    </SplitPane>
+    <div className="sakhi-workstation">
+      <div className="sakhi-rail" style={{ height: "100%", minHeight: 0 }}>
+        <SplitPane
+          style={{
+            ...commonShellStyle,
+            display: "flex",
+            height: "100%",
+            minHeight: 0,
+            gap: "var(--space-3)",
+            padding: "var(--space-3)",
+          }}
+        >
+          <QueuePanel
+            activeQueueId={activeQueueId}
+            onSelect={(entry) => setActiveQueueId(entry.queueId)}
+            goToConsultation={goToConsultation}
+          />
+          <ActivePatientPanel entry={activeEntry} goToConsultation={goToConsultation} />
+          <StatsPanel goToConsultation={goToConsultation} />
+        </SplitPane>
+      </div>
+    </div>
   );
 
   const MobileTodayCommandCenter = () => {
@@ -1172,16 +1171,16 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
 
     return (
       <ResponsiveContainer
+        className="sakhi-page"
         style={{
           ...commonShellStyle,
           display: "flex",
           flexDirection: "column",
-          gap: 16,
-          padding: "16px 16px 24px",
+          gap: "var(--space-3)",
         }}
       >
         {/* Hero: Now Serving */}
-        <MobileCard style={{ padding: 16, borderRadius: 20 }}>
+        <MobileCard>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.18em", color: "#64748b", textTransform: "uppercase" }}>
@@ -1245,7 +1244,7 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
         </MobileCard>
 
         {/* Queue strip */}
-        <MobileCard style={{ padding: 16, borderRadius: 20 }}>
+        <MobileCard>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 16 }}>
             <div style={{ fontSize: 12, fontWeight: 900, color: "#0f172a" }}>Queue</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -1389,7 +1388,7 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
                 (async () => {
                   if (!p) {
                     try {
-                      const fromDb = await db.patients.get(patientId);
+                      const fromDb = await patientRepository.getById(patientId);
                       if (fromDb && !(fromDb as any).deletedAt) p = fromDb as any;
                     } catch {}
                   }

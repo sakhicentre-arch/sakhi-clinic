@@ -76,6 +76,9 @@ export interface Medicine {
   createdAt?: string;
   updatedAt?: string;
   deletedAt?: number;
+  version?: number;
+  deviceId?: string;
+  syncStatus?: "local" | "pending" | "synced" | "conflict";
 }
 
 export interface Consultation {
@@ -138,6 +141,9 @@ export interface Consultation {
   createdAt?: string;
   updatedAt?: string;
   deletedAt?: number;
+  version?: number;
+  deviceId?: string;
+  syncStatus?: "local" | "pending" | "synced" | "conflict";
 
   // Idempotency stamp for AI Learning Engine
   learnedAt?: string;
@@ -171,6 +177,9 @@ export interface Patient {
   createdAt?: string;
   updatedAt?: string;
   deletedAt?: number;
+  version?: number;
+  deviceId?: string;
+  syncStatus?: "local" | "pending" | "synced" | "conflict";
 }
 
 export interface Appointment {
@@ -186,6 +195,9 @@ export interface Appointment {
   createdAt?: string;
   updatedAt?: string;
   deletedAt?: number;
+  version?: number;
+  deviceId?: string;
+  syncStatus?: "local" | "pending" | "synced" | "conflict";
 }
 
 export interface LearningPattern {
@@ -213,9 +225,40 @@ export interface CaseMemoryEntry {
   createdAt?: string;
   updatedAt?: string;
   deletedAt?: number;
+  version?: number;
+  deviceId?: string;
+  syncStatus?: "local" | "pending" | "synced" | "conflict";
 }
 
 // ✅ V47: Draft persistence for consultation auto-save
+export type OutboxOperationType = "create" | "update" | "delete";
+export type OutboxSyncStatus = "pending" | "synced" | "failed" | "conflict";
+
+export interface SyncOutboxEntry {
+  id: string;
+  entityType: "patient" | "consultation" | "appointment" | "queue" | "draft" | "caseMemory" | "learning";
+  entityId: string;
+  operationType: OutboxOperationType;
+  payload: any;
+  version: number;
+  deviceId: string;
+  timestamp: string;
+  syncStatus: OutboxSyncStatus;
+  retryCount: number;
+  lastAttemptAt?: string;
+}
+
+export type OperationalEventLevel = "info" | "warn" | "error";
+
+export interface OperationalEvent {
+  id: string;
+  timestamp: string;
+  level: OperationalEventLevel;
+  type: string;
+  message: string;
+  data?: any;
+}
+
 export interface ConsultationDraft {
   id: string;  // "draft-${patientId}"
   patientId: string;
@@ -230,6 +273,8 @@ class SakhiDB extends Dexie {
   caseMemory!: Dexie.Table<CaseMemoryEntry, number>;
   appointments!: Dexie.Table<Appointment, string>;
   drafts!: Dexie.Table<ConsultationDraft, string>;
+  syncOutbox!: Dexie.Table<SyncOutboxEntry, string>;
+  operationalEvents!: Dexie.Table<OperationalEvent, string>;
 
   constructor() {
     super("SakhiClinicDB");
@@ -295,7 +340,7 @@ class SakhiDB extends Dexie {
       });
     });
 
-    // ✅ V47: Consultation draft persistence (non-breaking)
+    // V47: Consultation draft persistence (non-breaking)
     this.version(47).stores({
       patients: "id, name, phone, nextFollowUpDate, lastVisit, deletedAt, createdAt, updatedAt",
       consultations: "id, patientId, appointmentId, date, outcome, clinicId, learnedAt, deletedAt, createdAt, updatedAt",
@@ -304,7 +349,34 @@ class SakhiDB extends Dexie {
       appointments: "id, date, patientId, status, clinic, [date+time+clinic], [clinic+date], deletedAt, createdAt, updatedAt",
       drafts: "id, patientId, savedAt"
     }).upgrade(() => {
-      // No migration — drafts table starts empty
+      // No migration - drafts table starts empty
+    });
+
+    // V48: Local mutation outbox (sync-ready, non-breaking)
+    this.version(48).stores({
+      patients: "id, name, phone, nextFollowUpDate, lastVisit, deletedAt, createdAt, updatedAt",
+      consultations: "id, patientId, appointmentId, date, outcome, clinicId, learnedAt, deletedAt, createdAt, updatedAt",
+      learning: "++id, [remedy+symptomKey], remedy, symptomKey",
+      caseMemory: "++id, patientId, remedy, outcome, deletedAt, createdAt, updatedAt",
+      appointments: "id, date, patientId, status, clinic, [date+time+clinic], [clinic+date], deletedAt, createdAt, updatedAt",
+      drafts: "id, patientId, savedAt",
+      syncOutbox: "id, entityType, entityId, operationType, timestamp, syncStatus, retryCount"
+    }).upgrade(() => {
+      // No migration - outbox starts empty
+    });
+
+    // V49: Local operational event log (non-breaking)
+    this.version(49).stores({
+      patients: "id, name, phone, nextFollowUpDate, lastVisit, deletedAt, createdAt, updatedAt",
+      consultations: "id, patientId, appointmentId, date, outcome, clinicId, learnedAt, deletedAt, createdAt, updatedAt",
+      learning: "++id, [remedy+symptomKey], remedy, symptomKey",
+      caseMemory: "++id, patientId, remedy, outcome, deletedAt, createdAt, updatedAt",
+      appointments: "id, date, patientId, status, clinic, [date+time+clinic], [clinic+date], deletedAt, createdAt, updatedAt",
+      drafts: "id, patientId, savedAt",
+      syncOutbox: "id, entityType, entityId, operationType, timestamp, syncStatus, retryCount",
+      operationalEvents: "id, timestamp, level, type"
+    }).upgrade(() => {
+      // No migration - operational log starts empty
     });
   }
 }

@@ -8,6 +8,8 @@
 import { db, Patient } from "./db";
 import { usePatientStore } from "../store/usePatientStore";
 import { broadcastSyncEvent } from "./syncService";
+import { getDeviceId } from "../utils/deviceId";
+import { enqueueOutbox } from "./outboxService";
 
 const nowIso = () => new Date().toISOString();
 
@@ -69,10 +71,26 @@ export async function addPatient(patient: Patient): Promise<void> {
     ...patient,
     createdAt: patient.createdAt || timestamp,
     updatedAt: timestamp,
+    version: typeof patient.version === "number" ? patient.version + 1 : 1,
+    deviceId: patient.deviceId || getDeviceId(),
+    syncStatus: patient.syncStatus || "local",
   };
   const key = await db.patients.add(record);
   // Ensure id present
   if (!record.id) record.id = String(key);
+
+  // Outbox: track mutation for future sync/backup pipelines.
+  try {
+    await enqueueOutbox({
+      entityType: "patient",
+      entityId: String(record.id),
+      operationType: "create",
+      payload: record,
+      version: record.version || 1,
+    });
+  } catch (err) {
+    console.warn("[patientService] outbox enqueue failed:", err);
+  }
 
   // Update transient store immediately so UI sees new patient
   try {
@@ -85,12 +103,33 @@ export async function addPatient(patient: Patient): Promise<void> {
 }
 
 export async function updatePatient(id: string, updates: Partial<Patient>): Promise<void> {
+  const existing = await db.patients.get(id);
+  const nextVersion =
+    typeof existing?.version === "number" ? existing.version + 1 : 1;
   const changed = await db.patients.update(id, {
     ...updates,
     updatedAt: nowIso(),
+    version: nextVersion,
+    deviceId: existing?.deviceId || getDeviceId(),
+    syncStatus: (existing as any)?.syncStatus || "local",
   });
   if (changed === 0) {
     throw new Error(`[patientService] Patient not found: ${id}`);
+  }
+
+  try {
+    const updated = await db.patients.get(id);
+    if (updated && !updated.deletedAt) {
+      await enqueueOutbox({
+        entityType: "patient",
+        entityId: String(id),
+        operationType: "update",
+        payload: updated,
+        version: (updated as any).version || nextVersion,
+      });
+    }
+  } catch (err) {
+    console.warn("[patientService] outbox enqueue failed:", err);
   }
 
   try {
@@ -110,7 +149,10 @@ export async function updatePatient(id: string, updates: Partial<Patient>): Prom
 export async function deletePatient(id: string): Promise<void> {
   const timestamp = Date.now();
   const updatedAt = nowIso();
+  let priorVersion = 1;
   await db.transaction("rw", [db.patients, db.consultations, db.appointments], async () => {
+    const existing = await db.patients.get(id);
+    priorVersion = typeof (existing as any)?.version === "number" ? (existing as any).version : 1;
     const changed = await db.patients.update(id, { deletedAt: timestamp, updatedAt });
     if (changed === 0) {
       throw new Error(`[patientService] Patient not found: ${id}`);
@@ -118,6 +160,18 @@ export async function deletePatient(id: string): Promise<void> {
     await db.consultations.where("patientId").equals(id).modify({ deletedAt: timestamp, updatedAt });
     await db.appointments.where("patientId").equals(id).modify({ deletedAt: timestamp, updatedAt });
   });
+
+  try {
+    await enqueueOutbox({
+      entityType: "patient",
+      entityId: String(id),
+      operationType: "delete",
+      payload: { id, deletedAt: timestamp, updatedAt },
+      version: priorVersion + 1,
+    });
+  } catch (err) {
+    console.warn("[patientService] outbox enqueue failed:", err);
+  }
 
   try {
     usePatientStore.setState((s) => ({

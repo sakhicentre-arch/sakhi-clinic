@@ -12,7 +12,7 @@ import {
 } from 'chart.js';
 import { Pie } from 'react-chartjs-2';
 
-import { db, ConsultationOutcome, normalizeOutcome, Consultation } from "../services/db"; 
+import { ConsultationOutcome, normalizeOutcome, Consultation } from "../services/db"; 
 import { getAllConsultations } from "../services/consultationService";
 import { getFollowUpAlerts, FollowUpAlert } from "../services/followupEngine";
 import { isValidPhone } from "../utils/whatsapp";
@@ -23,6 +23,7 @@ import { MobileCard, MobileSection, ResponsiveContainer } from "../components/la
 import { haptic } from "../utils/haptics";
 import { useQueueStore } from "../store/queueStore";
 import { PullToRefreshScrollRegion } from "../components/layout/LayoutPrimitives";
+import { patientRepository } from "../repositories/patientRepository";
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement, PointElement, LineElement
@@ -72,7 +73,7 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
     const fetchAnalytics = async () => {
       try {
         const [patients, allConsultations, rawAlerts] = await Promise.all([
-          db.patients.toArray(),
+          patientRepository.list(),
           getAllConsultations(),
           getFollowUpAlerts()
         ]);
@@ -416,7 +417,8 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
   }
 
   return (
-    <div style={containerStyle}>
+    <ResponsiveContainer data-testid="dashboard-root" className="sakhi-workstation">
+      <div className="sakhi-rail">
       <header style={headerStyle}>
         <div>
           <h1 style={titleStyle}>Clinic Command Center</h1>
@@ -590,16 +592,16 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
         </div>
       </div>
 
-    </div>
+      </div>
+    </ResponsiveContainer>
   );
 };
 
 // --- Styles ---
-const containerStyle: React.CSSProperties = { padding: "32px 40px", background: "#f8fafc", minHeight: "100vh", fontFamily: "'Lora', serif" };
-const headerStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 };
-const titleStyle: React.CSSProperties = { fontSize: 32, fontWeight: 800, color: "#0f172a", margin: 0 };
-const subtitleStyle: React.CSSProperties = { color: "#64748b", marginTop: 4, fontSize: 15 };
-const clinicSelectStyle: React.CSSProperties = { padding: "var(--space-2) var(--space-3)", borderRadius: "var(--radius-1)", border: "1.5px solid #e2e8f0", background: "#fff", fontWeight: 700, cursor: 'pointer', outline: 'none' };
+const headerStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 };
+const titleStyle: React.CSSProperties = { fontSize: 18, fontWeight: 950, color: "#0f172a", margin: 0, letterSpacing: "-0.2px" };
+const subtitleStyle: React.CSSProperties = { color: "#64748b", marginTop: 6, fontSize: 12, fontWeight: 800 };
+const clinicSelectStyle: React.CSSProperties = { padding: "0 var(--space-3)", height: 44, borderRadius: 999, border: "1px solid var(--border)", background: "rgba(2,6,23,0.02)", fontWeight: 900, cursor: 'pointer', outline: 'none' };
 const healthBadgeStyle = (score: number): React.CSSProperties => ({
   padding: "var(--space-2) var(--space-3)", borderRadius: "var(--radius-1)", fontWeight: 800, fontSize: 12,
   background: score > 85 ? "#dcfce7" : "#fee2e2",
@@ -607,16 +609,16 @@ const healthBadgeStyle = (score: number): React.CSSProperties => ({
   border: `1px solid ${score > 85 ? "#22c55e" : "#ef4444"}`,
   textTransform: 'uppercase',
 });
-const statGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 24, marginBottom: 32 };
-const mainGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24 };
-const panelStyle: React.CSSProperties = { background: '#fff', padding: 32, borderRadius: 24, border: '1.5px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' };
-const panelTitleStyle: React.CSSProperties = { fontSize: 11, fontWeight: 900, color: '#94a3b8', marginBottom: 24, textTransform: 'uppercase', letterSpacing: '0.15em' };
+const statGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16, marginBottom: 24 };
+const mainGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16 };
+const panelStyle: React.CSSProperties = { background: 'rgba(255,255,255,0.92)', padding: 24, borderRadius: 24, border: '1px solid rgba(226, 232, 240, 0.9)', boxShadow: 'var(--shadow-1)' };
+const panelTitleStyle: React.CSSProperties = { fontSize: 11, fontWeight: 900, color: '#94a3b8', marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.15em' };
 const riskItemStyle: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px', borderRadius: 16, background: '#fff1f2', border: '1px solid #fecaca', marginBottom: 16 };
 const riskNameStyle: React.CSSProperties = { fontWeight: 800, color: '#991b1b', fontSize: 16 };
 const riskReasonStyle: React.CSSProperties = { fontSize: 13, color: '#be123c', marginTop: 4, fontWeight: 600 };
-const actionButtonStyle: React.CSSProperties = { background: '#991b1b', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 12 };
-const alertGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 };
-const alertCardStyle: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', borderRadius: 16, border: '1px solid #e2e8f0' };
+const actionButtonStyle: React.CSSProperties = { background: 'rgba(153, 27, 27, 0.10)', color: '#991b1b', border: '1px solid rgba(153, 27, 27, 0.20)', padding: '0 16px', height: 40, borderRadius: 999, cursor: 'pointer', fontWeight: 950, fontSize: 12 };
+const alertGridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 };
+const alertCardStyle: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', borderRadius: 16, border: '1px solid rgba(226, 232, 240, 0.9)', background: 'rgba(2, 6, 23, 0.02)' };
 const alertMessageStyle = (type: string) => ({ fontSize: 12, fontWeight: 800, color: type === "HIGH_RISK" ? "#dc2626" : "#64748b", marginTop: 4 });
 const notifyButtonStyle = (active: boolean, critical: boolean): React.CSSProperties => ({
   background: active ? (critical ? '#991b1b' : '#22c55e') : '#cbd5e1',
@@ -624,9 +626,9 @@ const notifyButtonStyle = (active: boolean, critical: boolean): React.CSSPropert
   borderRadius: 'var(--radius-1)', cursor: active ? 'pointer' : 'not-allowed', fontWeight: 800, fontSize: 12,
 });
 const SummaryCard = ({ label, val, color }: any) => (
-  <div style={{ background: '#fff', padding: 28, borderRadius: 24, border: '1.5px solid #e2e8f0' }}>
+  <div style={{ background: 'rgba(255,255,255,0.92)', padding: 20, borderRadius: 24, border: '1px solid rgba(226, 232, 240, 0.9)', boxShadow: '0 1px 0 rgba(15, 23, 42, 0.03) inset' }}>
     <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
-    <div style={{ fontSize: 36, fontWeight: 900, color, marginTop: 8 }}>{val ?? 0}</div>
+    <div style={{ fontSize: 22, fontWeight: 950, color, marginTop: 8 }}>{val ?? 0}</div>
   </div>
 );
 const riskListStyle: React.CSSProperties = { maxHeight: 350, overflowY: 'auto' };
