@@ -22,6 +22,7 @@ import { useUIStore } from "../store/uiStore";
 import { MobileCard, MobileSection, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
 import { haptic } from "../utils/haptics";
 import { useQueueStore } from "../store/queueStore";
+import { PullToRefreshScrollRegion } from "../components/layout/LayoutPrimitives";
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement, PointElement, LineElement
@@ -56,6 +57,7 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
   const [alerts, setAlerts] = useState<FollowUpAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeClinic, setActiveClinic] = useState<string>("All");
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const queue = useQueueStore((s) => s.queue);
 
   useEffect(() => {
@@ -211,7 +213,7 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
       }
     };
     fetchAnalytics();
-  }, [activeClinic]);
+  }, [activeClinic, refreshNonce]);
 
   const outcomeChartData = useMemo(() => {
     if (!stats) return null;
@@ -232,7 +234,31 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
     };
   }, [stats]);
 
-  if (loading) return <div style={loadingOverlayStyle}>📊 Synthesizing Practice Intelligence...</div>;
+  if (loading) {
+    return (
+      <PullToRefreshScrollRegion
+        onRefresh={async () => {
+          haptic("tap");
+          setRefreshNonce((n) => n + 1);
+        }}
+      >
+      <ResponsiveContainer data-testid="dashboard-root" className="sakhi-page">
+        <div className="sakhi-stack">
+          <div className="sakhi-row" style={{ justifyContent: "space-between" }}>
+            <div style={{ minWidth: 0 }}>
+              <div className="sakhi-micro">Dashboard</div>
+              <div className="sakhi-title">Clinic Ops</div>
+            </div>
+            <div className="sakhi-skeleton" style={{ width: 170, height: 48 }} />
+          </div>
+          <div className="sakhi-skeleton" style={{ height: 110, borderRadius: "var(--radius-4)" }} />
+          <div className="sakhi-skeleton" style={{ height: 170, borderRadius: "var(--radius-4)" }} />
+          <div className="sakhi-skeleton" style={{ height: 160, borderRadius: "var(--radius-4)" }} />
+        </div>
+      </ResponsiveContainer>
+      </PullToRefreshScrollRegion>
+    );
+  }
 
   if (isMobile) {
     const successRate = Math.round(((stats?.outcomeStats[ConsultationOutcome.IMPROVED] || 0) / (stats?.outcomeStats.total || 1)) * 100);

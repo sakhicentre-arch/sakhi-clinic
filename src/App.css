@@ -37,6 +37,13 @@
   /* Shadows (restrained) */
   --shadow-1: 0 2px 10px rgba(15, 23, 42, 0.06);
   --shadow-2: 0 10px 30px rgba(15, 23, 42, 0.10);
+
+  /* Motion (Android-like, restrained) */
+  --motion-fast: 120ms;
+  --motion-med: 180ms;
+  --motion-slow: 220ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
 }
 
 html,
@@ -80,7 +87,11 @@ button {
 .sakhi-tap {
   -webkit-tap-highlight-color: transparent;
   user-select: none;
-  transition: transform 90ms ease, filter 90ms ease, background-color 90ms ease;
+  transition:
+    transform var(--motion-fast) var(--ease-out),
+    filter var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
 }
 .sakhi-tap:active {
   transform: translateY(1px);
@@ -89,6 +100,26 @@ button {
 .sakhi-focus-ring:focus-visible {
   outline: 2px solid rgba(13, 115, 119, 0.45);
   outline-offset: 2px;
+}
+
+/* Ripple-ish pressed state (CSS-only, reduced-motion safe) */
+.sakhi-ripple {
+  position: relative;
+  overflow: hidden;
+}
+.sakhi-ripple::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at var(--ripple-x, 50%) var(--ripple-y, 50%), rgba(2, 6, 23, 0.10), transparent 52%);
+  opacity: 0;
+  transform: scale(0.96);
+  transition: opacity var(--motion-fast) var(--ease-out), transform var(--motion-med) var(--ease-out);
+  pointer-events: none;
+}
+.sakhi-ripple:active::after {
+  opacity: 1;
+  transform: scale(1.0);
 }
 
 /* ================= Typography Helpers ================= */
@@ -153,6 +184,8 @@ button {
   font-weight: 900;
   letter-spacing: -0.2px;
   box-shadow: var(--shadow-1);
+  position: relative;
+  overflow: hidden;
 }
 .sakhi-btn-secondary {
   width: 100%;
@@ -163,6 +196,8 @@ button {
   background: var(--surface);
   color: #0f172a;
   font-weight: 900;
+  position: relative;
+  overflow: hidden;
 }
 .sakhi-btn-compact {
   min-height: 48px;
@@ -181,6 +216,8 @@ button {
   align-items: center;
   justify-content: center;
   padding: 0;
+  position: relative;
+  overflow: hidden;
 }
 .sakhi-surface {
   background: var(--surface);
@@ -383,6 +420,55 @@ button {
 }
 @media (prefers-reduced-motion: reduce) {
   .sakhi-skeleton {
+    animation: none;
+  }
+  .sakhi-tap {
+    transition: none;
+  }
+  .sakhi-ripple::after {
+    transition: none;
+  }
+}
+
+/* ================= Overlays + Sheets Motion ================= */
+@keyframes sakhi-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sakhi-sheet-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.sakhi-overlay-enter {
+  animation: sakhi-fade-in var(--motion-med) var(--ease-out) both;
+}
+.sakhi-sheet-enter {
+  animation: sakhi-sheet-up var(--motion-slow) var(--ease-out) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sakhi-overlay-enter,
+  .sakhi-sheet-enter {
+    animation: none;
+  }
+}
+
+/* Command Palette motion polish */
+.sakhi-palette-overlay {
+  animation: sakhi-fade-in var(--motion-med) var(--ease-out) both;
+}
+.sakhi-palette-panel {
+  animation: sakhi-sheet-up var(--motion-slow) var(--ease-out) both;
+}
+
+/* Consultation stage panes (keep mounted, hide via display) */
+.sakhi-stage-pane {
+  will-change: opacity, transform;
+}
+.sakhi-stage-pane[data-active="true"] {
+  animation: sakhi-sheet-up var(--motion-med) var(--ease-out) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sakhi-stage-pane[data-active="true"] {
     animation: none;
   }
 }

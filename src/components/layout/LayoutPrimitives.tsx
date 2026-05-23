@@ -125,6 +125,10 @@ export function PullToRefreshScrollRegion({
   const threshold = 56;
   const maxPull = 92;
   const armed = pullPx >= threshold;
+  const prefersReducedMotion =
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const reset = () => {
     startYRef.current = null;
@@ -192,7 +196,11 @@ export function PullToRefreshScrollRegion({
           height: pullPx,
           display: "grid",
           placeItems: "end center",
-          transition: refreshing ? "height 120ms ease" : "height 70ms ease",
+          transition: prefersReducedMotion
+            ? "none"
+            : refreshing
+              ? "height 180ms cubic-bezier(0.2, 0.8, 0.2, 1)"
+              : "height 120ms cubic-bezier(0.2, 0.8, 0.2, 1)",
         }}
       >
         <div
@@ -210,7 +218,7 @@ export function PullToRefreshScrollRegion({
             background: "rgba(2, 6, 23, 0.02)",
             transform: `translateY(${Math.min(8, pullPx / 8)}px)`,
             opacity: pullPx > 10 ? 1 : 0,
-            transition: "opacity 80ms ease",
+            transition: prefersReducedMotion ? "none" : "opacity 120ms cubic-bezier(0.2, 0.8, 0.2, 1)",
           }}
         >
           <span style={{ width: 10, height: 10, borderRadius: 999, background: armed ? "#0D7377" : "#94a3b8" }} />

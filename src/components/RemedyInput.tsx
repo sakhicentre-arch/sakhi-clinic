@@ -115,8 +115,8 @@ export default function RemedyInput({
                   onPrescriptionCommit?.(r);
                   commitValue(r.name);
                 }}
-                className="sakhi-tap sakhi-focus-ring flex-none rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
-                style={{ minHeight: 40 }}
+                className="sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+                style={{ minHeight: 48, borderRadius: "var(--radius-3)", border: "1px solid var(--border)", background: "var(--surface)", padding: "var(--space-2) var(--space-3)", color: "#0f172a", fontSize: "var(--type-caption)", fontWeight: 900 }}
                 title="Reuse prescription"
               >
                 <span className="block max-w-[220px] truncate">{r.name}</span>
@@ -140,8 +140,8 @@ export default function RemedyInput({
               type="button"
               disabled={disabled}
               onClick={() => { haptic("tap"); commitValue(r); }}
-              className="sakhi-tap sakhi-focus-ring flex-none rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
-              style={{ minHeight: 40 }}
+              className="sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+              style={{ minHeight: 48, borderRadius: "var(--radius-3)", border: "1px solid var(--border)", background: "var(--surface)", padding: "var(--space-2) var(--space-3)", color: "#334155", fontSize: "var(--type-caption)", fontWeight: 900 }}
               title="Use recent remedy"
             >
               {r}
@@ -232,11 +232,8 @@ export default function RemedyInput({
               type="button"
               disabled={disabled}
               onClick={() => { haptic("tap"); onPotencyChange(p); }}
-              className={
-                "sakhi-tap sakhi-focus-ring rounded-2xl border px-3 py-2 text-xs font-semibold " +
-                (potency === p ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-700")
-              }
-              style={{ minHeight: 40 }}
+              className="sakhi-tap sakhi-focus-ring sakhi-ripple"
+              style={{ minHeight: 40, borderRadius: "var(--radius-3)", border: potency === p ? "1px solid rgba(16,185,129,0.25)" : "1px solid var(--border)", background: potency === p ? "rgba(16,185,129,0.10)" : "var(--surface)", color: potency === p ? "#065f46" : "#334155", padding: "var(--space-2) var(--space-3)", fontSize: "var(--type-caption)", fontWeight: 900 }}
               title="Set potency"
             >
               {p}

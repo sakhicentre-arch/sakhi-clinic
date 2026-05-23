@@ -24,6 +24,7 @@ export default function BottomNav({ onNavigate, isMobile = false, onOpenSearch }
   return (
     <nav
       data-testid="bottom-nav"
+      className="sakhi-overlay-enter"
       style={{
         position: 'fixed',
         bottom: 0,
@@ -79,7 +80,7 @@ export default function BottomNav({ onNavigate, isMobile = false, onOpenSearch }
             backgroundColor: 'transparent',
             pointerEvents: 'auto',
           }}
-          className="sakhi-tap sakhi-focus-ring"
+          className="sakhi-tap sakhi-focus-ring sakhi-ripple"
         >
           {label}
         </button>

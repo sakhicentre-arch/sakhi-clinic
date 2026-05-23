@@ -551,7 +551,7 @@ const ProfileField: React.FC<{ label: string; value: string }> = ({ label, value
   <div><div style={profileLabelStyle}>{label}</div><div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{value}</div></div>
 );
 
-const profileLabelStyle: React.CSSProperties = { fontSize: 10, fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 };
+const profileLabelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 };
 const profileValueBlockStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", lineHeight: 1.6 };
 const profileChipStyle: React.CSSProperties = { background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 700, color: "#475569" };
 
@@ -576,7 +576,7 @@ const TEMPLATE_META: Record<string, { label: string; emoji: string; color: strin
 
 const Field: React.FC<{ label: string; span?: boolean; required?: boolean; children: React.ReactNode }> = ({ label, span, required, children }) => (
   <div style={{ display: "flex", flexDirection: "column", gap: 6, gridColumn: span ? "1 / -1" : undefined }}>
-    <label style={{ fontSize: 10, fontFamily: "'JetBrains Mono'", fontWeight: 800, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+    <label style={{ fontSize: 11, fontFamily: "'JetBrains Mono'", fontWeight: 800, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>
       {label} {required && <span style={{ color: "#ef4444" }}>*</span>}
     </label>
     {children}
@@ -1145,7 +1145,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               <div key={`rem-${i}`} style={patternRowStyle}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div style={{ fontWeight: 800, color: "#1e3a8a" }}>{r.name}</div>
-                  <span style={{ fontSize: 9, fontWeight: 900, color: "#fff", background: "#10b981", padding: "2px 6px", borderRadius: 4, textTransform: "uppercase" }}>{r.score > 5 ? "High Match" : "Possible"}</span>
+                  <span style={{ fontSize: 11, fontWeight: 900, color: "#fff", background: "#10b981", padding: "2px 6px", borderRadius: 6, textTransform: "uppercase" }}>{r.score > 5 ? "High Match" : "Possible"}</span>
                 </div>
                 <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{r.reason}</div>
               </div>
@@ -1175,10 +1175,10 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 <div key={`lp-${idx}`} style={patternRowStyle}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div style={{ fontWeight: 800, color: "#1e3a8a" }}>{lp.remedy}</div>
-                    <span style={{ fontSize: 9, fontWeight: 900, color: "#fff", background: badgeColor, padding: "2px 6px", borderRadius: 4, textTransform: "uppercase" }}>{badgeText}</span>
+                    <span style={{ fontSize: 11, fontWeight: 900, color: "#fff", background: badgeColor, padding: "2px 6px", borderRadius: 6, textTransform: "uppercase" }}>{badgeText}</span>
                   </div>
                   <div style={{ fontSize: 11, color: "#3b82f6", fontWeight: 600, marginTop: 4 }}>Confidence Index: {Math.round(confidence * 100)}%</div>
-                  <div style={{ fontSize: 10, color: "#64748b" }}>Matched {lp.matches} clinical tokens</div>
+                  <div style={{ fontSize: 11, color: "#64748b" }}>Matched {lp.matches} clinical tokens</div>
                 </div>
               );
             })}
@@ -1194,7 +1194,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
             {frequentRemedies.map(([name, count], i) => (
               <div key={`freq-${i}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #f3e8ff" }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: "#1e3a8a" }}>{name}</span>
-                <span style={{ fontSize: 10, fontWeight: 800, color: "#7c3aed", background: "#f3e8ff", padding: "2px 8px", borderRadius: 10 }}>{count}×</span>
+                <span style={{ fontSize: 11, fontWeight: 800, color: "#7c3aed", background: "#f3e8ff", padding: "2px 8px", borderRadius: 10 }}>{count}×</span>
               </div>
             ))}
           </div>
@@ -1266,6 +1266,59 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     const stageVisibleStyle = (stage: typeof mobileStage): React.CSSProperties =>
       !isMobile || mobileStage === stage ? { display: "block" } : { display: "none" };
 
+    const ChipSelect = ({
+      value,
+      onChange,
+      options,
+      emptyLabel = "Any",
+      allowEmpty = true,
+      testId,
+    }: {
+      value: string;
+      onChange: (next: string) => void;
+      options: Array<{ value: string; label: string }>;
+      emptyLabel?: string;
+      allowEmpty?: boolean;
+      testId?: string;
+    }) => {
+      const current = value || "";
+      return (
+        <div
+          className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]"
+          data-testid={testId}
+          role="group"
+        >
+          {allowEmpty && (
+            <button
+              type="button"
+              onClick={() => { haptic("tap"); onChange(""); }}
+              className={
+                "sakhi-tap sakhi-focus-ring sakhi-ripple flex-none rounded-2xl border px-3 py-2 text-[11px] font-extrabold " +
+                (current === "" ? "border-slate-200 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700")
+              }
+              style={{ minHeight: 40 }}
+            >
+              {emptyLabel}
+            </button>
+          )}
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => { haptic("tap"); onChange(opt.value); }}
+              className={
+                "sakhi-tap sakhi-focus-ring sakhi-ripple flex-none rounded-2xl border px-3 py-2 text-[11px] font-extrabold " +
+                (current === opt.value ? "border-sky-200 bg-sky-50 text-sky-800" : "border-slate-200 bg-white text-slate-700")
+              }
+              style={{ minHeight: 40 }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      );
+    };
+
     return (
       <div data-testid="consultation-root" className="min-h-screen bg-slate-50 text-slate-900">
         <style>{customCSS}</style>
@@ -1278,8 +1331,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
             top: "calc(59px + env(safe-area-inset-top, 0px))",
           }}
         >
-          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
               {onFinish && (
                 <button
                   type="button"
@@ -1340,36 +1393,78 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 )}
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={handleAskReview}
-                className="rounded-2xl bg-amber-500 px-4 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-amber-400/30"
-              >
-                ⭐ Review
-              </button>
-              <button
-                type="button"
-                onClick={handleWhatsAppShare}
-                data-testid="consultation-whatsapp-button"
-                className="rounded-2xl bg-emerald-500 px-4 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-emerald-400/30"
-              >
-                📲 WA Rx
-              </button>
-              <button
-                type="button"
-                onClick={handleWhatsAppBill}
-                className="rounded-2xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-emerald-500/30"
-              >
-                💰 Bill
-              </button>
-              <div className="relative">
+            <div className={"flex items-center gap-2 " + (isMobile ? "flex-nowrap overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]" : "flex-wrap")}>
+              {isMobile ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleAskReview}
+                    className="sakhi-icon-btn sakhi-tap sakhi-focus-ring flex-none"
+                    style={{ background: "rgba(245, 158, 11, 0.18)", borderColor: "rgba(245, 158, 11, 0.25)", color: "#fde68a" }}
+                    aria-label="Review"
+                    title="Review"
+                  >
+                    ⭐
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleWhatsAppShare}
+                    data-testid="consultation-whatsapp-button"
+                    className="sakhi-icon-btn sakhi-tap sakhi-focus-ring flex-none"
+                    style={{ background: "rgba(16, 185, 129, 0.18)", borderColor: "rgba(16, 185, 129, 0.25)", color: "#bbf7d0" }}
+                    aria-label="WhatsApp prescription"
+                    title="WhatsApp Rx"
+                  >
+                    📲
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleWhatsAppBill}
+                    className="sakhi-icon-btn sakhi-tap sakhi-focus-ring flex-none"
+                    style={{ background: "rgba(5, 150, 105, 0.18)", borderColor: "rgba(5, 150, 105, 0.25)", color: "#bbf7d0" }}
+                    aria-label="WhatsApp bill"
+                    title="WhatsApp Bill"
+                  >
+                    💰
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleAskReview}
+                    className="rounded-2xl bg-amber-500 px-4 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-amber-400/30"
+                  >
+                    ⭐ Review
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleWhatsAppShare}
+                    data-testid="consultation-whatsapp-button"
+                    className="rounded-2xl bg-emerald-500 px-4 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-emerald-400/30"
+                  >
+                    📲 WA Rx
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleWhatsAppBill}
+                    className="rounded-2xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-emerald-500/30"
+                  >
+                    💰 Bill
+                  </button>
+                </>
+              )}
+
+              <div className="relative flex-none">
                 <button
                   type="button"
                   onClick={() => setShowPrintMenu((v) => !v)}
-                  className="rounded-2xl bg-slate-800/80 px-4 py-2 text-xs font-semibold text-white shadow-sm"
+                  className={isMobile ? "sakhi-icon-btn sakhi-tap sakhi-focus-ring" : "rounded-2xl bg-slate-800/80 px-4 py-2 text-xs font-semibold text-white shadow-sm"}
+                  aria-label="Print"
+                  title="Print"
+                  style={isMobile ? { background: "rgba(255,255,255,0.10)", borderColor: "rgba(255,255,255,0.14)", color: "#fff" } : undefined}
                 >
-                  🖨️ Print ▾
+                  {isMobile ? "🖨️" : "🖨️ Print ▾"}
                 </button>
                 {showPrintMenu && (
                   <div className="absolute right-0 top-full z-40 mt-2 w-48 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl">
@@ -1401,7 +1496,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                       window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
                     }}
                     className={
-                      "sakhi-tap sakhi-focus-ring flex-none rounded-2xl px-4 py-2 text-sm font-semibold ring-1 ring-white/10 " +
+                      "sakhi-tap sakhi-focus-ring sakhi-ripple flex-none rounded-2xl px-4 py-2 text-sm font-semibold ring-1 ring-white/10 " +
                       (mobileStage === item.id ? "bg-white text-slate-900" : "bg-slate-800 text-white/85")
                     }
                     style={{ minHeight: 44 }}
@@ -1435,15 +1530,29 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               <div className="space-y-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex flex-wrap gap-2">
-                    <select
-                      value={(formData as any).language || "en-IN"}
-                      onChange={(e) => patch({ language: e.target.value } as any)}
-                      className="rounded-2xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 outline-none"
-                    >
-                      <option value="en-IN">English</option>
-                      <option value="hi-IN">Hindi</option>
-                      <option value="gu-IN">Gujarati</option>
-                    </select>
+                    {isMobile ? (
+                      <ChipSelect
+                        value={String((formData as any).language || "en-IN")}
+                        onChange={(next) => patch({ language: next } as any)}
+                        options={[
+                          { value: "en-IN", label: "EN" },
+                          { value: "hi-IN", label: "HI" },
+                          { value: "gu-IN", label: "GU" },
+                        ]}
+                        allowEmpty={false}
+                        testId="consultation-language-chips"
+                      />
+                    ) : (
+                      <select
+                        value={(formData as any).language || "en-IN"}
+                        onChange={(e) => patch({ language: e.target.value } as any)}
+                        className="rounded-2xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 outline-none"
+                      >
+                        <option value="en-IN">English</option>
+                        <option value="hi-IN">Hindi</option>
+                        <option value="gu-IN">Gujarati</option>
+                      </select>
+                    )}
                     <DictationButton lang={lang} onText={(spoken) => patch({ chiefComplaint: formData.chiefComplaint ? formData.chiefComplaint + " " + spoken : spoken })} />
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1463,7 +1572,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 <SmartInput
                   multiline
                   rows={2}
-                  style={{ width: "100%", padding: 16, borderRadius: 20, border: "1.5px solid #e2e8f0", background: "#f8fafc", fontSize: 14 }}
+                  style={{ width: "100%", padding: "var(--space-3)", borderRadius: "var(--radius-3)", border: "1px solid var(--border)", background: "var(--surface-muted)", fontSize: 14 }}
                   value={formData.chiefComplaint}
                   onChange={(val) => patch({ chiefComplaint: val })}
                   suggestions={SUGGESTIONS.chiefComplaint}
@@ -1494,28 +1603,56 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 </MobileField>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <MobileField label="Thermal" optional>
-                    <select
-                      value={formData.thermal || ""}
-                      onChange={(e) => patch({ thermal: e.target.value })}
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
-                    >
-                      <option value="">— Select —</option>
-                      <option value="Hot">Hot</option>
-                      <option value="Cold">Cold</option>
-                      <option value="Neutral">Neutral</option>
-                    </select>
+                    {isMobile ? (
+                      <ChipSelect
+                        value={formData.thermal || ""}
+                        onChange={(next) => patch({ thermal: next })}
+                        options={[
+                          { value: "Hot", label: "Hot" },
+                          { value: "Cold", label: "Cold" },
+                          { value: "Neutral", label: "Neutral" },
+                        ]}
+                        emptyLabel="—"
+                        testId="consultation-thermal-chips"
+                      />
+                    ) : (
+                      <select
+                        value={formData.thermal || ""}
+                        onChange={(e) => patch({ thermal: e.target.value })}
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
+                      >
+                        <option value="">— Select —</option>
+                        <option value="Hot">Hot</option>
+                        <option value="Cold">Cold</option>
+                        <option value="Neutral">Neutral</option>
+                      </select>
+                    )}
                   </MobileField>
                   <MobileField label="Appetite" optional>
-                    <select
-                      value={formData.appetite || ""}
-                      onChange={(e) => patch({ appetite: e.target.value })}
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
-                    >
-                      <option value="">— Select —</option>
-                      <option value="Increased">Increased</option>
-                      <option value="Decreased">Decreased</option>
-                      <option value="Normal">Normal</option>
-                    </select>
+                    {isMobile ? (
+                      <ChipSelect
+                        value={formData.appetite || ""}
+                        onChange={(next) => patch({ appetite: next })}
+                        options={[
+                          { value: "Increased", label: "Increased" },
+                          { value: "Decreased", label: "Decreased" },
+                          { value: "Normal", label: "Normal" },
+                        ]}
+                        emptyLabel="—"
+                        testId="consultation-appetite-chips"
+                      />
+                    ) : (
+                      <select
+                        value={formData.appetite || ""}
+                        onChange={(e) => patch({ appetite: e.target.value })}
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
+                      >
+                        <option value="">— Select —</option>
+                        <option value="Increased">Increased</option>
+                        <option value="Decreased">Decreased</option>
+                        <option value="Normal">Normal</option>
+                      </select>
+                    )}
                   </MobileField>
                 </div>
               </div>
@@ -1716,53 +1853,94 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                               </MobileField>
                             </div>
                           ) : (
-                            <div className="grid gap-3 sm:grid-cols-3">
-                              <MobileField label="Potency">
-                                <select
-                                  value={med.potency || remedyDefaults.potency}
-                                  onChange={(e) => updateMedRow(idx, { ...med, potency: e.target.value })}
-                                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
-                                >
-                                  {POTENCIES.map((p) => (
-                                    <option key={p} value={p}>
-                                      {p}
-                                    </option>
-                                  ))}
-                                </select>
-                              </MobileField>
-                              <MobileField label="Dosage">
-                                <select
-                                  value={med.dosage || remedyDefaults.dosage}
-                                  onChange={(e) => {
-                                    updateMedRow(idx, { ...med, dosage: e.target.value });
-                                    saveRemedyDefaults({ potency: med.potency || remedyDefaults.potency, dosage: e.target.value, duration: med.duration || remedyDefaults.duration });
-                                  }}
-                                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
-                                >
-                                  {DOSAGE_PRESETS.map((d) => (
-                                    <option key={d} value={d}>
-                                      {d}
-                                    </option>
-                                  ))}
-                                </select>
-                              </MobileField>
-                              <MobileField label="Duration">
-                                <select
-                                  value={med.duration || remedyDefaults.duration}
-                                  onChange={(e) => {
-                                    updateMedRow(idx, { ...med, duration: e.target.value });
-                                    saveRemedyDefaults({ potency: med.potency || remedyDefaults.potency, dosage: med.dosage || remedyDefaults.dosage, duration: e.target.value });
-                                  }}
-                                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
-                                >
-                                  {DURATIONS.map((d) => (
-                                    <option key={d} value={d}>
-                                      {d}
-                                    </option>
-                                  ))}
-                                </select>
-                              </MobileField>
-                            </div>
+                            !isMobile ? (
+                              <div className="grid gap-3 sm:grid-cols-3">
+                                <MobileField label="Potency">
+                                  <select
+                                    value={med.potency || remedyDefaults.potency}
+                                    onChange={(e) => updateMedRow(idx, { ...med, potency: e.target.value })}
+                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
+                                  >
+                                    {POTENCIES.map((p) => (
+                                      <option key={p} value={p}>
+                                        {p}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </MobileField>
+                                <MobileField label="Dosage">
+                                  <select
+                                    value={med.dosage || remedyDefaults.dosage}
+                                    onChange={(e) => {
+                                      updateMedRow(idx, { ...med, dosage: e.target.value });
+                                      saveRemedyDefaults({ potency: med.potency || remedyDefaults.potency, dosage: e.target.value, duration: med.duration || remedyDefaults.duration });
+                                    }}
+                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
+                                  >
+                                    {DOSAGE_PRESETS.map((d) => (
+                                      <option key={d} value={d}>
+                                        {d}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </MobileField>
+                                <MobileField label="Duration">
+                                  <select
+                                    value={med.duration || remedyDefaults.duration}
+                                    onChange={(e) => {
+                                      updateMedRow(idx, { ...med, duration: e.target.value });
+                                      saveRemedyDefaults({ potency: med.potency || remedyDefaults.potency, dosage: med.dosage || remedyDefaults.dosage, duration: e.target.value });
+                                    }}
+                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm"
+                                  >
+                                    {DURATIONS.map((d) => (
+                                      <option key={d} value={d}>
+                                        {d}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </MobileField>
+                              </div>
+                            ) : (
+                              <div className="grid gap-3">
+                                <MobileField label="Potency">
+                                  <ChipSelect
+                                    value={med.potency || remedyDefaults.potency}
+                                    onChange={(next) => {
+                                      updateMedRow(idx, { ...med, potency: next });
+                                      saveRemedyDefaults({ potency: next, dosage: med.dosage || remedyDefaults.dosage, duration: med.duration || remedyDefaults.duration });
+                                    }}
+                                    options={POTENCIES.slice(0, 8).map((p) => ({ value: p, label: p }))}
+                                    allowEmpty={false}
+                                    testId={`medicine-${idx}-potency-chips`}
+                                  />
+                                </MobileField>
+                                <MobileField label="Dosage">
+                                  <ChipSelect
+                                    value={med.dosage || remedyDefaults.dosage}
+                                    onChange={(next) => {
+                                      updateMedRow(idx, { ...med, dosage: next });
+                                      saveRemedyDefaults({ potency: med.potency || remedyDefaults.potency, dosage: next, duration: med.duration || remedyDefaults.duration });
+                                    }}
+                                    options={DOSAGE_PRESETS.slice(0, 8).map((d) => ({ value: d, label: d }))}
+                                    allowEmpty={false}
+                                    testId={`medicine-${idx}-dosage-chips`}
+                                  />
+                                </MobileField>
+                                <MobileField label="Duration">
+                                  <ChipSelect
+                                    value={med.duration || remedyDefaults.duration}
+                                    onChange={(next) => {
+                                      updateMedRow(idx, { ...med, duration: next });
+                                      saveRemedyDefaults({ potency: med.potency || remedyDefaults.potency, dosage: med.dosage || remedyDefaults.dosage, duration: next });
+                                    }}
+                                    options={DURATIONS.slice(0, 8).map((d) => ({ value: d, label: d }))}
+                                    allowEmpty={false}
+                                    testId={`medicine-${idx}-duration-chips`}
+                                  />
+                                </MobileField>
+                              </div>
+                            )
                           )}
                         </div>
                         <button
@@ -1936,14 +2114,14 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 data-testid="consultation-saved-toast"
                 style={{
                   position: "fixed",
-                  left: 12,
-                  right: 12,
+                  left: "var(--space-3)",
+                  right: "var(--space-3)",
                   bottom: "calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px) + 88px)",
                   zIndex: 80,
                   background: "rgba(15, 23, 42, 0.92)",
                   color: "#fff",
-                  borderRadius: 16,
-                  padding: "12px 14px",
+                  borderRadius: "var(--radius-3)",
+                  padding: "var(--space-2) var(--space-3)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
@@ -1957,7 +2135,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     type="button"
                     onClick={() => void saveAndMaybeToast({ next: true })}
                     className="sakhi-tap sakhi-focus-ring"
-                    style={{ minHeight: 40, padding: "8px 12px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.08)", color: "#fff", fontWeight: 900, fontSize: 12 }}
+                    style={{ minHeight: 40, padding: "var(--space-2) var(--space-3)", borderRadius: "var(--radius-2)", border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.08)", color: "#fff", fontWeight: 900, fontSize: 12 }}
                   >
                     Next patient →
                   </button>
@@ -1966,12 +2144,13 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
             )}
             <div
               data-testid="consultation-action-bar"
+              className="sakhi-overlay-enter"
               style={{
                 position: "fixed",
                 left: 0,
                 right: 0,
                 bottom: `calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px))`,
-                padding: "8px 16px",
+                padding: "var(--space-2) var(--space-3)",
                 background: "rgba(248, 250, 252, 0.92)",
                 borderTop: "1px solid rgba(226, 232, 240, 0.9)",
                 backdropFilter: "blur(12px)",
@@ -1979,7 +2158,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 boxSizing: "border-box",
               }}
             >
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8 }}>
+              <div style={{ maxWidth: 720, margin: "0 auto" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8 }}>
                 <button
                   type="button"
                   onClick={() => {
@@ -2032,41 +2212,49 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 >
                   {saving ? "Saving…" : (queue.some((e) => e.status === "waiting" && e.patientId !== patientId) ? "Save & Next" : "Save")}
                 </button>
+                </div>
               </div>
             </div>
 
             {showNotesSheet && (
-              <div role="dialog" aria-modal="true" data-testid="notes-sheet" style={{ position: "fixed", inset: 0, zIndex: 70 }}>
+              <div role="dialog" aria-modal="true" data-testid="notes-sheet" className="sakhi-overlay-enter" style={{ position: "fixed", inset: 0, zIndex: 70 }}>
                 <div onClick={() => setShowNotesSheet(false)} style={{ position: "absolute", inset: 0, background: "rgba(15, 23, 42, 0.45)" }} />
                 <div
+                  className="sakhi-sheet-enter"
                   style={{
                     position: "absolute",
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    borderTopLeftRadius: 24,
-                    borderTopRightRadius: 24,
-                    background: "#fff",
-                    padding: 16,
+                    borderTopLeftRadius: "var(--radius-4)",
+                    borderTopRightRadius: "var(--radius-4)",
+                    background: "var(--surface)",
+                    padding: "var(--space-3)",
                     boxShadow: "0 -16px 40px rgba(15, 23, 42, 0.18)",
                     maxHeight: "calc(var(--app-vh, 1vh) * 100 - 80px)",
                     overflow: "auto",
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                    <div style={{ fontSize: 14, fontWeight: 900, color: "#0f172a" }}>Notes</div>
-                    <button type="button" onClick={() => setShowNotesSheet(false)} style={{ border: "none", background: "transparent", fontWeight: 900, color: "#64748b" }}>
+                    <div className="sakhi-title">Notes</div>
+                    <button
+                      type="button"
+                      onClick={() => setShowNotesSheet(false)}
+                      className="sakhi-tap sakhi-focus-ring sakhi-ripple"
+                      style={{ border: "1px solid var(--border)", background: "rgba(2,6,23,0.02)", fontWeight: 900, color: "#475569", borderRadius: 999, padding: "var(--space-1) var(--space-2)" }}
+                    >
                       Close
                     </button>
                   </div>
-                  <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ marginTop: "var(--space-3)", display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.18em", textTransform: "uppercase", color: "#94a3b8" }}>Case Notes</div>
                       <textarea
                         value={formData.caseText}
                         onChange={(e) => patch({ caseText: e.target.value })}
                         rows={6}
-                        style={{ marginTop: 8, width: "100%", borderRadius: 16, border: "1px solid #e2e8f0", padding: 12, fontSize: 14, boxSizing: "border-box" }}
+                        className="sakhi-input sakhi-focus-ring"
+                        style={{ marginTop: "var(--space-2)", minHeight: 140 }}
                         placeholder="Symptoms, observations, clinical narrative…"
                       />
                     </div>
@@ -2076,7 +2264,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                         value={formData.mind || ""}
                         onChange={(e) => patch({ mind: e.target.value })}
                         rows={4}
-                        style={{ marginTop: 8, width: "100%", borderRadius: 16, border: "1px solid #e2e8f0", padding: 12, fontSize: 14, boxSizing: "border-box" }}
+                        className="sakhi-input sakhi-focus-ring"
+                        style={{ marginTop: "var(--space-2)", minHeight: 110 }}
                         placeholder="Anxieties, fears, disposition…"
                       />
                     </div>
@@ -2643,22 +2832,22 @@ const decisionGridStyle: React.CSSProperties = { display: "flex", gap: 12 };
 const formFooterStyle: React.CSSProperties = { marginTop: 48, paddingTop: 32, borderTop: "2px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16 };
 const sidebarStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 24 };
 const cardHeaderStyle: React.CSSProperties = { fontSize: 12, fontWeight: 800, textTransform: "uppercase", color: "#64748b", marginBottom: 16, letterSpacing: "0.05em" };
-const subHeaderStyle: React.CSSProperties = { fontSize: 10, fontWeight: 900, color: "#3b82f6", textTransform: "uppercase", marginBottom: 10, letterSpacing: "0.05em" };
+const subHeaderStyle: React.CSSProperties = { fontSize: 11, fontWeight: 900, color: "#3b82f6", textTransform: "uppercase", marginBottom: 10, letterSpacing: "0.05em" };
 const patternRowStyle: React.CSSProperties = { marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid #e2e8f0" };
 const historyRowStyle: React.CSSProperties = { padding: "10px 0", borderBottom: "1px solid #f1f5f9" };
 const emptyTextStyle: React.CSSProperties = { fontSize: 13, color: "#94a3b8", fontStyle: "italic", textAlign: "center", padding: "20px 0" };
 const fullMessageStyle: React.CSSProperties = { padding: 100, textAlign: "center", fontSize: 18, color: "#64748b", fontWeight: 600 };
-const lastVisitLabelStyle: React.CSSProperties = { fontSize: 10, fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 };
+const lastVisitLabelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 };
 const lastVisitValueStyle: React.CSSProperties = { fontSize: 13, fontWeight: 700, color: "#0f172a" };
 const modeBarStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 16, marginBottom: 24, padding: "12px 16px", background: "#fff", borderRadius: 14, border: "1.5px solid #e2e8f0", flexWrap: "wrap" };
 const quickTopBarStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 24px", background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)", color: "#fff", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 4px 20px rgba(0,0,0,0.15)", flexWrap: "wrap", gap: 8 };
 const quickBodyStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 280px", gap: 16, padding: "20px 24px", alignItems: "start", minWidth: 0 };
 const qCardStyle: React.CSSProperties = { background: "#fff", borderRadius: 14, padding: "18px 18px 14px", border: "1.5px solid #e2e8f0", boxShadow: "0 2px 6px rgba(0,0,0,0.03)" };
-const qCardTitleStyle: React.CSSProperties = { fontSize: 10, fontWeight: 900, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 12 };
+const qCardTitleStyle: React.CSSProperties = { fontSize: 11, fontWeight: 900, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 12 };
 const quickIconBtnStyle: React.CSSProperties = { background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", fontWeight: 800, fontSize: 18, cursor: "pointer", borderRadius: 8, padding: "6px 12px" };
 const quickActionBtnStyle: React.CSSProperties = { padding: "8px 14px", borderRadius: 8, border: "none", color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" };
 const printMenuItemStyle: React.CSSProperties = { width: "100%", padding: "12px 16px", background: "transparent", border: "none", textAlign: "left", cursor: "pointer", fontWeight: 700, fontSize: 13, color: "#0f172a", borderBottom: "1px solid #f1f5f9" };
-const medHeaderStyle: React.CSSProperties = { fontSize: 9, fontWeight: 900, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", flex: 1 };
+const medHeaderStyle: React.CSSProperties = { fontSize: 11, fontWeight: 900, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", flex: 1 };
 
 const INPUT: React.CSSProperties = { width: "100%", padding: "12px 16px", fontSize: 14, background: "#f8fafc", border: "1.5px solid #e2e8f0", borderRadius: 12, boxSizing: "border-box", outline: "none" };
 

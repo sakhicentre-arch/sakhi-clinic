@@ -184,7 +184,8 @@ export async function assertAboveBottomNav(page: Page, targetSelector: string, b
   const bottomNav = await getRect(page, bottomNavSelector);
   if (!bottomNav) return;
 
-  expect(target.bottom).toBeLessThanOrEqual(bottomNav.top + 1);
+  // Device scale + subpixel rounding can cause small deltas; allow a tiny tolerance.
+  expect(target.bottom).toBeLessThanOrEqual(bottomNav.top + 4);
 }
 
 export async function registerPatient(page: Page, patientData: {

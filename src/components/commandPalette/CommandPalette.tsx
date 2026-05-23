@@ -325,7 +325,7 @@ export default function CommandPalette({
                   item.run();
                   close();
                 }}
-                className="sakhi-palette-item sakhi-focus-ring sakhi-tap"
+                className="sakhi-palette-item sakhi-focus-ring sakhi-tap sakhi-ripple"
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="sakhi-row" style={{ gap: "var(--space-2)" }}>
@@ -369,4 +369,3 @@ export default function CommandPalette({
 
   return createPortal(content, document.body);
 }
-

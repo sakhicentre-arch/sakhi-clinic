@@ -45,7 +45,7 @@ export default function TopBar({
           <button
             onClick={onToggleMobileNav}
             aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
-            className="sakhi-icon-btn sakhi-tap sakhi-focus-ring"
+            className="sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple"
             style={{ background: "var(--surface-muted)" }}
           >
             {mobileNavOpen ? <X size={20} /> : <Menu size={20} />}
@@ -67,7 +67,7 @@ export default function TopBar({
           <button
             type="button"
             onClick={() => setGlobalSearchOpen(true)}
-            className="sakhi-tap sakhi-focus-ring"
+            className="sakhi-tap sakhi-focus-ring sakhi-ripple"
             aria-label="Open search (Ctrl or Command plus K)"
           >
             <div className="sakhi-search-pill">
@@ -88,7 +88,7 @@ export default function TopBar({
             onClick={() => setGlobalSearchOpen(true)}
             aria-label="Search"
             data-testid="topbar-search-button"
-            className="sakhi-icon-btn sakhi-tap sakhi-focus-ring"
+            className="sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple"
             style={{ boxShadow: "0 1px 0 rgba(15, 23, 42, 0.03) inset" }}
           >
             <Search size={18} />
