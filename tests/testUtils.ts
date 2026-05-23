@@ -165,10 +165,21 @@ export async function assertLastActionNotCoveredByActionBar(page: Page, sectionS
   const focusables = section.locator('button, input, select, textarea, [role="button"]');
   const count = await focusables.count();
   if (count === 0) return;
-  const last = focusables.nth(count - 1);
-  await last.scrollIntoViewIfNeeded();
 
-  const lastRect = await last.boundingBox();
+  // Some components render hidden focusables (e.g., offscreen helpers).
+  // Find the last *visible* interactive control to assert true reachability.
+  let lastRect: { x: number; y: number; width: number; height: number } | null = null;
+  for (let i = count - 1; i >= 0; i--) {
+    const candidate = focusables.nth(i);
+    try {
+      await candidate.scrollIntoViewIfNeeded();
+    } catch {
+      // ignore and keep searching
+    }
+    // boundingBox returns null if not visible.
+    lastRect = await candidate.boundingBox();
+    if (lastRect) break;
+  }
   expect(lastRect).not.toBeNull();
   if (!lastRect) return;
 

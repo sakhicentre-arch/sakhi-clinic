@@ -1325,7 +1325,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
         <div
           data-testid="consultation-sticky-header"
-          className="sticky z-30 border-b border-slate-200 bg-slate-900/95 px-4 py-3 backdrop-blur-sm"
+          className="sticky z-30 border-b border-slate-200 bg-white/92 px-4 py-3 backdrop-blur-sm"
           style={{
             // AppShell TopBar is fixed; keep consultation header from sliding underneath it on scroll.
             top: "calc(59px + env(safe-area-inset-top, 0px))",
@@ -1337,49 +1337,62 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 <button
                   type="button"
                   onClick={onFinish}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-800 text-white shadow-sm ring-1 ring-white/10"
+                  className="sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple"
+                  style={{ width: 44, height: 44, borderRadius: 999, background: "rgba(2, 6, 23, 0.02)" }}
                   title="Back"
+                  aria-label="Back"
                 >
                   ←
                 </button>
               )}
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">Consultation</p>
-                <h1 className={`truncate font-semibold text-white ${headerCollapsed ? "text-base" : "text-lg"}`}>{patient?.name || patientName || "Patient"}</h1>
-                <p className={`mt-1 text-sm text-slate-300 ${headerCollapsed ? "hidden" : "block"}`}>
+                <div className="sakhi-micro">Consultation</div>
+                <h1 className={`truncate ${headerCollapsed ? "text-base" : "text-lg"}`} style={{ fontWeight: 950, letterSpacing: "-0.2px", color: "#0f172a" }}>
+                  {patient?.name || patientName || "Patient"}
+                </h1>
+                <p className="mt-1 truncate" style={{ fontSize: 12, fontWeight: 800, color: "#64748b" }}>
                   {patient?.gender || "—"} · {patient?.age ?? "?"} yrs · {consultations.length} visits
                   {isFirstVisit && (
-                    <span className="ml-2 inline-flex rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-100">
+                    <span
+                      className="ml-2 inline-flex items-center"
+                      style={{
+                        padding: "2px 8px",
+                        borderRadius: 999,
+                        border: "1px solid rgba(16, 185, 129, 0.25)",
+                        background: "rgba(16, 185, 129, 0.10)",
+                        color: "#065f46",
+                        fontSize: 11,
+                        fontWeight: 900,
+                      }}
+                    >
                       First visit
                     </span>
                   )}
                 </p>
-                {!headerCollapsed && consultations[0] && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <span className="inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-[12px] font-semibold text-white/90 ring-1 ring-white/10">
+                {consultations[0] && (
+                  <div className={"mt-2 flex flex-wrap gap-2 " + (headerCollapsed ? "hidden" : "")}>
+                    <span className="sakhi-pill" style={{ background: "rgba(2,6,23,0.02)" }}>
                       Last: {new Date(consultations[0].date).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}
                     </span>
-                    {(consultations[0].medicines?.length || 0) > 0 && (
-                      <span className="inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-[12px] font-semibold text-white/90 ring-1 ring-white/10">
-                        Rx: {consultations[0].medicines?.length}
-                      </span>
-                    )}
+                    <span className="sakhi-pill" style={{ background: "rgba(2,6,23,0.02)" }}>
+                      Rx: {consultations[0].medicines?.length || 0}
+                    </span>
                     {consultations[0].followUpDate && (
                       <span
-                        className="inline-flex items-center rounded-full px-3 py-1 text-[12px] font-semibold ring-1"
+                        className="sakhi-pill"
                         style={{
                           background:
+                            new Date(consultations[0].followUpDate).getTime() < Date.now()
+                              ? "rgba(244, 63, 94, 0.10)"
+                              : "rgba(56, 189, 248, 0.10)",
+                          borderColor:
                             new Date(consultations[0].followUpDate).getTime() < Date.now()
                               ? "rgba(244, 63, 94, 0.18)"
                               : "rgba(56, 189, 248, 0.18)",
                           color:
                             new Date(consultations[0].followUpDate).getTime() < Date.now()
-                              ? "#fecdd3"
-                              : "#bae6fd",
-                          borderColor:
-                            new Date(consultations[0].followUpDate).getTime() < Date.now()
-                              ? "rgba(244, 63, 94, 0.35)"
-                              : "rgba(56, 189, 248, 0.35)",
+                              ? "#9f1239"
+                              : "#075985",
                         }}
                       >
                         FU:{" "}
@@ -1399,8 +1412,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                   <button
                     type="button"
                     onClick={handleAskReview}
-                    className="sakhi-icon-btn sakhi-tap sakhi-focus-ring flex-none"
-                    style={{ background: "rgba(245, 158, 11, 0.18)", borderColor: "rgba(245, 158, 11, 0.25)", color: "#fde68a" }}
+                    className="sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+                    style={{ width: 44, height: 44, borderRadius: 999, background: "rgba(245, 158, 11, 0.10)", borderColor: "rgba(245, 158, 11, 0.18)", color: "#92400e" }}
                     aria-label="Review"
                     title="Review"
                   >
@@ -1410,8 +1423,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     type="button"
                     onClick={handleWhatsAppShare}
                     data-testid="consultation-whatsapp-button"
-                    className="sakhi-icon-btn sakhi-tap sakhi-focus-ring flex-none"
-                    style={{ background: "rgba(16, 185, 129, 0.18)", borderColor: "rgba(16, 185, 129, 0.25)", color: "#bbf7d0" }}
+                    className="sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+                    style={{ width: 44, height: 44, borderRadius: 999, background: "rgba(34, 197, 94, 0.10)", borderColor: "rgba(34, 197, 94, 0.18)", color: "#166534" }}
                     aria-label="WhatsApp prescription"
                     title="WhatsApp Rx"
                   >
@@ -1420,8 +1433,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                   <button
                     type="button"
                     onClick={handleWhatsAppBill}
-                    className="sakhi-icon-btn sakhi-tap sakhi-focus-ring flex-none"
-                    style={{ background: "rgba(5, 150, 105, 0.18)", borderColor: "rgba(5, 150, 105, 0.25)", color: "#bbf7d0" }}
+                    className="sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+                    style={{ width: 44, height: 44, borderRadius: 999, background: "rgba(5, 150, 105, 0.10)", borderColor: "rgba(5, 150, 105, 0.18)", color: "#065f46" }}
                     aria-label="WhatsApp bill"
                     title="WhatsApp Bill"
                   >
@@ -1459,10 +1472,10 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowPrintMenu((v) => !v)}
-                  className={isMobile ? "sakhi-icon-btn sakhi-tap sakhi-focus-ring" : "rounded-2xl bg-slate-800/80 px-4 py-2 text-xs font-semibold text-white shadow-sm"}
+                  className={isMobile ? "sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple" : "rounded-2xl bg-slate-800/80 px-4 py-2 text-xs font-semibold text-white shadow-sm"}
                   aria-label="Print"
                   title="Print"
-                  style={isMobile ? { background: "rgba(255,255,255,0.10)", borderColor: "rgba(255,255,255,0.14)", color: "#fff" } : undefined}
+                  style={isMobile ? { width: 44, height: 44, borderRadius: 999, background: "rgba(2, 6, 23, 0.04)", borderColor: "rgba(2, 6, 23, 0.08)", color: "#0f172a" } : undefined}
                 >
                   {isMobile ? "🖨️" : "🖨️ Print ▾"}
                 </button>
@@ -1481,12 +1494,16 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
             <div className="mx-auto mt-3 max-w-6xl">
               <div
                 data-testid="consultation-stage-strip"
-                className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]"
+                className="sakhi-segmented"
+                role="tablist"
+                aria-label="Consultation stages"
               >
                 {stageItems.map((item) => (
                   <button
                     key={item.id}
                     type="button"
+                    role="tab"
+                    aria-selected={mobileStage === item.id}
                     data-testid={`consultation-stage-${item.id}`}
                     onClick={() => {
                       haptic("tap");
@@ -1495,11 +1512,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                       // when switching while scrolled deep within another stage).
                       window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
                     }}
-                    className={
-                      "sakhi-tap sakhi-focus-ring sakhi-ripple flex-none rounded-2xl px-4 py-2 text-sm font-semibold ring-1 ring-white/10 " +
-                      (mobileStage === item.id ? "bg-white text-slate-900" : "bg-slate-800 text-white/85")
-                    }
-                    style={{ minHeight: 44 }}
+                    className="sakhi-segmented-btn sakhi-tap sakhi-focus-ring sakhi-ripple"
+                    data-active={String(mobileStage === item.id)}
                   >
                     {item.label}
                   </button>
@@ -1515,7 +1529,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
             // Keep all stages fully scrollable and prevent the keyboard-aware action bar
             // from covering the bottom of forms while typing.
             paddingBottom: isMobile
-              ? "calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px) + 120px)"
+              ? "calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px) + 168px)"
               : undefined,
           }}
         >
@@ -1561,8 +1575,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                         key={key}
                         type="button"
                         onClick={() => applyTemplate(key)}
-                        className="rounded-2xl border px-3 py-2 text-xs font-semibold text-slate-900"
-                        style={{ borderColor: meta.border, backgroundColor: meta.color }}
+                        className="sakhi-tap sakhi-focus-ring sakhi-ripple rounded-2xl border px-3 py-2 text-[12px] font-extrabold text-slate-900"
+                        style={{ borderColor: meta.border, backgroundColor: meta.color, minHeight: 44 }}
                       >
                         {meta.emoji} {meta.label}
                       </button>
@@ -1744,7 +1758,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     <div
                       key={med.id ?? idx}
                       data-testid={`medicine-card-${idx}`}
-                      className="rounded-3xl border border-slate-200 bg-slate-50 p-4 shadow-sm"
+                      className="sakhi-surface"
+                      style={{ padding: "var(--space-3)", background: "var(--surface)" }}
                     >
                       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0 space-y-3">
@@ -1813,7 +1828,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                                         }
                                       }}
                                       className={
-                                        "sakhi-tap sakhi-focus-ring rounded-2xl border px-3 py-2 text-xs font-semibold " +
+                                        "sakhi-tap sakhi-focus-ring sakhi-ripple rounded-2xl border px-3 py-2 text-[12px] font-extrabold " +
                                         ((med.dosage || remedyDefaults.dosage) === d
                                           ? "border-emerald-200 bg-emerald-50 text-emerald-800"
                                           : "border-slate-200 bg-white text-slate-700")
@@ -1839,7 +1854,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                                         if (med.id) setComposerStep(String(med.id), null);
                                       }}
                                       className={
-                                        "sakhi-tap sakhi-focus-ring rounded-2xl border px-3 py-2 text-xs font-semibold " +
+                                        "sakhi-tap sakhi-focus-ring sakhi-ripple rounded-2xl border px-3 py-2 text-[12px] font-extrabold " +
                                         ((med.duration || remedyDefaults.duration) === d
                                           ? "border-sky-200 bg-sky-50 text-sky-800"
                                           : "border-slate-200 bg-white text-slate-700")
@@ -1946,7 +1961,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                         <button
                           type="button"
                           onClick={() => deleteMedRow(idx)}
-                          className="mt-1 h-10 w-10 flex-shrink-0 rounded-2xl bg-rose-50 text-rose-600 shadow-sm"
+                          className="sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple mt-1 flex-shrink-0"
+                          style={{ width: 44, height: 44, borderRadius: 16, background: "rgba(244, 63, 94, 0.10)", borderColor: "rgba(244, 63, 94, 0.18)", color: "#9f1239" }}
                           title="Remove remedy"
                           aria-label="Remove remedy"
                         >
@@ -1955,7 +1971,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                       </div>
                       <MobileField label="Notes" optional>
                         <textarea
-                          className="w-full rounded-3xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
+                          className="sakhi-input sakhi-focus-ring"
+                          style={{ paddingTop: "var(--space-2)", paddingBottom: "var(--space-2)" }}
                           rows={2}
                           value={med.notes || ""}
                           onChange={(e) => updateMedRow(idx, { ...med, notes: e.target.value })}
@@ -1971,7 +1988,16 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 type="button"
                 data-testid="medicine-add-button"
                 onClick={() => addMedRow()}
-                className="w-full rounded-3xl border border-dashed border-sky-300 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-700"
+                className="sakhi-tap sakhi-focus-ring sakhi-ripple w-full"
+                style={{
+                  minHeight: 56,
+                  borderRadius: "var(--radius-4)",
+                  border: "1px dashed rgba(13, 115, 119, 0.35)",
+                  background: "rgba(13, 115, 119, 0.06)",
+                  color: "var(--brand-ink)",
+                  fontWeight: 950,
+                  fontSize: 13,
+                }}
                 aria-label="Add medicine"
               >
                 ＋ Add medicine
@@ -2035,14 +2061,27 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                   />
                 </MobileField>
                 <MobileField label="Payment status">
-                  <select
-                    value={formData.paymentStatus || "pending"}
-                    onChange={(e) => patch({ paymentStatus: e.target.value as PaymentStatus })}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
-                  >
-                    <option value="pending">⏳ Pending</option>
-                    <option value="paid">✅ Paid</option>
-                  </select>
+                  {isMobile ? (
+                    <ChipSelect
+                      value={String(formData.paymentStatus || "pending")}
+                      onChange={(next) => patch({ paymentStatus: next as PaymentStatus })}
+                      options={[
+                        { value: "pending", label: "Pending" },
+                        { value: "paid", label: "Paid" },
+                      ]}
+                      allowEmpty={false}
+                      testId="consultation-payment-status-chips"
+                    />
+                  ) : (
+                    <select
+                      value={formData.paymentStatus || "pending"}
+                      onChange={(e) => patch({ paymentStatus: e.target.value as PaymentStatus })}
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
+                    >
+                      <option value="pending">⏳ Pending</option>
+                      <option value="paid">✅ Paid</option>
+                    </select>
+                  )}
                 </MobileField>
               </div>
             </MobileSection>
@@ -2151,15 +2190,23 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 right: 0,
                 bottom: `calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px))`,
                 padding: "var(--space-2) var(--space-3)",
-                background: "rgba(248, 250, 252, 0.92)",
-                borderTop: "1px solid rgba(226, 232, 240, 0.9)",
-                backdropFilter: "blur(12px)",
+                background: "transparent",
                 zIndex: 50,
                 boxSizing: "border-box",
               }}
             >
               <div style={{ maxWidth: 720, margin: "0 auto" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8 }}>
+                <div
+                  className="sakhi-surface"
+                  style={{
+                    padding: "var(--space-2)",
+                    borderRadius: "var(--radius-4)",
+                    boxShadow: "var(--shadow-2)",
+                    background: "rgba(255,255,255,0.92)",
+                    backdropFilter: "blur(12px)",
+                  }}
+                >
+                  <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
                 <button
                   type="button"
                   onClick={() => {
@@ -2169,32 +2216,32 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     patch({ medicines: next });
                     setMobileStage("remedy");
                   }}
-                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a" }}
-                  className="sakhi-tap sakhi-focus-ring"
+                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid var(--border)", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a", padding: "0 14px" }}
+                  className="sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
                 >
                   + Remedy
                 </button>
                 <button
                   type="button"
                   onClick={() => { haptic("tap"); setShowNotesSheet(true); }}
-                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a" }}
-                  className="sakhi-tap sakhi-focus-ring"
+                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid var(--border)", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a", padding: "0 14px" }}
+                  className="sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
                 >
                   Notes
                 </button>
                 <button
                   type="button"
                   onClick={() => { haptic("tap"); setShowFollowUpSheet(true); }}
-                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a" }}
-                  className="sakhi-tap sakhi-focus-ring"
+                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid var(--border)", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a", padding: "0 14px" }}
+                  className="sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
                 >
                   Follow-up
                 </button>
                 <button
                   type="button"
                   onClick={() => { haptic("tap"); setShowTemplatesSheet(true); }}
-                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a" }}
-                  className="sakhi-tap sakhi-focus-ring"
+                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid var(--border)", background: "#fff", fontWeight: 900, fontSize: 12, color: "#0f172a", padding: "0 14px" }}
+                  className="sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
                 >
                   Templates
                 </button>
@@ -2207,11 +2254,12 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     void saveAndMaybeToast({ next: shouldNext });
                   }}
                   disabled={saving}
-                  style={{ minHeight: 48, borderRadius: 16, border: "none", background: "#0D7377", color: "#fff", fontWeight: 900, fontSize: 12, opacity: saving ? 0.65 : 1 }}
-                  className="sakhi-tap sakhi-focus-ring"
+                  style={{ minHeight: 48, borderRadius: 16, border: "1px solid rgba(13, 115, 119, 0.0)", background: "var(--brand)", color: "#fff", fontWeight: 950, fontSize: 12, opacity: saving ? 0.65 : 1, padding: "0 14px", boxShadow: "0 1px 0 rgba(255,255,255,0.14) inset" }}
+                  className="sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
                 >
                   {saving ? "Saving…" : (queue.some((e) => e.status === "waiting" && e.patientId !== patientId) ? "Save & Next" : "Save")}
                 </button>
+                  </div>
                 </div>
               </div>
             </div>

@@ -58,6 +58,12 @@ body,
   color: #0f172a;
 }
 
+html {
+  /* Ensure `scrollIntoView` respects fixed chrome (TopBar + bottom action docks). */
+  scroll-padding-top: calc(59px + env(safe-area-inset-top, 0px) + var(--space-3));
+  scroll-padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px) + 176px);
+}
+
 *,
 *::before,
 *::after {
@@ -471,6 +477,41 @@ button {
   .sakhi-stage-pane[data-active="true"] {
     animation: none;
   }
+}
+
+/* ================= Segmented Controls (Android-like) ================= */
+.sakhi-segmented {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 4px;
+  border-radius: var(--radius-3);
+  border: 1px solid var(--border);
+  background: rgba(2, 6, 23, 0.04);
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03) inset;
+  overflow: hidden;
+}
+.sakhi-segmented-btn {
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-weight: 900;
+  font-size: var(--type-caption);
+  min-height: 44px;
+  border-radius: calc(var(--radius-3) - 6px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 var(--space-2);
+  position: relative;
+  overflow: hidden;
+}
+.sakhi-segmented-btn[data-active="true"] {
+  background: var(--surface);
+  color: #0f172a;
+  box-shadow: var(--shadow-1);
 }
 
 /* ================= PRINT LAYOUT FIX ================= */
