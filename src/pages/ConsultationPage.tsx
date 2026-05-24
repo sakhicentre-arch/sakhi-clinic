@@ -1648,7 +1648,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
         <div
           data-testid="consultation-sticky-header"
-          className="sakhi-consult-header sticky z-30 px-4 py-2"
+          className="sakhi-consult-header sticky z-30 px-3 py-1"
           style={{
             // AppShell TopBar is fixed; keep consultation header from sliding underneath it on scroll.
             top: "calc(59px + env(safe-area-inset-top, 0px))",
@@ -1701,7 +1701,14 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                   )}
                 </p>
                 {consultations[0] && (
-                  <div className={"mt-2 flex flex-wrap gap-2 " + (headerCollapsed ? "hidden" : "")}>
+                  <div
+                    className={
+                      "mt-2 " +
+                      (headerCollapsed ? "hidden " : "") +
+                      (isMobile ? "flex gap-2 flex-nowrap overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]" : "flex flex-wrap gap-2")
+                    }
+                    aria-label="Recent visit metadata"
+                  >
                     <span className="sakhi-pill" style={{ background: "rgba(2,6,23,0.02)" }}>
                       Last: {new Date(consultations[0].date).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}
                     </span>
@@ -1851,7 +1858,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
             </div>
           </div>
 
-          <div className="sakhi-consult-header-inner mt-3">
+          <div className="sakhi-consult-header-inner mt-2">
             {isMobile ? (
               <div className="space-y-2">
                 <div className="sakhi-consult-phasebar" aria-label="Consultation phase">

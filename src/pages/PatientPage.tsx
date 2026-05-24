@@ -6,6 +6,7 @@ import {
   User,
   History as HistoryIcon,
   Brain,
+  Pencil,
   ShieldAlert,
   ChevronRight,
   ChevronDown,
@@ -19,6 +20,7 @@ import {
   MessageCircle,
   Receipt,
   RefreshCw,
+  Trash2,
   X,
 } from "lucide-react";
 import { usePatientStore } from "../store/usePatientStore";
@@ -905,18 +907,24 @@ export default function PatientPage(
                     <span>{p.phone || "—"}</span>
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
+                <div className="patient-row-actions" style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
                   <button
-                    className="action-btn edit-btn"
+                    type="button"
+                    className="sakhi-mini-iconbtn sakhi-tap sakhi-focus-ring sakhi-ripple"
                     onClick={(e) => handleEditPatient(e, p.id)}
+                    aria-label="Edit patient"
+                    title="Edit"
                   >
-                    Edit
+                    <Pencil size={16} />
                   </button>
                   <button
-                    className="action-btn delete-btn"
+                    type="button"
+                    className="sakhi-mini-iconbtn sakhi-tap sakhi-focus-ring sakhi-ripple"
                     onClick={(e) => handleDeletePatient(e, p.id)}
+                    aria-label="Delete patient"
+                    title="Delete"
                   >
-                    Del
+                    <Trash2 size={16} />
                   </button>
                 </div>
               </div>
@@ -1561,15 +1569,11 @@ const CSS = `
   .sakhi-btn-primary:hover { background-color: #1e3a8a !important; transform: translateY(-1px); }
   .sakhi-btn-whatsapp:hover { background-color: #15803d !important; transform: translateY(-1px); }
   .hero-consult-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(0,0,0,0.16) !important; }
-  .patient-row { position: relative; padding: 12px 14px; margin: 4px 10px; cursor: pointer; display: flex; align-items: center; gap: 12px; border-radius: 12px; transition: all 0.15s ease; border: 2px solid transparent; }
-  .patient-row:hover { background-color: #f0f9ff; border-color: #93c5fd; }
-  .patient-row-active { background-color: #eff6ff !important; border-color: #2563eb !important; }
-  .patient-row-focused { background-color: #f0f9ff !important; border-color: #93c5fd !important; outline: none; }
-  .action-btn { padding: 3px 8px; font-size: 11px; border: none; border-radius: 4px; cursor: pointer; font-weight: 700; transition: all 0.15s ease; }
-  .edit-btn { background: #3b82f6; color: #fff; }
-  .edit-btn:hover { background: #2563eb; }
-  .delete-btn { background: #ef4444; color: #fff; }
-  .delete-btn:hover { background: #dc2626; }
+  .patient-row { position: relative; padding: 10px 12px; margin: 4px 8px; cursor: pointer; display: flex; align-items: center; gap: 12px; border-radius: 14px; transition: all 0.15s ease; border: 1px solid rgba(226,232,240,0.9); background: rgba(255,255,255,0.92); box-shadow: 0 1px 0 rgba(15,23,42,0.03) inset; }
+  .patient-row:hover { background-color: rgba(2, 6, 23, 0.02); border-color: rgba(148, 163, 184, 0.55); }
+  .patient-row-active { background-color: rgba(13, 115, 119, 0.05) !important; border-color: rgba(13, 115, 119, 0.25) !important; }
+  .patient-row-focused { background-color: rgba(2, 6, 23, 0.02) !important; border-color: rgba(148, 163, 184, 0.55) !important; outline: none; }
+  .patient-row-actions .sakhi-mini-iconbtn { flex: 0 0 auto; }
   .summary-card { transition: all 0.2s ease; }
   .summary-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(15,23,42,0.06) !important; }
   .timeline-card:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(15,23,42,0.08) !important; }

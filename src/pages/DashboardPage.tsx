@@ -459,7 +459,14 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
       </header>
 
       {/* KPI Section */}
-      <div style={statGridStyle}>
+      <div
+        style={{
+          ...statGridStyle,
+          gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : statGridStyle.gridTemplateColumns,
+          gap: isMobile ? 12 : 16,
+          marginBottom: isMobile ? 16 : 24,
+        }}
+      >
         <SummaryCard label="Branch Patients" val={stats?.totalPatients} color="#2563eb" />
         <SummaryCard label="Actionable Follow-ups" val={stats?.followUpsDue} color="#d97706" />
         <SummaryCard label="High-Risk Cases" val={stats?.highRiskPatients.length} color="#ef4444" />
@@ -470,9 +477,21 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
         />
       </div>
 
-      <div style={mainGridStyle}>
+      <div
+        style={{
+          ...mainGridStyle,
+          gridTemplateColumns: isMobile ? "1fr" : mainGridStyle.gridTemplateColumns,
+          gap: isMobile ? 12 : 16,
+        }}
+      >
         {/* Risk Management Panel */}
-        <div style={panelStyle}>
+        <div
+          style={{
+            ...panelStyle,
+            padding: isMobile ? 16 : 24,
+            borderRadius: isMobile ? 20 : 24,
+          }}
+        >
           <h3 style={panelTitleStyle}>⚠️ Clinical Priority Review</h3>
           <div style={riskListStyle}>
             {stats?.highRiskPatients.length === 0 ? (
@@ -498,20 +517,35 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
         </div>
 
         {/* Analytics Section */}
-        <div style={panelStyle}>
-          <h3 style={panelTitleStyle}>Success Distribution</h3>
-          <div style={{ height: 280 }}>
-            {outcomeChartData && (
-              <Pie data={outcomeChartData} options={{ maintainAspectRatio: false }} />
-            )}
+        {!isMobile && (
+          <div style={panelStyle}>
+            <h3 style={panelTitleStyle}>Success Distribution</h3>
+            <div style={{ height: 280 }}>
+              {outcomeChartData && (
+                <Pie data={outcomeChartData} options={{ maintainAspectRatio: false }} />
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Follow-up Alerts Grid */}
-      <div style={{ ...panelStyle, marginTop: 24 }}>
+      <div
+        style={{
+          ...panelStyle,
+          marginTop: isMobile ? 16 : 24,
+          padding: isMobile ? 16 : 24,
+          borderRadius: isMobile ? 20 : 24,
+        }}
+      >
         <h3 style={panelTitleStyle}>Communication & Reminder Queue</h3>
-        <div style={alertGridStyle}>
+        <div
+          style={{
+            ...alertGridStyle,
+            gridTemplateColumns: isMobile ? "1fr" : alertGridStyle.gridTemplateColumns,
+            gap: isMobile ? 10 : 12,
+          }}
+        >
           {alerts.length === 0 ? (
             <div style={{ ...emptyPlaceholderStyle, gridColumn: '1 / -1' }}>
               Queue is currently clear.
@@ -548,7 +582,14 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
       </div>
 
       {/* 🔐 DATA BACKUP & RESTORE */}
-      <div style={{ ...panelStyle, marginTop: 24 }}>
+      <div
+        style={{
+          ...panelStyle,
+          marginTop: isMobile ? 16 : 24,
+          padding: isMobile ? 16 : 24,
+          borderRadius: isMobile ? 20 : 24,
+        }}
+      >
         <h3 style={panelTitleStyle}>🔐 Data Safety & Backup</h3>
         <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
           <button

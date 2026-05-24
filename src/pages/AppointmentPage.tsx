@@ -330,41 +330,39 @@ export default function AppointmentPage({ goToConsultation }: Props) {
         key={appt?.id || slot}
         data-testid="appointment-slot-card"
         data-appointment-id={appt?.id}
-        className="flex items-center justify-between border p-4"
-        style={{ borderColor: c.border, background: c.bg, borderRadius: "var(--radius-3)" }}
+        data-status={status}
+        className="sakhi-slot-card sakhi-tap sakhi-focus-ring sakhi-ripple"
       >
-        <div className="flex min-w-0 items-center gap-4">
-          <div className="min-w-[72px] border-r pr-4 text-center" style={{ borderColor: c.border }}>
-            <div className="text-[14px] font-black text-slate-900">
-              {appt ? formatTimeLabel(appt.time) : formatTimeLabel(slot)}
-            </div>
-            <div className="sakhi-micro" style={{ color: c.ink }}>
-              {isWalkIn ? "WALK-IN" : "SLOT"}
-            </div>
+        <div className="min-w-0">
+          <div className="sakhi-slot-time">
+            {appt ? formatTimeLabel(appt.time) : formatTimeLabel(slot)}
           </div>
 
           {appt ? (
-            <div className="min-w-0">
-              <div className="truncate text-[14px] font-black text-slate-900">{appt.patientName}</div>
-              <div className="mt-1 inline-flex items-center gap-2">
+            <div className="mt-1 min-w-0">
+              <div className="truncate text-[12px] font-extrabold text-slate-800">{appt.patientName}</div>
+              <div className="mt-1 flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full" style={{ background: c.ink }} />
-                <span className="sakhi-micro" style={{ color: c.ink }}>
-                  {c.label}
+                <span className="sakhi-slot-sub" style={{ color: c.ink }}>
+                  {isWalkIn ? "Walk-in" : c.label}
                 </span>
               </div>
             </div>
           ) : (
-            <div className="sakhi-body text-slate-500">Open appointment slot</div>
+            <div className="sakhi-slot-sub" style={{ color: c.ink }}>
+              {""}
+            </div>
           )}
         </div>
 
         {appt && (
-          <div className="flex items-center gap-2">
+          <div className="sakhi-slot-actions">
             {appt.status === "booked" && (
               <button
                 type="button"
                 onClick={() => markArrived(appt.id)}
-                className="rounded-xl bg-slate-900 px-3 py-2 text-[12px] font-black text-white sakhi-tap sakhi-focus-ring"
+                className="sakhi-slot-actionbtn sakhi-tap sakhi-focus-ring sakhi-ripple"
+                style={{ background: "rgba(2,6,23,0.86)", color: "#fff", borderColor: "rgba(2,6,23,0.0)" }}
               >
                 Check-in
               </button>
@@ -376,7 +374,8 @@ export default function AppointmentPage({ goToConsultation }: Props) {
                   startConsultation(appt.id);
                   goToConsultation(appt.patientId, appt.id);
                 }}
-                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-[12px] font-black text-white sakhi-tap sakhi-focus-ring"
+                className="sakhi-slot-actionbtn sakhi-tap sakhi-focus-ring sakhi-ripple"
+                style={{ background: "rgba(2,6,23,0.86)", color: "#fff", borderColor: "rgba(2,6,23,0.0)" }}
               >
                 <Stethoscope size={14} /> Start
               </button>
@@ -384,8 +383,9 @@ export default function AppointmentPage({ goToConsultation }: Props) {
             <button
               type="button"
               onClick={() => openReminder(appt)}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-emerald-700 sakhi-tap sakhi-focus-ring"
+              className="sakhi-slot-actionbtn sakhi-slot-iconbtn sakhi-tap sakhi-focus-ring sakhi-ripple"
               aria-label="Send WhatsApp reminder"
+              title="WhatsApp reminder"
             >
               <Smartphone size={18} />
             </button>
@@ -524,8 +524,17 @@ export default function AppointmentPage({ goToConsultation }: Props) {
           <button
             type="button"
             onClick={sendAllReminders}
-            className="mt-4 w-full border border-emerald-200 bg-emerald-600 px-4 py-4 text-[14px] font-black text-white shadow-sm sakhi-tap sakhi-focus-ring"
-            style={{ borderRadius: "var(--radius-3)" }}
+            className="mt-4 w-full sakhi-tap sakhi-focus-ring sakhi-ripple"
+            style={{
+              minHeight: 52,
+              padding: "0 var(--space-3)",
+              borderRadius: "var(--radius-3)",
+              border: "1px solid rgba(13, 115, 119, 0.18)",
+              background: "rgba(13, 115, 119, 0.08)",
+              color: "var(--brand-ink)",
+              fontSize: 13,
+              fontWeight: 950,
+            }}
           >
             <span className="inline-flex items-center justify-center gap-2">
               <Send size={18} /> Blast Sequential Reminders
@@ -669,32 +678,32 @@ export default function AppointmentPage({ goToConsultation }: Props) {
                       <div className="rounded-xl bg-blue-600 p-2">
                         <Layers size={16} className="text-white" />
                       </div>
-                      <div className="sakhi-body">Dabholi</div>
-                    </div>
-                    <div className="mt-3 grid gap-3" style={{ maxHeight: "45vh", overflowY: "auto" }}>
-                      {todayDabholi.length > 0 ? (
-                        todayDabholi.map((appt) => renderSlot(appt.time, appt))
-                      ) : (
-                        <div className="sakhi-caption">No appointments scheduled.</div>
-                      )}
-                    </div>
-                  </MobileCard>
+                  <div className="sakhi-body">Dabholi</div>
+                </div>
+                <div className="mt-3 sakhi-slot-grid" style={{ maxHeight: "45vh", overflowY: "auto" }}>
+                  {todayDabholi.length > 0 ? (
+                    todayDabholi.map((appt) => renderSlot(appt.time, appt))
+                  ) : (
+                    <div className="sakhi-caption">No appointments scheduled.</div>
+                  )}
+                </div>
+              </MobileCard>
 
                   <MobileCard elevated={false} style={{ borderColor: "#fde68a", background: "#ffffff" }}>
                     <div className="flex items-center gap-2">
                       <div className="rounded-xl bg-emerald-600 p-2">
                         <Layers size={16} className="text-white" />
                       </div>
-                      <div className="sakhi-body">City Light</div>
-                    </div>
-                    <div className="mt-3 grid gap-3" style={{ maxHeight: "45vh", overflowY: "auto" }}>
-                      {todayCity.length > 0 ? (
-                        todayCity.map((appt) => renderSlot(appt.time, appt))
-                      ) : (
-                        <div className="sakhi-caption">No appointments scheduled.</div>
-                      )}
-                    </div>
-                  </MobileCard>
+                  <div className="sakhi-body">City Light</div>
+                </div>
+                <div className="mt-3 sakhi-slot-grid" style={{ maxHeight: "45vh", overflowY: "auto" }}>
+                  {todayCity.length > 0 ? (
+                    todayCity.map((appt) => renderSlot(appt.time, appt))
+                  ) : (
+                    <div className="sakhi-caption">No appointments scheduled.</div>
+                  )}
+                </div>
+              </MobileCard>
                 </ResponsiveGrid>
               </div>
             </div>
@@ -709,17 +718,17 @@ export default function AppointmentPage({ goToConsultation }: Props) {
                   </div>
                   <div className="min-w-0">
                     <div className="sakhi-body">Dabholi</div>
-                    <div className="sakhi-caption">Morning sessions</div>
-                  </div>
+                  <div className="sakhi-caption">Morning sessions</div>
                 </div>
-                <div className="mt-3 grid gap-3" style={{ maxHeight: "70vh", overflowY: "auto" }}>
-                  {generateSlotsFor("Dabholi").map((slot) => {
-                    const appt = appointments.find(
-                      (a) => a.date === date && a.time === slot && a.clinic === "Dabholi",
-                    );
-                    return renderSlot(slot, appt);
-                  })}
-                  {appointments
+              </div>
+              <div className="mt-3 sakhi-slot-grid" style={{ maxHeight: "70vh", overflowY: "auto" }}>
+                {generateSlotsFor("Dabholi").map((slot) => {
+                  const appt = appointments.find(
+                    (a) => a.date === date && a.time === slot && a.clinic === "Dabholi",
+                  );
+                  return renderSlot(slot, appt);
+                })}
+                {appointments
                     .filter(
                       (a) =>
                         a.date === date &&
@@ -728,26 +737,26 @@ export default function AppointmentPage({ goToConsultation }: Props) {
                         !generateSlotsFor("Dabholi").includes(a.time),
                     )
                     .map((appt) => renderSlot(appt.time, appt))}
-                </div>
               </div>
+            </div>
 
-              <div>
+            <div>
                 <div className="flex items-center gap-3">
                   <div className="rounded-xl bg-emerald-600 p-2">
                     <Layers size={16} className="text-white" />
                   </div>
                   <div className="min-w-0">
                     <div className="sakhi-body">City Light</div>
-                    <div className="sakhi-caption">Evening sessions</div>
-                  </div>
+                  <div className="sakhi-caption">Evening sessions</div>
                 </div>
-                <div className="mt-3 grid gap-3" style={{ maxHeight: "70vh", overflowY: "auto" }}>
-                  {generateSlotsFor("City Light").map((slot) => {
-                    const appt = appointments.find(
-                      (a) => a.date === date && a.time === slot && a.clinic === "City Light",
-                    );
-                    return renderSlot(slot, appt);
-                  })}
+              </div>
+              <div className="mt-3 sakhi-slot-grid" style={{ maxHeight: "70vh", overflowY: "auto" }}>
+                {generateSlotsFor("City Light").map((slot) => {
+                  const appt = appointments.find(
+                    (a) => a.date === date && a.time === slot && a.clinic === "City Light",
+                  );
+                  return renderSlot(slot, appt);
+                })}
                   {appointments
                     .filter(
                       (a) =>
