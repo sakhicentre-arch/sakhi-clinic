@@ -727,6 +727,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const [saveToast, setSaveToast] = useState<
     | null
     | { kind: "saved"; canNext: boolean }
+    | { kind: "warn"; message: string }
     | { kind: "error"; message: string }
   >(null);
   const setActiveConsultation = useUIStore((s) => s.setActiveConsultation);
@@ -795,9 +796,19 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const saveAndMaybeToast = async (opts?: { next?: boolean }) => {
     setSaveToast(null);
     setDraftStatus("Saving…");
+    let hadWarning = false;
     try {
-      await handleSave();
+      const result = await handleSave();
+      if (!result.saved) {
+        setDraftStatus("");
+        return;
+      }
       setDraftStatus("Saved");
+      if (result.warning) {
+        hadWarning = true;
+        setSaveToast({ kind: "warn", message: result.warning });
+        window.setTimeout(() => setSaveToast(null), 3200);
+      }
     } catch (err) {
       setDraftStatus("Save failed");
       setSaveToast({ kind: "error", message: "Consultation could not be saved. Please retry." });
@@ -826,8 +837,10 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
       return;
     }
 
-    setSaveToast({ kind: "saved", canNext });
-    window.setTimeout(() => setSaveToast(null), 2200);
+    if (!hadWarning) {
+      setSaveToast({ kind: "saved", canNext });
+      window.setTimeout(() => setSaveToast(null), 2200);
+    }
   };
 
 
@@ -1111,14 +1124,18 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   };
 
   // ── Save ──
-  const handleSave = async () => {
-    if (!formData.chiefComplaint) return alert("Chief Complaint is required.");
+  const handleSave = async (): Promise<{ saved: boolean; warning?: string }> => {
+    if (!formData.chiefComplaint) {
+      alert("Chief Complaint is required.");
+      return { saved: false };
+    }
     if (formData.medicines.length === 0 && formData.outcome !== ConsultationOutcome.FIRST_VISIT) {
       const confirmWait = window.confirm("No medicines prescribed. Save this session as 'Observation/Wait' mode?");
-      if (!confirmWait) return;
+      if (!confirmWait) return { saved: false };
     }
     dispatch({ type: "SAVE_START" });
-    let success = false;
+    let persisted = false;
+    const warnings: string[] = [];
     try {
       const session: Consultation = {
         ...formData,
@@ -1132,11 +1149,48 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
       };
       const ok = await saveConsultation(session);
       if (ok) {
-        success = true;
-        await deleteDraft(patientId); // ✅ V1A: DELETE DRAFT AFTER SAVE
+        persisted = true;
         dispatch({ type: "SAVE_DONE" });
-        await loadData();
-        if (onFinish) onFinish();
+
+        // Post-save side effects (must never turn a successful save into a destructive error toast).
+        // Each step logs full detail internally and degrades to a soft warning only.
+        try {
+          await deleteDraft(patientId); // ✅ V1A: DELETE DRAFT AFTER SAVE
+        } catch (error) {
+          warnings.push("Saved locally. Draft cleanup did not complete.");
+          await captureOperationError({
+            op: "consultation.save",
+            message: "Post-save: deleteDraft failed",
+            error,
+            payload: { patientId },
+          });
+        }
+
+        try {
+          await loadData();
+        } catch (error) {
+          warnings.push("Saved locally. Refresh did not complete.");
+          await captureOperationError({
+            op: "consultation.save",
+            message: "Post-save: loadData failed",
+            error,
+            payload: { patientId },
+          });
+        }
+
+        try {
+          if (onFinish) onFinish();
+        } catch (error) {
+          warnings.push("Saved locally. Navigation did not complete.");
+          await captureOperationError({
+            op: "consultation.save",
+            message: "Post-save: onFinish failed",
+            error,
+            payload: { patientId, appointmentId },
+          });
+        }
+
+        return { saved: true, warning: warnings[0] };
       } else {
         await captureOperationError({
           op: "consultation.save",
@@ -1156,7 +1210,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
       });
       throw error;
     } finally {
-      if (!success) dispatch({ type: "SAVE_FAIL" });
+      if (!persisted) dispatch({ type: "SAVE_FAIL" });
     }
   };
 
@@ -2621,6 +2675,37 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                   bottom: `calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px) + ${mobileBottomNavOffsetPx + 88}px)`,
                   zIndex: 80,
                   background: "rgba(127, 29, 29, 0.94)",
+                  color: "#fff",
+                  borderRadius: "var(--radius-3)",
+                  padding: "var(--space-2) var(--space-3)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.28)",
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 800 }}>{saveToast.message}</div>
+                <button
+                  type="button"
+                  onClick={() => setSaveToast(null)}
+                  className="sakhi-tap sakhi-focus-ring"
+                  style={{ minHeight: 36, padding: "0 10px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.08)", color: "#fff", fontWeight: 900, fontSize: 12 }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+            {saveToast?.kind === "warn" && (
+              <div
+                data-testid="consultation-warn-toast"
+                style={{
+                  position: "fixed",
+                  left: "var(--space-3)",
+                  right: "var(--space-3)",
+                  bottom: `calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px) + ${mobileBottomNavOffsetPx + 88}px)`,
+                  zIndex: 80,
+                  background: "rgba(15, 23, 42, 0.92)",
                   color: "#fff",
                   borderRadius: "var(--radius-3)",
                   padding: "var(--space-2) var(--space-3)",
