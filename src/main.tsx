@@ -6,6 +6,7 @@ import { initSyncService, notifyHydrationComplete, requestQueueSnapshot } from "
 import { registerSW } from 'virtual:pwa-register';
 import { initAppLifecycleRuntime } from "./services/appLifecycleRuntimeService";
 import { logOperationalEvent } from "./services/operationalEventLogService";
+import { installGlobalErrorCapture } from "./services/runtimeErrorCaptureService";
 
 const root = ReactDOM.createRoot(document.getElementById("root")!);
 
@@ -47,6 +48,13 @@ const root = ReactDOM.createRoot(document.getElementById("root")!);
       <App />
     </React.StrictMode>
   );
+
+  // Global runtime error capture (production-safe, stored locally).
+  try {
+    installGlobalErrorCapture();
+  } catch (err) {
+    console.warn("[main] installGlobalErrorCapture failed", err);
+  }
 
   // Operational runtime integration: non-blocking lifecycle orchestration.
   // Intentionally started after initial render to protect startup performance.

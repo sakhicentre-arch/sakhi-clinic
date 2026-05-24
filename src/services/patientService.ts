@@ -10,6 +10,7 @@ import { usePatientStore } from "../store/usePatientStore";
 import { broadcastSyncEvent } from "./syncService";
 import { getDeviceId } from "../utils/deviceId";
 import { enqueueOutbox } from "./outboxService";
+import { captureOperationError, logOperationAttempt, logOperationSuccess } from "./runtimeErrorCaptureService";
 
 const nowIso = () => new Date().toISOString();
 
@@ -66,84 +67,124 @@ export async function getPatientById(id: string): Promise<Patient | undefined> {
 }
 
 export async function addPatient(patient: Patient): Promise<void> {
-  const timestamp = nowIso();
-  const record: Patient = {
-    ...patient,
-    createdAt: patient.createdAt || timestamp,
-    updatedAt: timestamp,
-    version: typeof patient.version === "number" ? patient.version + 1 : 1,
-    deviceId: patient.deviceId || getDeviceId(),
-    syncStatus: patient.syncStatus || "local",
-  };
-  const key = await db.patients.add(record);
-  // Ensure id present
-  if (!record.id) record.id = String(key);
-
-  // Outbox: track mutation for future sync/backup pipelines.
+  await logOperationAttempt({
+    op: "patient.create",
+    message: "Patient create attempt",
+    payload: { id: patient?.id, name: patient?.name, phone: patient?.phone },
+  });
   try {
-    await enqueueOutbox({
-      entityType: "patient",
-      entityId: String(record.id),
-      operationType: "create",
-      payload: record,
-      version: record.version || 1,
+    const timestamp = nowIso();
+    const record: Patient = {
+      ...patient,
+      createdAt: patient.createdAt || timestamp,
+      updatedAt: timestamp,
+      version: typeof patient.version === "number" ? patient.version + 1 : 1,
+      deviceId: patient.deviceId || getDeviceId(),
+      syncStatus: patient.syncStatus || "local",
+    };
+    const key = await db.patients.add(record);
+    // Ensure id present
+    if (!record.id) record.id = String(key);
+
+    // Outbox: track mutation for future sync/backup pipelines.
+    try {
+      await enqueueOutbox({
+        entityType: "patient",
+        entityId: String(record.id),
+        operationType: "create",
+        payload: record,
+        version: record.version || 1,
+      });
+    } catch (err) {
+      console.warn("[patientService] outbox enqueue failed:", err);
+    }
+
+    // Update transient store immediately so UI sees new patient
+    try {
+      usePatientStore.setState((s) => ({ patients: [...s.patients, record] }));
+    } catch (err) {
+      console.warn('[patientService] addPatient store sync failed', err);
+    }
+
+    broadcastSyncEvent({ type: "patient:created", payload: { id: String(record.id) } });
+    await logOperationSuccess({
+      op: "patient.create",
+      message: "Patient created",
+      data: { id: String(record.id) },
     });
-  } catch (err) {
-    console.warn("[patientService] outbox enqueue failed:", err);
+  } catch (error) {
+    await captureOperationError({
+      op: "patient.create",
+      message: "Patient create failed",
+      error,
+      payload: { id: patient?.id, name: patient?.name, phone: patient?.phone },
+    });
+    throw error;
   }
-
-  // Update transient store immediately so UI sees new patient
-  try {
-    usePatientStore.setState((s) => ({ patients: [...s.patients, record] }));
-  } catch (err) {
-    console.warn('[patientService] addPatient store sync failed', err);
-  }
-
-  broadcastSyncEvent({ type: "patient:created", payload: { id: String(record.id) } });
 }
 
 export async function updatePatient(id: string, updates: Partial<Patient>): Promise<void> {
-  const existing = await db.patients.get(id);
-  const nextVersion =
-    typeof existing?.version === "number" ? existing.version + 1 : 1;
-  const changed = await db.patients.update(id, {
-    ...updates,
-    updatedAt: nowIso(),
-    version: nextVersion,
-    deviceId: existing?.deviceId || getDeviceId(),
-    syncStatus: (existing as any)?.syncStatus || "local",
+  await logOperationAttempt({
+    op: "patient.update",
+    message: "Patient update attempt",
+    payload: { id, updates },
   });
-  if (changed === 0) {
-    throw new Error(`[patientService] Patient not found: ${id}`);
-  }
-
   try {
-    const updated = await db.patients.get(id);
-    if (updated && !updated.deletedAt) {
-      await enqueueOutbox({
-        entityType: "patient",
-        entityId: String(id),
-        operationType: "update",
-        payload: updated,
-        version: (updated as any).version || nextVersion,
-      });
+    const existing = await db.patients.get(id);
+    const nextVersion =
+      typeof existing?.version === "number" ? existing.version + 1 : 1;
+    const changed = await db.patients.update(id, {
+      ...updates,
+      updatedAt: nowIso(),
+      version: nextVersion,
+      deviceId: existing?.deviceId || getDeviceId(),
+      syncStatus: (existing as any)?.syncStatus || "local",
+    });
+    if (changed === 0) {
+      throw new Error(`[patientService] Patient not found: ${id}`);
     }
-  } catch (err) {
-    console.warn("[patientService] outbox enqueue failed:", err);
-  }
 
-  try {
-    const updated = await db.patients.get(id);
-    if (updated) {
-      usePatientStore.setState((s) => ({
-        patients: s.patients.map((p) => (p.id === id ? updated : p)),
-      }));
+    try {
+      const updated = await db.patients.get(id);
+      if (updated && !updated.deletedAt) {
+        await enqueueOutbox({
+          entityType: "patient",
+          entityId: String(id),
+          operationType: "update",
+          payload: updated,
+          version: (updated as any).version || nextVersion,
+        });
+      }
+    } catch (err) {
+      console.warn("[patientService] outbox enqueue failed:", err);
     }
-  } catch (err) {
-    console.warn('[patientService] updatePatient store sync failed', err);
-  }
 
-  broadcastSyncEvent({ type: "patient:updated", payload: { id } });
+    try {
+      const updated = await db.patients.get(id);
+      if (updated) {
+        usePatientStore.setState((s) => ({
+          patients: s.patients.map((p) => (p.id === id ? updated : p)),
+        }));
+      }
+    } catch (err) {
+      console.warn('[patientService] updatePatient store sync failed', err);
+    }
+
+    broadcastSyncEvent({ type: "patient:updated", payload: { id } });
+    await logOperationSuccess({
+      op: "patient.update",
+      message: "Patient updated",
+      data: { id },
+    });
+  } catch (error) {
+    await captureOperationError({
+      op: "patient.update",
+      message: "Patient update failed",
+      error,
+      payload: { id, updates },
+    });
+    throw error;
+  }
 }
 
 export async function deletePatient(id: string): Promise<void> {

@@ -8,6 +8,7 @@ import UpdateBanner from './UpdateBanner';
 import useKeyboardInset from '../../hooks/useKeyboardInset';
 import { useUIStore } from "../../store/uiStore";
 import CommandPalette from "../commandPalette/CommandPalette";
+import DiagnosticsPanel from "../debug/DiagnosticsPanel";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -25,6 +26,7 @@ export default function AppShell({
   const keyboard = useKeyboardInset();
   const globalSearchOpen = useUIStore((s) => s.globalSearchOpen);
   const setGlobalSearchOpen = useUIStore((s) => s.setGlobalSearchOpen);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
@@ -92,6 +94,7 @@ export default function AppShell({
         isMobile={isMobile}
         mobileNavOpen={drawerOpen}
         onToggleMobileNav={() => setDrawerOpen((prev) => !prev)}
+        onOpenDiagnostics={() => setDiagnosticsOpen(true)}
       />
       {!isMobile && <LeftNav onNavigate={handleNavigate} />}
       {isMobile && drawerOpen && (
@@ -123,6 +126,7 @@ export default function AppShell({
         />
       )}
       <CommandPalette onNavigate={handleNavigate} onSelectPatient={onPatientSelect} />
+      <DiagnosticsPanel open={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
     </>
   );
 }

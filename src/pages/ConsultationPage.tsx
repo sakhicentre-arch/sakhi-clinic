@@ -40,6 +40,7 @@ import { openWhatsApp } from "../services/whatsappService";
 import { analyzeRemedies } from "../services/remedyEngine";
 import PrintableConsultation from "../components/PrintableConsultation";
 import { generateRemedyExplanations } from "../services/aiReasoningEngine";
+import { captureOperationError } from "../services/runtimeErrorCaptureService";
 import { usePatientStore } from "../store/usePatientStore";
 import { useConsultationStore } from "../store/useConsultationStore";
 import { saveDraft, loadDraft, deleteDraft } from "../services/draftService";
@@ -723,7 +724,11 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const [showNotesSheet, setShowNotesSheet] = useState(false);
   const [showFollowUpSheet, setShowFollowUpSheet] = useState(false);
   const [showTemplatesSheet, setShowTemplatesSheet] = useState(false);
-  const [saveToast, setSaveToast] = useState<null | { kind: "saved"; canNext: boolean }>(null);
+  const [saveToast, setSaveToast] = useState<
+    | null
+    | { kind: "saved"; canNext: boolean }
+    | { kind: "error"; message: string }
+  >(null);
   const setActiveConsultation = useUIStore((s) => s.setActiveConsultation);
   const setDraftStatus = useUIStore((s) => s.setDraftStatus);
   const queue = useQueueStore((s) => s.queue);
@@ -795,6 +800,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
       setDraftStatus("Saved");
     } catch (err) {
       setDraftStatus("Save failed");
+      setSaveToast({ kind: "error", message: "Consultation could not be saved. Please retry." });
+      window.setTimeout(() => setSaveToast(null), 3200);
       throw err;
     }
 
@@ -1131,11 +1138,23 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
         await loadData();
         if (onFinish) onFinish();
       } else {
-        alert("Unable to save consultation. Please try again.");
+        await captureOperationError({
+          op: "consultation.save",
+          message: "Consultation save returned false",
+          error: new Error("saveConsultation returned false"),
+          payload: { id: session.id, patientId: session.patientId, appointmentId: (session as any).appointmentId, date: session.date },
+        });
+        throw new Error("Unable to save consultation. Please try again.");
       }
     } catch (error) {
       console.error("Error saving consultation:", error);
-      alert("Error saving consultation. Please try again.");
+      await captureOperationError({
+        op: "consultation.save",
+        message: "Consultation save failed (page)",
+        error,
+        payload: { patientId, appointmentId, editingId, formDate: formData.formDate, followUp: formData.formFollowUpDate },
+      });
+      throw error;
     } finally {
       if (!success) dispatch({ type: "SAVE_FAIL" });
     }
@@ -2590,6 +2609,37 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     Next patient →
                   </button>
                 )}
+              </div>
+            )}
+            {saveToast?.kind === "error" && (
+              <div
+                data-testid="consultation-error-toast"
+                style={{
+                  position: "fixed",
+                  left: "var(--space-3)",
+                  right: "var(--space-3)",
+                  bottom: `calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px) + ${mobileBottomNavOffsetPx + 88}px)`,
+                  zIndex: 80,
+                  background: "rgba(127, 29, 29, 0.94)",
+                  color: "#fff",
+                  borderRadius: "var(--radius-3)",
+                  padding: "var(--space-2) var(--space-3)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.28)",
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 800 }}>{saveToast.message}</div>
+                <button
+                  type="button"
+                  onClick={() => setSaveToast(null)}
+                  className="sakhi-tap sakhi-focus-ring"
+                  style={{ minHeight: 36, padding: "0 10px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.08)", color: "#fff", fontWeight: 900, fontSize: 12 }}
+                >
+                  Dismiss
+                </button>
               </div>
             )}
             <div

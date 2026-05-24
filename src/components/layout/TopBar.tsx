@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Clock, Menu, Search, X } from "lucide-react";
 import { useUIStore } from "../../store/uiStore";
 import ClinicBadge from "../shared/ClinicBadge";
@@ -8,6 +8,7 @@ interface TopBarProps {
   isMobile?: boolean;
   mobileNavOpen?: boolean;
   onToggleMobileNav: () => void;
+  onOpenDiagnostics?: () => void;
 }
 
 export default function TopBar({
@@ -15,11 +16,13 @@ export default function TopBar({
   isMobile = false,
   mobileNavOpen = false,
   onToggleMobileNav,
+  onOpenDiagnostics,
 }: TopBarProps) {
   const activeClinic = useUIStore((s) => s.activeClinic);
   const draftStatus = useUIStore((s) => s.draftStatus);
   const setGlobalSearchOpen = useUIStore((s) => s.setGlobalSearchOpen);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const devTapRef = useRef<{ count: number; lastAt: number }>({ count: 0, lastAt: 0 });
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -53,7 +56,31 @@ export default function TopBar({
         )}
 
         <div className="sakhi-row" style={{ gap: "var(--space-2)", minWidth: "fit-content" }}>
-          <div className="sakhi-appmark" style={{ background: clinicColor }}>
+          <div
+            className="sakhi-appmark sakhi-tap sakhi-focus-ring sakhi-ripple"
+            style={{ background: clinicColor, cursor: "pointer" }}
+            role="button"
+            tabIndex={0}
+            aria-label="Sakhi diagnostics trigger"
+            title="Tap 7x for diagnostics"
+            onClick={() => {
+              const now = Date.now();
+              const prev = devTapRef.current;
+              const withinWindow = now - prev.lastAt < 1200;
+              const nextCount = withinWindow ? prev.count + 1 : 1;
+              devTapRef.current = { count: nextCount, lastAt: now };
+              if (nextCount >= 7) {
+                devTapRef.current = { count: 0, lastAt: 0 };
+                onOpenDiagnostics?.();
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                (e.currentTarget as any).click();
+              }
+            }}
+          >
             ⚕️
           </div>
           <span className="sakhi-title">Sakhi</span>
@@ -128,4 +155,3 @@ export default function TopBar({
     </>
   );
 }
-

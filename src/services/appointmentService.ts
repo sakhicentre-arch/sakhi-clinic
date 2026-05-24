@@ -2,6 +2,7 @@ import { Appointment, AppointmentStatus, db } from "./db";
 import { broadcastSyncEvent } from "./syncService";
 import { getDeviceId } from "../utils/deviceId";
 import { enqueueOutbox } from "./outboxService";
+import { captureOperationError, logOperationAttempt, logOperationSuccess } from "./runtimeErrorCaptureService";
 
 const nowIso = () => new Date().toISOString();
 const todayDateString = (): string => new Date().toISOString().slice(0, 10);
@@ -91,6 +92,11 @@ export const appointmentService = {
   },
 
   async createAppointment(appointment: Appointment): Promise<boolean> {
+    await logOperationAttempt({
+      op: "appointment.create",
+      message: "Appointment create attempt",
+      payload: { id: appointment?.id, patientId: appointment?.patientId, clinic: appointment?.clinic, date: appointment?.date, time: appointment?.time, type: appointment?.type },
+    });
     try {
       await markOverdueAppointmentsMissed();
       assertValidAppointment(appointment);
@@ -121,14 +127,30 @@ export const appointmentService = {
         }
       });
       broadcastSyncEvent({ type: "appointment:created", payload: { id: appointment.id } });
+      await logOperationSuccess({
+        op: "appointment.create",
+        message: "Appointment created",
+        data: { id: appointment.id, patientId: appointment.patientId, date: appointment.date, time: appointment.time, clinic: appointment.clinic },
+      });
       return true;
     } catch (error) {
       console.error("[AppointmentService] createAppointment failed:", error);
+      await captureOperationError({
+        op: "appointment.create",
+        message: "Appointment create failed",
+        error,
+        payload: { id: appointment?.id, patientId: appointment?.patientId, clinic: appointment?.clinic, date: appointment?.date, time: appointment?.time, type: appointment?.type },
+      });
       throw error;
     }
   },
 
   async updateAppointment(id: string, changes: Partial<Appointment>): Promise<boolean> {
+    await logOperationAttempt({
+      op: "appointment.update",
+      message: "Appointment update attempt",
+      payload: { id, changes },
+    });
     try {
       if (!id) throw new Error("[AppointmentService] updateAppointment requires id");
       await markOverdueAppointmentsMissed();
@@ -160,9 +182,20 @@ export const appointmentService = {
         }
       });
       broadcastSyncEvent({ type: "appointment:updated", payload: { id } });
+      await logOperationSuccess({
+        op: "appointment.update",
+        message: "Appointment updated",
+        data: { id, patientId: updated.patientId, date: updated.date, time: updated.time, clinic: updated.clinic, status: updated.status },
+      });
       return true;
     } catch (error) {
       console.error("[AppointmentService] updateAppointment failed:", error);
+      await captureOperationError({
+        op: "appointment.update",
+        message: "Appointment update failed",
+        error,
+        payload: { id, changes },
+      });
       throw error;
     }
   },

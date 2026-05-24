@@ -120,6 +120,8 @@ export default function AppointmentPage({ goToConsultation }: Props) {
   const markArrived = useAppointmentStore((s) => s.markArrived);
   const markReminderSent = useAppointmentStore((s) => s.markReminderSent);
   const loadAppointments = useAppointmentStore((s) => s.loadAppointments);
+  const lastError = useAppointmentStore((s) => s.lastError);
+  const clearError = useAppointmentStore((s) => s.clearError);
 
   const [selectedPatientId, setSelectedPatientId] = useState("");
   const [clinic, setClinic] = useState<"Dabholi" | "City Light">("Dabholi");
@@ -278,6 +280,11 @@ export default function AppointmentPage({ goToConsultation }: Props) {
       if (phone) openWhatsApp({ phone, message: msg });
       alert("Appointment Secured ✅");
     }
+
+    if (!success) {
+      alert(lastError ? `Appointment booking failed: ${lastError}` : "Appointment booking failed. Please retry.");
+      clearError();
+    }
   };
 
   const handleWalkIn = async () => {
@@ -286,7 +293,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
 
     const now = new Date();
     const currentTimeStr = `${now.getHours()}:${now.getMinutes().toString().padStart(2, "0")}`;
-    await addAppointment({
+    const success = await addAppointment({
       id: Date.now().toString(),
       patientId: patient.id,
       patientName: patient.name,
@@ -296,6 +303,11 @@ export default function AppointmentPage({ goToConsultation }: Props) {
       type: "walk-in",
       status: "arrived",
     });
+    if (!success) {
+      alert(lastError ? `Walk-in could not be saved: ${lastError}` : "Walk-in could not be saved. Please retry.");
+      clearError();
+      return;
+    }
     alert(`Priority Walk-in registered at ${currentTimeStr} ✅`);
   };
 

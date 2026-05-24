@@ -9,10 +9,16 @@ import { syncPatientFollowUp } from "./patientService";
 import { broadcastSyncEvent } from "./syncService";
 import { getDeviceId } from "../utils/deviceId";
 import { enqueueOutbox } from "./outboxService";
+import { captureOperationError, logOperationAttempt, logOperationSuccess } from "./runtimeErrorCaptureService";
 
 const nowIso = () => new Date().toISOString();
 
 export async function saveConsultation(c: Consultation): Promise<boolean> {
+  await logOperationAttempt({
+    op: "consultation.save",
+    message: "Consultation save attempt",
+    payload: { id: c?.id, patientId: c?.patientId, appointmentId: (c as any)?.appointmentId, date: c?.date, hasMeds: (c?.medicines || []).length > 0 },
+  });
   try {
     const timestamp = nowIso();
     const normalized: Consultation = {
@@ -52,6 +58,11 @@ export async function saveConsultation(c: Consultation): Promise<boolean> {
     });
 
     broadcastSyncEvent({ type: "consultation:saved", payload: { id: normalized.id } });
+    await logOperationSuccess({
+      op: "consultation.save",
+      message: "Consultation saved",
+      data: { id: normalized.id, patientId: normalized.patientId, version: normalized.version },
+    });
 
     if (!normalized.learnedAt) {
       learnFromConsultation(normalized)
@@ -69,6 +80,12 @@ export async function saveConsultation(c: Consultation): Promise<boolean> {
     return true;
   } catch (error) {
     console.error("[consultationService] CRITICAL: Consultation save failed:", error);
+    await captureOperationError({
+      op: "consultation.save",
+      message: "Consultation save failed",
+      error,
+      payload: { id: c?.id, patientId: c?.patientId, appointmentId: (c as any)?.appointmentId, date: c?.date },
+    });
     throw error;
   }
 }

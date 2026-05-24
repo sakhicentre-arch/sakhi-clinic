@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { db, Appointment } from "../services/db";
 import { appointmentService } from "../services/appointmentService";
 import { subscribeToSync } from "../services/syncService";
+import { captureOperationError } from "../services/runtimeErrorCaptureService";
 
 const toErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -42,6 +43,12 @@ export const useAppointmentStore = create<AppointmentStore>((set, get) => ({
     try {
       const success = await appointmentService.add(a);
       if (!success) {
+        await captureOperationError({
+          op: "appointment.create",
+          message: "Appointment service returned false",
+          error: new Error("appointmentService.add returned false"),
+          payload: { id: a?.id, patientId: a?.patientId, clinic: (a as any)?.clinic, date: a?.date, time: a?.time, type: (a as any)?.type },
+        });
         set({ lastError: "Appointment save failed without a service result." });
         return false;
       }
@@ -54,6 +61,12 @@ export const useAppointmentStore = create<AppointmentStore>((set, get) => ({
       return true;
     } catch (error) {
       console.error("[AppointmentStore] addAppointment failed:", error);
+      await captureOperationError({
+        op: "appointment.create",
+        message: "Appointment create failed (store)",
+        error,
+        payload: { id: a?.id, patientId: a?.patientId, clinic: (a as any)?.clinic, date: a?.date, time: a?.time, type: (a as any)?.type },
+      });
       set({ lastError: toErrorMessage(error) });
       return false;
     }
@@ -149,4 +162,3 @@ if (typeof window !== "undefined") {
     }
   });
 }
-
