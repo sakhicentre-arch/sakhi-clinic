@@ -8,6 +8,9 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: ["./src/__tests__/setup.ts"],
+    // Keep unit/integration tests separate from Playwright E2E specs (in `/tests`).
+    include: ["src/__tests__/**/*.{test,spec}.{ts,tsx}"],
+    exclude: ["tests/**", "playwright-results/**", "playwright-report/**", "dist/**", "node_modules/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],

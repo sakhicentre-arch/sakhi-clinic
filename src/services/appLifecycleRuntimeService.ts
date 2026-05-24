@@ -7,6 +7,7 @@ import {
   stopMaintenanceRuntime,
 } from "./maintenanceRuntimeService";
 import { computeRuntimeStatus, setLastRuntimeStatus } from "./runtimeStatusService";
+import { runAutoBackupIfDue } from "./backupService";
 
 type IdleCallbackHandle = any;
 
@@ -56,6 +57,10 @@ async function refreshRuntimeSnapshot(reason: string) {
         data: { ageDays: report.backup.ageDays, staleAfterDays: DEFAULT_MAINTENANCE_POLICIES.backup.staleAfterDays, reason },
       });
     }
+
+    // Best-effort local auto-backup snapshots (non-blocking and never user-visible).
+    // Uses Cache Storage, not Dexie tables, to avoid schema changes.
+    runAutoBackupIfDue({ reason }).catch(() => {});
   } catch (error) {
     await logOperationalEvent({
       level: "error",
@@ -134,4 +139,3 @@ export function initAppLifecycleRuntime() {
     }
   });
 }
-

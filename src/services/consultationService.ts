@@ -14,14 +14,23 @@ import { captureOperationError, logOperationAttempt, logOperationSuccess } from 
 const nowIso = () => new Date().toISOString();
 
 export async function saveConsultation(c: Consultation): Promise<boolean> {
-  await logOperationAttempt({
-    op: "consultation.save",
-    message: "Consultation save attempt",
-    payload: { id: c?.id, patientId: c?.patientId, appointmentId: (c as any)?.appointmentId, date: c?.date, hasMeds: (c?.medicines || []).length > 0 },
-  });
+  // Never allow diagnostics/logging to block a clinical save.
+  try {
+    await logOperationAttempt({
+      op: "consultation.save",
+      message: "Consultation save attempt",
+      payload: { id: c?.id, patientId: c?.patientId, appointmentId: (c as any)?.appointmentId, date: c?.date, hasMeds: (c?.medicines || []).length > 0 },
+    });
+  } catch {
+    // ignore
+  }
+
+  let localPersisted = false;
+  let normalized: Consultation | null = null;
+
   try {
     const timestamp = nowIso();
-    const normalized: Consultation = {
+    normalized = {
       ...c,
       createdAt: c.createdAt || timestamp,
       updatedAt: timestamp,
@@ -42,32 +51,45 @@ export async function saveConsultation(c: Consultation): Promise<boolean> {
     };
 
     await db.transaction("rw", [db.consultations, db.patients, db.syncOutbox], async () => {
-      await db.consultations.put(normalized);
-      await syncPatientFollowUp(normalized.patientId);
+      await db.consultations.put(normalized as Consultation);
+      await syncPatientFollowUp((normalized as Consultation).patientId);
       try {
         await enqueueOutbox({
           entityType: "consultation",
-          entityId: normalized.id,
+          entityId: (normalized as Consultation).id,
           operationType: "update",
-          payload: normalized,
-          version: normalized.version || 1,
+          payload: normalized as Consultation,
+          version: (normalized as Consultation).version || 1,
         });
       } catch (err) {
         console.warn("[consultationService] outbox enqueue failed:", err);
       }
     });
 
-    broadcastSyncEvent({ type: "consultation:saved", payload: { id: normalized.id } });
-    await logOperationSuccess({
-      op: "consultation.save",
-      message: "Consultation saved",
-      data: { id: normalized.id, patientId: normalized.patientId, version: normalized.version },
-    });
+    // If we reached here, IndexedDB transaction committed successfully.
+    localPersisted = true;
 
-    if (!normalized.learnedAt) {
-      learnFromConsultation(normalized)
+    // Post-save side effects: never throw after local persistence succeeds.
+    try {
+      broadcastSyncEvent({ type: "consultation:saved", payload: { id: (normalized as Consultation).id } });
+    } catch (err) {
+      console.warn("[consultationService] broadcastSyncEvent failed:", err);
+    }
+
+    try {
+      await logOperationSuccess({
+        op: "consultation.save",
+        message: "Consultation saved",
+        data: { id: (normalized as Consultation).id, patientId: (normalized as Consultation).patientId, version: (normalized as Consultation).version },
+      });
+    } catch (err) {
+      console.warn("[consultationService] logOperationSuccess failed:", err);
+    }
+
+    if (!(normalized as Consultation).learnedAt) {
+      learnFromConsultation(normalized as Consultation)
         .then(async () => {
-          await db.consultations.update(normalized.id, {
+          await db.consultations.update((normalized as Consultation).id, {
             learnedAt: nowIso(),
             updatedAt: nowIso(),
           });
@@ -79,13 +101,33 @@ export async function saveConsultation(c: Consultation): Promise<boolean> {
 
     return true;
   } catch (error) {
+    // If local persistence succeeded but something after it failed, downgrade to warning.
+    if (localPersisted) {
+      console.warn("[consultationService] Non-critical post-save failure after local persistence:", error);
+      try {
+        await captureOperationError({
+          op: "consultation.save",
+          message: "Post-save failure after local persistence",
+          error,
+          payload: { id: normalized?.id || c?.id, patientId: normalized?.patientId || c?.patientId, appointmentId: (c as any)?.appointmentId, date: normalized?.date || c?.date },
+        });
+      } catch {
+        // ignore
+      }
+      return true;
+    }
+
     console.error("[consultationService] CRITICAL: Consultation save failed:", error);
-    await captureOperationError({
-      op: "consultation.save",
-      message: "Consultation save failed",
-      error,
-      payload: { id: c?.id, patientId: c?.patientId, appointmentId: (c as any)?.appointmentId, date: c?.date },
-    });
+    try {
+      await captureOperationError({
+        op: "consultation.save",
+        message: "Consultation save failed",
+        error,
+        payload: { id: c?.id, patientId: c?.patientId, appointmentId: (c as any)?.appointmentId, date: c?.date },
+      });
+    } catch {
+      // ignore
+    }
     throw error;
   }
 }

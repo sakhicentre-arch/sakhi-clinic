@@ -38,6 +38,21 @@ const localStorageMock = {
 };
 global.localStorage = localStorageMock as any;
 
+// Mock matchMedia for responsive hooks/layouts.
+Object.defineProperty(window, "matchMedia", {
+  writable: true,
+  value: (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }),
+});
+
 // Suppress console errors in tests (optional - can be removed for debugging)
 const originalError = console.error;
 beforeEach(() => {

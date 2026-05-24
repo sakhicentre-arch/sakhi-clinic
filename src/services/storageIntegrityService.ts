@@ -41,7 +41,7 @@ export function verifyExportBundle(bundle: ClinicExportBundleV2): { ok: boolean;
     if (!bundle.exportedAt || typeof bundle.exportedAt !== "string") throw new Error("Missing exportedAt");
     if (!bundle.deviceId || typeof bundle.deviceId !== "string") throw new Error("Missing deviceId");
     if (!bundle.data || typeof bundle.data !== "object") throw new Error("Missing data");
-    const keys = ["patients", "consultations", "appointments", "drafts", "learning", "caseMemory", "syncOutbox"] as const;
+    const keys = ["patients", "consultations", "appointments", "drafts", "learning", "caseMemory", "syncOutbox", "operationalEvents"] as const;
     for (const k of keys) {
       const v: any = (bundle.data as any)[k];
       if (!Array.isArray(v)) throw new Error(`data.${k} must be an array`);
@@ -57,4 +57,3 @@ export function verifyExportBundle(bundle: ClinicExportBundleV2): { ok: boolean;
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
-

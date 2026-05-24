@@ -97,6 +97,9 @@ export const appointmentService = {
       message: "Appointment create attempt",
       payload: { id: appointment?.id, patientId: appointment?.patientId, clinic: appointment?.clinic, date: appointment?.date, time: appointment?.time, type: appointment?.type },
     });
+
+    let localPersisted = false;
+    let created: Appointment | null = null;
     try {
       await markOverdueAppointmentsMissed();
       assertValidAppointment(appointment);
@@ -111,36 +114,60 @@ export const appointmentService = {
         throw new Error("[AppointmentService] Appointment with this ID already exists");
       }
 
-      const created = withMetadata(appointment);
+      created = withMetadata(appointment);
       await db.transaction("rw", [db.appointments, db.syncOutbox], async () => {
-        await db.appointments.add(created);
+        await db.appointments.add(created as Appointment);
         try {
           await enqueueOutbox({
             entityType: "appointment",
-            entityId: created.id,
+            entityId: (created as Appointment).id,
             operationType: "create",
-            payload: created,
-            version: created.version || 1,
+            payload: created as Appointment,
+            version: (created as Appointment).version || 1,
           });
         } catch (err) {
           console.warn("[AppointmentService] outbox enqueue failed:", err);
         }
       });
-      broadcastSyncEvent({ type: "appointment:created", payload: { id: appointment.id } });
-      await logOperationSuccess({
-        op: "appointment.create",
-        message: "Appointment created",
-        data: { id: appointment.id, patientId: appointment.patientId, date: appointment.date, time: appointment.time, clinic: appointment.clinic },
-      });
+
+      // IndexedDB transaction committed successfully.
+      localPersisted = true;
+
+      // Post-save side effects must never turn a local save into a failure.
+      try {
+        broadcastSyncEvent({ type: "appointment:created", payload: { id: appointment.id } });
+      } catch (err) {
+        console.warn("[AppointmentService] broadcastSyncEvent failed:", err);
+      }
+      try {
+        await logOperationSuccess({
+          op: "appointment.create",
+          message: "Appointment created",
+          data: { id: appointment.id, patientId: appointment.patientId, date: appointment.date, time: appointment.time, clinic: appointment.clinic },
+        });
+      } catch (err) {
+        console.warn("[AppointmentService] logOperationSuccess failed:", err);
+      }
       return true;
     } catch (error) {
+      if (localPersisted) {
+        console.warn("[AppointmentService] Non-critical post-save failure after local persistence:", error);
+        await captureOperationError({
+          op: "appointment.create",
+          message: "Post-save failure after local persistence",
+          error,
+          payload: { id: created?.id || appointment?.id, patientId: created?.patientId || appointment?.patientId, clinic: created?.clinic || appointment?.clinic, date: created?.date || appointment?.date, time: created?.time || appointment?.time, type: created?.type || appointment?.type },
+        }).catch(() => {});
+        return true;
+      }
+
       console.error("[AppointmentService] createAppointment failed:", error);
       await captureOperationError({
         op: "appointment.create",
         message: "Appointment create failed",
         error,
         payload: { id: appointment?.id, patientId: appointment?.patientId, clinic: appointment?.clinic, date: appointment?.date, time: appointment?.time, type: appointment?.type },
-      });
+      }).catch(() => {});
       throw error;
     }
   },
@@ -151,6 +178,9 @@ export const appointmentService = {
       message: "Appointment update attempt",
       payload: { id, changes },
     });
+
+    let localPersisted = false;
+    let updated: Appointment | null = null;
     try {
       if (!id) throw new Error("[AppointmentService] updateAppointment requires id");
       await markOverdueAppointmentsMissed();
@@ -158,8 +188,8 @@ export const appointmentService = {
       const existing = await this.getById(id);
       if (!existing) throw new Error("[AppointmentService] Appointment not found");
 
-      const updated = withMetadata({ ...existing, ...changes, id });
-      assertValidAppointment(updated);
+      updated = withMetadata({ ...existing, ...changes, id });
+      assertValidAppointment(updated as Appointment);
 
       const slotChanged = changes.date !== undefined || changes.time !== undefined || changes.clinic !== undefined;
       if (slotChanged && updated.type === "scheduled") {
@@ -168,34 +198,56 @@ export const appointmentService = {
       }
 
       await db.transaction("rw", [db.appointments, db.syncOutbox], async () => {
-        await db.appointments.put(updated);
+        await db.appointments.put(updated as Appointment);
         try {
           await enqueueOutbox({
             entityType: "appointment",
             entityId: id,
             operationType: "update",
-            payload: updated,
-            version: updated.version || 1,
+            payload: updated as Appointment,
+            version: (updated as Appointment).version || 1,
           });
         } catch (err) {
           console.warn("[AppointmentService] outbox enqueue failed:", err);
         }
       });
-      broadcastSyncEvent({ type: "appointment:updated", payload: { id } });
-      await logOperationSuccess({
-        op: "appointment.update",
-        message: "Appointment updated",
-        data: { id, patientId: updated.patientId, date: updated.date, time: updated.time, clinic: updated.clinic, status: updated.status },
-      });
+
+      localPersisted = true;
+
+      try {
+        broadcastSyncEvent({ type: "appointment:updated", payload: { id } });
+      } catch (err) {
+        console.warn("[AppointmentService] broadcastSyncEvent failed:", err);
+      }
+      try {
+        await logOperationSuccess({
+          op: "appointment.update",
+          message: "Appointment updated",
+          data: { id, patientId: (updated as Appointment).patientId, date: (updated as Appointment).date, time: (updated as Appointment).time, clinic: (updated as Appointment).clinic, status: (updated as Appointment).status },
+        });
+      } catch (err) {
+        console.warn("[AppointmentService] logOperationSuccess failed:", err);
+      }
       return true;
     } catch (error) {
+      if (localPersisted) {
+        console.warn("[AppointmentService] Non-critical post-save failure after local persistence:", error);
+        await captureOperationError({
+          op: "appointment.update",
+          message: "Post-save failure after local persistence",
+          error,
+          payload: { id, changes, patientId: updated?.patientId, date: updated?.date, time: updated?.time, clinic: updated?.clinic },
+        }).catch(() => {});
+        return true;
+      }
+
       console.error("[AppointmentService] updateAppointment failed:", error);
       await captureOperationError({
         op: "appointment.update",
         message: "Appointment update failed",
         error,
         payload: { id, changes },
-      });
+      }).catch(() => {});
       throw error;
     }
   },

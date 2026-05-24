@@ -1,58 +1,85 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import type { Patient, PatientId } from '../types/models';
+import { useMemo } from "react";
 
-interface PatientState {
-  patients: Patient[];
-  selectedPatientId: PatientId | null;
-  // Actions
-  setSelectedPatientId: (id: PatientId | null) => void;
-  loadPatients: () => Promise<void>;
-  addPatient: (patient: Patient) => Promise<void>;
-  updatePatient: (id: PatientId, updates: Partial<Patient>) => Promise<void>;
-  deletePatient: (id: PatientId) => Promise<void>;
+type ConsultationLike = {
+  date?: string;
+  outcome?: string;
+  medicines?: Array<{ name?: string }>;
+};
+
+export type PrescriptionSuggestion = {
+  label: string;
+  confidence: "high" | "medium" | "low";
+};
+
+export type RemedyHistoryRow = {
+  remedy: string;
+  date: string;
+  outcome: string;
+};
+
+export function usePrescriptionPatterns(consultations: ConsultationLike[], chiefComplaint: string) {
+  return useMemo(() => {
+    const safe = Array.isArray(consultations) ? consultations.slice() : [];
+
+    const sorted = safe
+      .filter(Boolean)
+      .slice()
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+
+    const remedyHistory: RemedyHistoryRow[] = [];
+    sorted.forEach((c) => {
+      const meds = Array.isArray(c.medicines) ? c.medicines : [];
+      meds.forEach((m) => {
+        const name = String(m?.name || "").trim();
+        if (!name) return;
+        remedyHistory.push({
+          remedy: name,
+          date: String(c.date || ""),
+          outcome: String(c.outcome || ""),
+        });
+      });
+    });
+
+    const lastRemedies = (() => {
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const row of remedyHistory) {
+        const key = row.remedy.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(row.remedy);
+        if (out.length >= 3) break;
+      }
+      return out;
+    })();
+
+    const smartSuggestions: PrescriptionSuggestion[] = (() => {
+      const suggestions: PrescriptionSuggestion[] = [];
+      const cc = String(chiefComplaint || "").toLowerCase();
+
+      // Operational rule-of-thumb: if last visit improved, suggest repeating last remedy.
+      const last = sorted[0];
+      const lastOutcome = String(last?.outcome || "").toLowerCase();
+      if (lastOutcome.includes("improved") && lastRemedies[0]) {
+        suggestions.push({ label: `Repeat ${lastRemedies[0]}`, confidence: "high" });
+      }
+
+      if (cc.includes("fever") || cc.includes("cold") || cc.includes("cough")) {
+        suggestions.push({ label: "Consider acute remedy review", confidence: "medium" });
+      }
+
+      if (suggestions.length === 0 && lastRemedies[0]) {
+        suggestions.push({ label: `Review ${lastRemedies[0]}`, confidence: "low" });
+      }
+
+      // Ensure confidence values are always valid.
+      return suggestions.map((s) => ({
+        label: s.label,
+        confidence: s.confidence,
+      }));
+    })();
+
+    return { smartSuggestions, lastRemedies, remedyHistory };
+  }, [consultations, chiefComplaint]);
 }
 
-export const usePatientStore = create<PatientState>()(
-  persist(
-    (set, get) => ({
-      patients: [],
-      selectedPatientId: null,
-
-      setSelectedPatientId: (id: PatientId | null) => {
-        set({ selectedPatientId: id ? String(id).trim() : null });
-      },
-
-      loadPatients: async () => {
-        // Logic to load patients from your database/API
-        // Implementation remains unchanged to preserve existing data flow
-      },
-
-      addPatient: async (patient) => {
-        set((state) => ({
-          patients: [...state.patients, patient]
-        }));
-      },
-
-      updatePatient: async (id, updates) => {
-        set((state) => ({
-          patients: state.patients.map((p) => 
-            p.id === id ? { ...p, ...updates } : p
-          ),
-        }));
-      },
-
-      deletePatient: async (id) => {
-        set((state) => ({
-          patients: state.patients.filter((p) => p.id !== id),
-          // Clear selection if the deleted patient was selected
-          selectedPatientId: get().selectedPatientId === id ? null : get().selectedPatientId
-        }));
-      },
-    }),
-    {
-      name: 'sakhi-clinic-patients',
-      partialize: (state) => ({ patients: state.patients }), // Only persist list, not transient selection
-    }
-  )
-);
