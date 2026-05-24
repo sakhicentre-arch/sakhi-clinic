@@ -42,6 +42,9 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      // Mobile suites are validated against dedicated mobile viewports below.
+      // Ignoring them for the desktop project avoids false failures when the mobile-only BottomNav is intentionally absent.
+      testIgnore: /tests[\/\\]mobile[\/\\].*\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
     {

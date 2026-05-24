@@ -104,7 +104,7 @@ export default function RemedyInput({
       {recentRx.length > 0 && (
         <div className="mb-2">
           <div className="sakhi-micro mb-2">Recent Rx</div>
-          <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+          <div className="sakhi-chipstrip">
             {recentRx.map((r) => (
               <button
                 key={`${r.name}|${r.potency || ""}|${r.dosage || ""}|${r.duration || ""}`}
@@ -115,8 +115,8 @@ export default function RemedyInput({
                   onPrescriptionCommit?.(r);
                   commitValue(r.name);
                 }}
-                className="sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
-                style={{ minHeight: 48, borderRadius: "var(--radius-3)", border: "1px solid var(--border)", background: "var(--surface)", padding: "var(--space-2) var(--space-3)", color: "#0f172a", fontSize: "var(--type-caption)", fontWeight: 900 }}
+                className="sakhi-row-card sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
+                style={{ minHeight: 48, maxWidth: 260 }}
                 title="Reuse prescription"
               >
                 <span className="block max-w-[220px] truncate">{r.name}</span>
@@ -133,15 +133,16 @@ export default function RemedyInput({
 
       {/* Recents strip */}
       {recent.length > 0 && (
-        <div className="mb-2 flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+        <div className="mb-2 sakhi-chipstrip">
           {recent.map((r) => (
             <button
               key={r}
               type="button"
               disabled={disabled}
               onClick={() => { haptic("tap"); commitValue(r); }}
-              className="sakhi-tap sakhi-focus-ring sakhi-ripple flex-none"
-              style={{ minHeight: 48, borderRadius: "var(--radius-3)", border: "1px solid var(--border)", background: "var(--surface)", padding: "var(--space-2) var(--space-3)", color: "#334155", fontSize: "var(--type-caption)", fontWeight: 900 }}
+              data-tone="brand"
+              data-selected="false"
+              className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
               title="Use recent remedy"
             >
               {r}
@@ -196,14 +197,13 @@ export default function RemedyInput({
             }
           }}
           placeholder={placeholder}
-          className="sakhi-input sakhi-focus-ring sakhi-tap"
+          className="sakhi-input sakhi-input-muted sakhi-focus-ring sakhi-tap"
         />
 
         {/* Suggestions dropdown */}
         {open && filtered.length > 0 && (
           <div
-            className="absolute left-0 right-0 top-full z-40 mt-2 overflow-hidden border border-slate-200 bg-white shadow-xl"
-            style={{ borderRadius: "var(--radius-4)" }}
+            className="sakhi-menu-panel absolute left-0 right-0 top-full z-40 mt-2"
           >
             {filtered.map((s, idx) => (
               <button
@@ -211,10 +211,8 @@ export default function RemedyInput({
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { haptic("tap"); commitValue(s); }}
-                className={
-                  "w-full px-4 py-3 text-left text-sm font-semibold " +
-                  (idx === activeIndex ? "bg-slate-50 text-slate-900" : "bg-white text-slate-900 hover:bg-slate-50")
-                }
+                data-active={String(idx === activeIndex)}
+                className="sakhi-menu-row sakhi-tap sakhi-focus-ring sakhi-ripple"
               >
                 {s}
               </button>
@@ -232,8 +230,9 @@ export default function RemedyInput({
               type="button"
               disabled={disabled}
               onClick={() => { haptic("tap"); onPotencyChange(p); }}
-              className="sakhi-tap sakhi-focus-ring sakhi-ripple"
-              style={{ minHeight: 40, borderRadius: "var(--radius-3)", border: potency === p ? "1px solid rgba(16,185,129,0.25)" : "1px solid var(--border)", background: potency === p ? "rgba(16,185,129,0.10)" : "var(--surface)", color: potency === p ? "#065f46" : "#334155", padding: "var(--space-2) var(--space-3)", fontSize: "var(--type-caption)", fontWeight: 900 }}
+              data-selected={String(potency === p)}
+              data-tone="success"
+              className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
               title="Set potency"
             >
               {p}

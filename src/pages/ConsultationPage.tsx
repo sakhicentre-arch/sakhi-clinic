@@ -12,6 +12,7 @@ import React, {
   useState,
   useRef,
 } from "react";
+import { Banknote, MessageCircle, Printer, Star } from "lucide-react";
 import {
   Consultation,
   Patient,
@@ -418,12 +419,16 @@ const MobileSection: React.FC<{
   testId?: string;
   children: React.ReactNode;
 }> = ({ title, subtitle, testId, children }) => (
-  <section data-testid={testId} className="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-    <div className="mb-3">
-      <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
-      {subtitle && <p className="mt-1 text-xs text-slate-500">{subtitle}</p>}
+  <section
+    data-testid={testId}
+    className="sakhi-surface-flat"
+    style={{ padding: "var(--space-3)", borderRadius: "var(--radius-4)" }}
+  >
+    <div style={{ marginBottom: "var(--space-2)" }}>
+      <h2 className="sakhi-body" style={{ fontSize: 13, fontWeight: 950, color: "#0f172a" }}>{title}</h2>
+      {subtitle && <p className="sakhi-caption" style={{ marginTop: 4 }}>{subtitle}</p>}
     </div>
-    <div className="space-y-4">{children}</div>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>{children}</div>
   </section>
 );
 
@@ -432,10 +437,10 @@ const MobileField: React.FC<{
   optional?: boolean;
   children: React.ReactNode;
 }> = ({ label, optional, children }) => (
-  <div className="min-w-0 space-y-2">
+  <div className="min-w-0" style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
     <div className="flex items-center justify-between gap-2">
-      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</span>
-      {optional && <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Optional</span>}
+      <span className="sakhi-label" style={{ color: "#94a3b8" }}>{label}</span>
+      {optional && <span className="sakhi-label" style={{ color: "#cbd5e1", fontSize: "var(--type-micro)" }}>Optional</span>}
     </div>
     {children}
   </div>
@@ -479,24 +484,92 @@ interface HybridFieldProps {
   options: string[];
   placeholder?: string;
   rows?: number;
+  isMobile?: boolean;
 }
 
-const HybridField: React.FC<HybridFieldProps> = ({ value, onChange, lang, options, placeholder = "Type or speak...", rows = 2 }) => (
-  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-      <select
-        value=""
-        onChange={(e) => { if (!e.target.value) return; onChange(value ? value + ", " + e.target.value : e.target.value); e.target.value = ""; }}
-        style={{ flex: 1, padding: "7px 10px", fontSize: 12, background: "#f8fafc", border: "1.5px solid #e2e8f0", borderRadius: 8, fontWeight: 600, color: "#475569", cursor: "pointer" }}
-      >
-        <option value="">＋ Quick Add...</option>
-        {options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-      </select>
-      <DictationButton lang={lang} onText={(spoken) => onChange(value ? value + " " + spoken : spoken)} />
+const HybridField: React.FC<HybridFieldProps> = ({ value, onChange, lang, options, placeholder = "Type or speak...", rows = 2, isMobile = false }) => {
+  const [open, setOpen] = useState(false);
+  const quick = options.slice(0, 8);
+
+  const append = (next: string) => {
+    const trimmed = (next || "").trim();
+    if (!trimmed) return;
+    onChange(value ? `${value}, ${trimmed}` : trimmed);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+      <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", minWidth: 0 }}>
+        {isMobile ? (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="sakhi-chipstrip" aria-label="Quick add">
+              {quick.map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => { haptic("tap"); append(opt); }}
+                  className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
+                  data-tone="muted"
+                  data-selected="false"
+                  title="Quick add"
+                >
+                  {opt}
+                </button>
+              ))}
+              {options.length > quick.length && (
+                <button
+                  type="button"
+                  onClick={() => { haptic("tap"); setOpen((v) => !v); }}
+                  className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
+                  data-tone="brand"
+                  data-selected={String(open)}
+                  title="More options"
+                >
+                  More…
+                </button>
+              )}
+            </div>
+
+            {open && (
+              <div className="sakhi-menu-panel" style={{ marginTop: "var(--space-2)" }}>
+                {options.map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => { haptic("tap"); append(opt); setOpen(false); }}
+                    className="sakhi-menu-row sakhi-tap sakhi-focus-ring sakhi-ripple"
+                    data-active="false"
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <select
+            value=""
+            onChange={(e) => { if (!e.target.value) return; append(e.target.value); e.target.value = ""; }}
+            className="sakhi-input sakhi-input-muted"
+            style={{ flex: 1, padding: "var(--space-2) var(--space-3)", fontSize: 12 }}
+          >
+            <option value="">＋ Quick Add…</option>
+            {options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+          </select>
+        )}
+        <DictationButton lang={lang} onText={(spoken) => onChange(value ? value + " " + spoken : spoken)} />
+      </div>
+      <textarea
+        className="sakhi-input sakhi-input-muted sakhi-focus-ring"
+        style={{ minHeight: 96 }}
+        rows={rows}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
     </div>
-    <textarea style={INPUT} rows={rows} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
-  </div>
-);
+  );
+};
 
 const MIND_OPTIONS = ["Anxious", "Fearful", "Irritable", "Sad", "Restless", "Depressed", "Weeping", "Angry", "Indifferent", "Consolation aggravates"];
 const GENERALS_OPTIONS = ["Weakness", "Fatigue", "Chilliness", "Perspiration profuse", "Hot patient", "Cold patient", "Better open air", "Worse cold", "Worse heat", "Craving sweets"];
@@ -1135,8 +1208,28 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     ? { ...formData, medicines: formData.medicines || [], date: formData.formDate ? new Date(formData.formDate).toISOString() : undefined, followUpDate: formData.formFollowUpDate ? new Date(formData.formFollowUpDate).toISOString() : undefined }
     : last;
 
-  if (loading) return <div style={fullMessageStyle}>Loading Clinical Timeline...</div>;
-  if (loadError) return <div style={fullMessageStyle}>{loadError}</div>;
+  if (loading) {
+    return (
+      <div data-testid="consultation-root" className="sakhi-page" style={{ padding: "var(--space-3)" }}>
+        <div className="sakhi-surface-flat" style={{ padding: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
+          <div className="sakhi-label" style={{ color: "#94a3b8" }}>Loading consultation</div>
+          <div style={{ marginTop: "var(--space-3)", display: "grid", gap: "var(--space-2)" }}>
+            <div className="sakhi-skeleton" style={{ height: 22, width: "70%" }} />
+            <div className="sakhi-skeleton" style={{ height: 14, width: "45%" }} />
+            <div className="sakhi-skeleton" style={{ height: 96, width: "100%", borderRadius: "var(--radius-4)" }} />
+            <div className="sakhi-skeleton" style={{ height: 48, width: "100%", borderRadius: "var(--radius-4)" }} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (loadError) {
+    return (
+      <div data-testid="consultation-root" style={fullMessageStyle}>
+        {loadError}
+      </div>
+    );
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // SHARED SIDEBAR (used in classic mode)
@@ -1235,26 +1328,34 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
   const modeToggle = (
     <div style={modeBarStyle}>
-      <div style={{ display: "flex", gap: 0, border: "1.5px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
+      <div className="sakhi-segmented" role="tablist" aria-label="Consultation mode">
         <button
           onClick={() => setMode("quick")}
-          style={{ padding: "8px 20px", border: "none", background: mode === "quick" ? "#0f172a" : "#fff", color: mode === "quick" ? "#fff" : "#475569", fontWeight: 800, fontSize: 12, cursor: "pointer", transition: "0.15s" }}
+          type="button"
+          role="tab"
+          aria-selected={mode === "quick"}
+          data-active={String(mode === "quick")}
+          className="sakhi-segmented-btn sakhi-tap sakhi-focus-ring sakhi-ripple"
         >
           ⚡ Quick Mode
         </button>
         <button
           onClick={() => setMode("classic")}
-          style={{ padding: "8px 20px", border: "none", borderLeft: "1.5px solid #e2e8f0", background: mode === "classic" ? "#0f172a" : "#fff", color: mode === "classic" ? "#fff" : "#475569", fontWeight: 800, fontSize: 12, cursor: "pointer", transition: "0.15s" }}
+          type="button"
+          role="tab"
+          aria-selected={mode === "classic"}
+          data-active={String(mode === "classic")}
+          className="sakhi-segmented-btn sakhi-tap sakhi-focus-ring sakhi-ripple"
         >
           📋 Classic Mode
         </button>
       </div>
       {isFirstVisit && (
-        <span style={{ fontSize: 11, fontWeight: 800, color: "#7c3aed", background: "#f5f3ff", border: "1px solid #ede9fe", padding: "4px 12px", borderRadius: 20 }}>
+        <span className="sakhi-pill" style={{ background: "#f5f3ff", borderColor: "#ede9fe", color: "#6d28d9", fontSize: "var(--type-micro)" }}>
           🆕 First Visit
         </span>
       )}
-      <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600 }}>
+      <div className="sakhi-caption" style={{ color: "#94a3b8" }}>
         {mode === "quick" ? "Streamlined entry — medicine-first workflow" : "Full clinical documentation mode"}
       </div>
     </div>
@@ -1272,8 +1373,37 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
       { id: "followup", label: "Follow-up" },
     ];
 
+    type ConsultationUiPhase = "CAPTURE" | "CONTEXT" | "DECISION" | "COMPLETE";
+
+    const complaintDone = (formData.chiefComplaint || "").trim().length > 0;
+    const examDone = Boolean(
+      (formData.mind || "").trim() ||
+      (formData.generals || "").trim() ||
+      (formData.thermal || "").trim() ||
+      (formData.appetite || "").trim() ||
+      (formData.sleep || "").trim() ||
+      (formData.thirst || "").trim()
+    );
+    const remedyDone = (formData.medicines || []).some((m: any) => (m?.name || "").trim().length > 0);
+    const followDone = Boolean(
+      (formData.formFollowUpDate || "").trim() ||
+      Number(formData.fee || 0) > 0 ||
+      (formData.paymentStatus || "pending") !== "pending" ||
+      (formData.outcome || ConsultationOutcome.NO_CHANGE) !== ConsultationOutcome.NO_CHANGE
+    );
+
+    const uiPhase: ConsultationUiPhase = (() => {
+      if (!complaintDone) return "CAPTURE";
+      if (mobileStage === "followup") return "COMPLETE";
+      if (mobileStage === "remedy" || remedyDone) return "DECISION";
+      return "CONTEXT";
+    })();
+
     const stageVisibleStyle = (stage: typeof mobileStage): React.CSSProperties =>
       !isMobile || mobileStage === stage ? { display: "block" } : { display: "none" };
+
+    // BottomNav is rendered by AppShell when the keyboard is closed; keep the consultation dock above it.
+    const mobileBottomNavOffsetPx = isMobile && !keyboard.isOpen ? 92 : 0;
 
     const scrollToStageSection = (stage: typeof mobileStage) => {
       const map: Record<typeof mobileStage, string> = {
@@ -1285,11 +1415,107 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
       const sel = map[stage];
       const el = document.querySelector(sel) as HTMLElement | null;
       if (!el) return;
+
+      const strip = document.querySelector('[data-testid="consultation-stage-strip"]') as HTMLElement | null;
+      const stripBottom = strip ? strip.getBoundingClientRect().bottom : 0;
+      const elTop = el.getBoundingClientRect().top;
+      const y = Math.max(0, window.scrollY + elTop - stripBottom - 8);
       try {
-        el.scrollIntoView({ block: "start", behavior: "smooth" });
+        window.scrollTo({ top: y, behavior: "smooth" });
       } catch {
-        el.scrollIntoView();
+        window.scrollTo(0, y);
       }
+    };
+
+    const snippet = (text: string, max = 76) => {
+      const t = (text || "").trim().replace(/\s+/g, " ");
+      if (!t) return "";
+      return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+    };
+
+    const ProgressRail = () => {
+      if (uiPhase === "CAPTURE") return null;
+
+      const items: Array<{
+        id: typeof mobileStage;
+        label: string;
+        done: boolean;
+        active: boolean;
+        summary: string;
+      }> = [
+        {
+          id: "complaint",
+          label: "Complaint",
+          done: complaintDone,
+          active: mobileStage === "complaint",
+          summary: complaintDone ? snippet(formData.chiefComplaint, 80) : "Not captured yet",
+        },
+        {
+          id: "exam",
+          label: "Context",
+          done: examDone,
+          active: mobileStage === "exam",
+          summary: examDone
+            ? (snippet([formData.thermal, formData.appetite, formData.mind].filter(Boolean).join(" · "), 80) || "Captured")
+            : "Add key findings",
+        },
+        {
+          id: "remedy",
+          label: "Rx",
+          done: remedyDone,
+          active: mobileStage === "remedy",
+          summary: remedyDone
+            ? snippet((formData.medicines || []).filter((m: any) => (m?.name || "").trim()).map((m: any) => m.name).join(", "), 80)
+            : "No remedies yet",
+        },
+        {
+          id: "followup",
+          label: "Complete",
+          done: followDone,
+          active: mobileStage === "followup",
+          summary:
+            snippet(
+              [
+                formData.outcome ? String(formData.outcome) : "",
+                formData.formFollowUpDate ? `FU: ${new Date(formData.formFollowUpDate).toLocaleDateString("en-IN")}` : "",
+              ].filter(Boolean).join(" · "),
+              80
+            ) || "Outcome & follow-up",
+        },
+      ];
+
+      return (
+        <div className="sakhi-progress-rail" aria-label="Consultation progress">
+          {items.map((it) => (
+            <div key={it.id} className="sakhi-progress-card" data-active={String(it.active)}>
+              <div className="sakhi-progress-title">
+                <div className="sakhi-progress-title-left">
+                  <span className="sakhi-progress-dot" data-state={it.active ? "active" : it.done ? "done" : "todo"} />
+                  <span className="sakhi-body" style={{ fontSize: 12, fontWeight: 950, color: "#0f172a" }}>{it.label}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    haptic("tap");
+                    setMobileStage(it.id);
+                    // Stages remain mounted (display:none), so scroll targets exist immediately.
+                    // Defer the scroll one frame to align with user intent and avoid jank.
+                    window.requestAnimationFrame(() => scrollToStageSection(it.id));
+                  }}
+                  className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
+                  data-tone="muted"
+                  data-selected={String(it.active)}
+                  style={{ minHeight: 44 }}
+                  aria-label={`Edit ${it.label}`}
+                >
+                  Edit
+                </button>
+              </div>
+              <div className="sakhi-progress-snippet">{it.summary}</div>
+            </div>
+          ))}
+        </div>
+      );
     };
 
     const ChipSelect = ({
@@ -1308,10 +1534,9 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
       testId?: string;
     }) => {
       const current = value || "";
-      const chipFontSize = isMobile ? 11 : 12;
       return (
         <div
-          className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]"
+          className="sakhi-chipstrip"
           data-testid={testId}
           role="group"
         >
@@ -1319,11 +1544,10 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
             <button
               type="button"
               onClick={() => { haptic("tap"); onChange(""); }}
-              className={
-                "sakhi-tap sakhi-focus-ring sakhi-ripple flex-none rounded-2xl border px-3 py-2 font-extrabold " +
-                (current === "" ? "border-slate-200 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700")
-              }
-              style={{ minHeight: 44, fontSize: chipFontSize }}
+              data-selected={String(current === "")}
+              data-tone="solid"
+              className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
+              style={!isMobile ? { fontSize: 12 } : undefined}
             >
               {emptyLabel}
             </button>
@@ -1333,11 +1557,10 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               key={opt.value}
               type="button"
               onClick={() => { haptic("tap"); onChange(opt.value); }}
-              className={
-                "sakhi-tap sakhi-focus-ring sakhi-ripple flex-none rounded-2xl border px-3 py-2 font-extrabold " +
-                (current === opt.value ? "border-sky-200 bg-sky-50 text-sky-800" : "border-slate-200 bg-white text-slate-700")
-              }
-              style={{ minHeight: 44, fontSize: chipFontSize }}
+              data-selected={String(current === opt.value)}
+              data-tone="brand"
+              className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
+              style={!isMobile ? { fontSize: 12 } : undefined}
             >
               {opt.label}
             </button>
@@ -1347,12 +1570,12 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     };
 
     return (
-      <div data-testid="consultation-root" className="min-h-screen bg-slate-50 text-slate-900">
+      <div data-testid="consultation-root" data-ui-phase={uiPhase} className="min-h-screen bg-slate-50 text-slate-900">
         <style>{customCSS}</style>
 
         <div
           data-testid="consultation-sticky-header"
-          className="sakhi-consult-header sticky z-30 px-4 py-3"
+          className="sakhi-consult-header sticky z-30 px-4 py-2"
           style={{
             // AppShell TopBar is fixed; keep consultation header from sliding underneath it on scroll.
             top: "calc(59px + env(safe-area-inset-top, 0px))",
@@ -1372,8 +1595,17 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 </button>
               )}
               <div className="min-w-0">
-                <div className="sakhi-micro">Consultation</div>
-                <h1 className={`truncate ${headerCollapsed ? "text-base" : "text-lg"}`} style={{ fontWeight: 950, letterSpacing: "-0.2px", color: "#0f172a" }}>
+                <div className={"sakhi-micro " + (isMobile && headerCollapsed ? "hidden" : "")}>Consultation</div>
+                <h1
+                  className="truncate"
+                  style={{
+                    fontWeight: 950,
+                    letterSpacing: "-0.2px",
+                    color: "#0f172a",
+                    fontSize: isMobile ? (headerCollapsed ? 16 : 18) : undefined,
+                    lineHeight: isMobile ? 1.1 : undefined,
+                  }}
+                >
                   {patient?.name || patientName || "Patient"}
                 </h1>
                 <p className="mt-1 truncate" style={{ fontSize: 12, fontWeight: 800, color: "#64748b" }}>
@@ -1432,7 +1664,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 )}
               </div>
             </div>
-            <div className={"flex items-center gap-2 " + (isMobile ? "flex-nowrap overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]" : "flex-wrap")}>
+            <div className={"sakhi-consult-utils flex items-center " + (isMobile ? "gap-1 flex-nowrap overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]" : "gap-2 flex-wrap")}>
               {isMobile ? (
                 <>
                   <button
@@ -1443,7 +1675,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     aria-label="Review"
                     title="Review"
                   >
-                    ⭐
+                    <Star size={18} />
                   </button>
                   <button
                     type="button"
@@ -1454,7 +1686,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     aria-label="WhatsApp prescription"
                     title="WhatsApp Rx"
                   >
-                    📲
+                    <MessageCircle size={18} />
                   </button>
                   <button
                     type="button"
@@ -1464,7 +1696,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     aria-label="WhatsApp bill"
                     title="WhatsApp Bill"
                   >
-                    💰
+                    <Banknote size={18} />
                   </button>
                 </>
               ) : (
@@ -1533,7 +1765,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                   title="Print"
                   data-tone={isMobile ? "print" : undefined}
                 >
-                  {isMobile ? "🖨️" : "🖨️ Print ▾"}
+                  {isMobile ? <Printer size={18} /> : "🖨️ Print ▾"}
                 </button>
                 {showPrintMenu && (
                   <div className="sakhi-menu-panel absolute right-0 top-full z-40 mt-2 w-48">
@@ -1548,27 +1780,48 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
           <div className="sakhi-consult-header-inner mt-3">
             {isMobile ? (
-              <div data-testid="consultation-stage-strip" className="sakhi-segmented" role="tablist" aria-label="Consultation stages">
-                {stageItems.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={mobileStage === item.id}
-                    data-testid={`consultation-stage-${item.id}`}
+              <div className="space-y-2">
+                <div className="sakhi-consult-phasebar" aria-label="Consultation phase">
+                  {(
+                    [
+                      { id: "CAPTURE" as const, label: "Capture" },
+                      { id: "CONTEXT" as const, label: "Context" },
+                      { id: "DECISION" as const, label: "Rx" },
+                      { id: "COMPLETE" as const, label: "Complete" },
+                    ] satisfies Array<{ id: ConsultationUiPhase; label: string }>
+                  ).map((p) => (
+                    <div
+                      key={p.id}
+                      className="sakhi-consult-phase-pill"
+                      data-phase={p.id}
+                      data-active={String(uiPhase === p.id)}
+                    >
+                      {p.label}
+                    </div>
+                  ))}
+                </div>
+
+                <div data-testid="consultation-stage-strip" className="sakhi-segmented" role="tablist" aria-label="Consultation stages">
+                  {stageItems.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={mobileStage === item.id}
+                      data-testid={`consultation-stage-${item.id}`}
                     onClick={() => {
                       haptic("tap");
                       setMobileStage(item.id);
-                      // Ensure the newly selected stage is immediately visible (prevents "blank/clipped stage" perception
-                      // when switching while scrolled deep within another stage).
-                      window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+                      // Ensure the newly selected stage is immediately visible below the sticky header/strip.
+                      window.requestAnimationFrame(() => scrollToStageSection(item.id));
                     }}
                     className="sakhi-segmented-btn sakhi-tap sakhi-focus-ring sakhi-ripple"
                     data-active={String(mobileStage === item.id)}
                   >
-                    {item.label}
-                  </button>
-                ))}
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : (
               <div
@@ -1605,10 +1858,11 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
             // Keep all stages fully scrollable and prevent the keyboard-aware action bar
             // from covering the bottom of forms while typing.
             paddingBottom: isMobile
-              ? "calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px) + 168px)"
+              ? `calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px) + ${240 + mobileBottomNavOffsetPx}px)`
               : undefined,
           }}
         >
+          <ProgressRail />
           <div className={isMobile ? "space-y-4" : "space-y-6"}>
             <div
               data-stage="complaint"
@@ -1651,8 +1905,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                         key={key}
                         type="button"
                         onClick={() => applyTemplate(key)}
-                        className="sakhi-tap sakhi-focus-ring sakhi-ripple rounded-2xl border px-3 py-2 text-[12px] font-extrabold text-slate-900"
-                        style={{ borderColor: meta.border, backgroundColor: meta.color, minHeight: 44 }}
+                        className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
+                        style={{ borderColor: meta.border, backgroundColor: meta.color }}
                       >
                         {meta.emoji} {meta.label}
                       </button>
@@ -1662,7 +1916,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 <SmartInput
                   multiline
                   rows={2}
-                  style={{ width: "100%", padding: "var(--space-3)", borderRadius: "var(--radius-3)", border: "1px solid var(--border)", background: "var(--surface-muted)", fontSize: 14 }}
+                  className="sakhi-input sakhi-input-muted sakhi-focus-ring sakhi-tap"
                   value={formData.chiefComplaint}
                   onChange={(val) => patch({ chiefComplaint: val })}
                   suggestions={SUGGESTIONS.chiefComplaint}
@@ -1689,6 +1943,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     options={MIND_OPTIONS}
                     placeholder="Anxieties, fears, disposition…"
                     rows={2}
+                    isMobile={isMobile}
                   />
                 </MobileField>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -1799,7 +2054,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               {recentFullRxTemplates.length > 0 && (
                 <div className="mt-3 rounded-3xl border border-slate-200 bg-white p-4">
                   <div className="sakhi-micro mb-2">Recent Full Rx</div>
-                  <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+                  <div className="flex flex-nowrap gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
                     {recentFullRxTemplates.map((t, idx) => (
                       <button
                         key={t.id}
@@ -1825,8 +2080,9 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               )}
 
               {formData.medicines.length === 0 ? (
-                <div className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-                  No medicines added yet. Add one to begin.
+                <div className="sakhi-surface-muted" style={{ padding: "var(--space-4)", textAlign: "center" }}>
+                  <div className="sakhi-body" style={{ fontSize: 13, fontWeight: 950, color: "#0f172a" }}>No medicines yet</div>
+                  <div className="sakhi-caption" style={{ marginTop: 6 }}>Add a remedy to start prescribing.</div>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -1840,6 +2096,29 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                         background: "var(--surface)",
                       }}
                     >
+                      {Boolean((med.name || "").trim()) && (
+                        <div
+                          className="sakhi-rxline"
+                          aria-label="Prescription summary"
+                          data-state={
+                            ((med.name || "").trim() &&
+                              (med.potency || remedyDefaults.potency) &&
+                              (med.dosage || remedyDefaults.dosage) &&
+                              (med.duration || remedyDefaults.duration))
+                              ? "ready"
+                              : "draft"
+                          }
+                        >
+                          <div className="sakhi-rxline-main">
+                            <span className="sakhi-rxline-name">{(med.name || "").trim()}</span>
+                            <span className="sakhi-rxline-meta">
+                              {[med.potency || remedyDefaults.potency, med.dosage || remedyDefaults.dosage, med.duration || remedyDefaults.duration]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </span>
+                          </div>
+                        </div>
+                      )}
                       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0 space-y-3">
                           <MobileField label={`Remedy ${idx + 1}`}>
@@ -1886,7 +2165,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                             <div className="grid gap-3">
                               <MobileField label="Dosage (tap)">
                                 <div
-                                  className="flex flex-wrap gap-2"
+                                  className="sakhi-composer-group flex flex-wrap gap-2"
+                                  data-dim={String(Boolean(med.id && composerStepByMedId[String(med.id)] === "duration"))}
                                   style={
                                     med.id && composerStepByMedId[String(med.id)] === "dosage"
                                       ? ({ outline: "2px solid rgba(13, 115, 119, 0.25)", outlineOffset: 4, borderRadius: 16 } as any)
@@ -1906,13 +2186,10 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                                           handleMedEnter(idx);
                                         }
                                       }}
-                                      className={
-                                        "sakhi-tap sakhi-focus-ring sakhi-ripple rounded-2xl border px-3 py-2 text-[12px] font-extrabold " +
-                                        ((med.dosage || remedyDefaults.dosage) === d
-                                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                                          : "border-slate-200 bg-white text-slate-700")
-                                      }
-                                      style={{ minHeight: 40 }}
+                                      className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
+                                      data-tone={(med.dosage || remedyDefaults.dosage) === d ? "brand" : "muted"}
+                                      data-selected={String((med.dosage || remedyDefaults.dosage) === d)}
+                                      style={{ minHeight: 44 }}
                                     >
                                       {d}
                                     </button>
@@ -1921,7 +2198,10 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                               </MobileField>
 
                               <MobileField label="Duration (tap)">
-                                <div className="flex flex-wrap gap-2">
+                                <div
+                                  className="sakhi-composer-group flex flex-wrap gap-2"
+                                  data-dim={String(Boolean(med.id && composerStepByMedId[String(med.id)] === "dosage"))}
+                                >
                                   {DURATIONS.map((d) => (
                                     <button
                                       key={d}
@@ -1932,13 +2212,10 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                                         saveRemedyDefaults({ potency: med.potency || remedyDefaults.potency, dosage: med.dosage || remedyDefaults.dosage, duration: d });
                                         if (med.id) setComposerStep(String(med.id), null);
                                       }}
-                                      className={
-                                        "sakhi-tap sakhi-focus-ring sakhi-ripple rounded-2xl border px-3 py-2 text-[12px] font-extrabold " +
-                                        ((med.duration || remedyDefaults.duration) === d
-                                          ? "border-sky-200 bg-sky-50 text-sky-800"
-                                          : "border-slate-200 bg-white text-slate-700")
-                                      }
-                                      style={{ minHeight: 40 }}
+                                      className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
+                                      data-tone={(med.duration || remedyDefaults.duration) === d ? "brand" : "muted"}
+                                      data-selected={String((med.duration || remedyDefaults.duration) === d)}
+                                      style={{ minHeight: 44 }}
                                     >
                                       {d}
                                     </button>
@@ -2083,17 +2360,19 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               </button>
 
               {remedySuggestions.length > 0 && (
-                <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-slate-700">
-                  <p className="font-semibold text-emerald-700">🤖 AI Suggestions</p>
+                <div className="sakhi-surface-muted" style={{ padding: "var(--space-3)" }}>
+                  <div className="sakhi-label" style={{ color: "#94a3b8" }}>Suggestions</div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {remedySuggestions.slice(0, 4).map((r, i) => (
                       <button
                         key={i}
                         type="button"
                         onClick={() => patch({ medicines: [...formData.medicines, { id: crypto.randomUUID(), name: r.name, potency: "30C", dosage: "1-1-1", duration: "5 Days", notes: "" }] })}
-                        className="rounded-full border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-700"
+                        className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
+                        data-tone="brand"
+                        data-selected="false"
                       >
-                        {r.name} +Add
+                        {r.name}
                       </button>
                     ))}
                   </div>
@@ -2108,61 +2387,114 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               data-active={String(!isMobile || mobileStage === "followup")}
               style={stageVisibleStyle("followup")}
             >
-            <MobileSection title="Outcome & Follow-up" subtitle="Quick action and billing" testId="section-followup">
-              <div className="grid gap-2 sm:grid-cols-2">
-                {Object.values(ConsultationOutcome).map((o) => (
-                  <button
-                    key={o}
-                    type="button"
-                    onClick={() => patch({ outcome: o })}
-                    className={`rounded-2xl px-3 py-3 text-left text-sm font-semibold ${formData.outcome === o ? "bg-slate-900 text-white" : "bg-white text-slate-700 border border-slate-200"}`}
-                  >
-                    {o}
-                  </button>
-                ))}
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <MobileField label="Next follow-up">
-                  <input
-                    type="datetime-local"
-                    value={formData.formFollowUpDate}
-                    onChange={(e) => patch({ formFollowUpDate: e.target.value })}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
-                  />
-                </MobileField>
-                <MobileField label="Fee (₹)">
-                  <input
-                    type="number"
-                    value={formData.fee || ""}
-                    onChange={(e) => patch({ fee: Number(e.target.value) })}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
-                    placeholder="Amount"
-                  />
-                </MobileField>
-                <MobileField label="Payment status">
-                  {isMobile ? (
-                    <ChipSelect
-                      value={String(formData.paymentStatus || "pending")}
-                      onChange={(next) => patch({ paymentStatus: next as PaymentStatus })}
-                      options={[
-                        { value: "pending", label: "Pending" },
-                        { value: "paid", label: "Paid" },
-                      ]}
-                      allowEmpty={false}
-                      testId="consultation-payment-status-chips"
-                    />
-                  ) : (
-                    <select
-                      value={formData.paymentStatus || "pending"}
-                      onChange={(e) => patch({ paymentStatus: e.target.value as PaymentStatus })}
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none"
-                    >
-                      <option value="pending">⏳ Pending</option>
-                      <option value="paid">✅ Paid</option>
-                    </select>
+            <MobileSection title="Outcome & Follow-up" subtitle="Finalize the visit" testId="section-followup">
+              <div className="sakhi-surface" style={{ padding: "var(--space-3)" }}>
+                <div className="flex items-center justify-between gap-3" style={{ marginBottom: "var(--space-2)" }}>
+                  <div className="sakhi-label" style={{ color: "#94a3b8" }}>Outcome</div>
+                  {(formData.outcome || ConsultationOutcome.NO_CHANGE) !== ConsultationOutcome.NO_CHANGE && (
+                    <span className="sakhi-pill" style={{ background: "rgba(13,115,119,0.06)", borderColor: "rgba(13,115,119,0.16)", color: "var(--brand-ink)", fontSize: 11 }}>
+                      Marked
+                    </span>
                   )}
-                </MobileField>
+                </div>
+                <div className="sakhi-chipstrip" role="group" aria-label="Outcome selection">
+                  {Object.values(ConsultationOutcome).map((o) => (
+                    <button
+                      key={o}
+                      type="button"
+                      onClick={() => { haptic("tap"); patch({ outcome: o }); }}
+                      data-selected={String(formData.outcome === o)}
+                      data-tone={formData.outcome === o ? "brand" : "muted"}
+                      className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
+                      title="Set outcome"
+                    >
+                      {o}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {isMobile && followUpActions.length > 0 && (
+                <div className="sakhi-surface-muted" style={{ padding: "var(--space-3)" }}>
+                  <div className="sakhi-label" style={{ color: "#94a3b8", marginBottom: "var(--space-2)" }}>Quick plan</div>
+                  <div className="sakhi-chipstrip" role="group" aria-label="Quick follow-up actions">
+                    {followUpActions.map((action) => (
+                      <button
+                        key={action.id}
+                        type="button"
+                        disabled={action.disabled}
+                        onClick={() => {
+                          haptic("tap");
+                          if (["repeat", "change", "wait", "worse"].includes(action.id)) {
+                            handleFollowUpAction(action.id);
+                          } else {
+                            patch(action.patch);
+                          }
+                        }}
+                        className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
+                        data-tone="brand"
+                        data-selected="false"
+                        style={action.disabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+                        title={action.title}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="sakhi-surface-muted" style={{ padding: "var(--space-3)" }}>
+                <div className="sakhi-label" style={{ color: "#94a3b8", marginBottom: "var(--space-2)" }}>Schedule & billing (optional)</div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <MobileField label="Next follow-up">
+                    <input
+                      type="datetime-local"
+                      value={formData.formFollowUpDate}
+                      onChange={(e) => patch({ formFollowUpDate: e.target.value })}
+                      className="sakhi-input sakhi-input-muted sakhi-focus-ring"
+                    />
+                  </MobileField>
+                  <MobileField label="Fee (₹)">
+                    <input
+                      type="number"
+                      value={formData.fee || ""}
+                      onChange={(e) => patch({ fee: Number(e.target.value) })}
+                      className="sakhi-input sakhi-input-muted sakhi-focus-ring"
+                      placeholder="Amount"
+                    />
+                  </MobileField>
+                  <MobileField label="Payment status">
+                    {isMobile ? (
+                      <ChipSelect
+                        value={String(formData.paymentStatus || "pending")}
+                        onChange={(next) => patch({ paymentStatus: next as PaymentStatus })}
+                        options={[
+                          { value: "pending", label: "Pending" },
+                          { value: "paid", label: "Paid" },
+                        ]}
+                        allowEmpty={false}
+                        testId="consultation-payment-status-chips"
+                      />
+                    ) : (
+                      <select
+                        value={formData.paymentStatus || "pending"}
+                        onChange={(e) => patch({ paymentStatus: e.target.value as PaymentStatus })}
+                        className="sakhi-input sakhi-input-muted sakhi-focus-ring"
+                      >
+                        <option value="pending">⏳ Pending</option>
+                        <option value="paid">✅ Paid</option>
+                      </select>
+                    )}
+                  </MobileField>
+                </div>
+              </div>
+
+              {followDone && (
+                <div className="sakhi-surface-flat" style={{ padding: "var(--space-3)", borderRadius: "var(--radius-4)" }} aria-label="Completion status">
+                  <div className="sakhi-body" style={{ fontSize: 13, fontWeight: 950, color: "#0f172a" }}>Ready to finish</div>
+                  <div className="sakhi-caption" style={{ marginTop: 4 }}>Save to finalize and move to the next patient.</div>
+                </div>
+              )}
             </MobileSection>
             </div>
 
@@ -2234,7 +2566,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                   position: "fixed",
                   left: "var(--space-3)",
                   right: "var(--space-3)",
-                  bottom: "calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px) + 88px)",
+                  bottom: `calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px) + ${mobileBottomNavOffsetPx + 88}px)`,
                   zIndex: 80,
                   background: "rgba(15, 23, 42, 0.92)",
                   color: "#fff",
@@ -2267,7 +2599,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 position: "fixed",
                 left: 0,
                 right: 0,
-                bottom: `calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px))`,
+                bottom: `calc(env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px) + ${mobileBottomNavOffsetPx}px)`,
                 zIndex: 50,
                 boxSizing: "border-box",
               }}

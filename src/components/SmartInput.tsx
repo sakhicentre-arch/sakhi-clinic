@@ -384,7 +384,7 @@ const SmartInput: React.FC<SmartInputProps> = ({
           id={`${inputId}-listbox`}
           role="listbox"
           aria-label="Suggestions"
-          style={dropdownStyle}
+          className="sakhi-menu-panel sakhi-menu-list"
         >
           {filtered.map((suggestion, index) => {
             const isActive = index === activeIndex;
@@ -400,10 +400,8 @@ const SmartInput: React.FC<SmartInputProps> = ({
                   selectSuggestion(suggestion);
                 }}
                 onMouseEnter={() => setActiveIndex(index)}
-                style={{
-                  ...itemStyle,
-                  ...(isActive ? itemActiveStyle : {}),
-                }}
+                data-active={String(isActive)}
+                className="sakhi-menu-item"
               >
                 <HighlightMatch
                   text={suggestion}
@@ -439,7 +437,7 @@ const HighlightMatch: React.FC<{ text: string; query: string }> = ({
   return (
     <>
       {text.slice(0, index)}
-      <strong style={{ fontWeight: 800, color: "#1e40af" }}>
+      <strong style={{ fontWeight: 900, color: "#064e52" }}>
         {text.slice(index, index + query.length)}
       </strong>
       {text.slice(index + query.length)}
@@ -453,38 +451,7 @@ const HighlightMatch: React.FC<{ text: string; query: string }> = ({
 // Parent passes its own style/className to the input element directly.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const dropdownStyle: React.CSSProperties = {
-  position: "absolute",
-  top: "calc(100% + 4px)",
-  left: 0,
-  right: 0,
-  zIndex: 1000,
-  margin: 0,
-  padding: "4px 0",
-  listStyle: "none",
-  backgroundColor: "#ffffff",
-  border: "1.5px solid #e2e8f0",
-  borderRadius: "10px",
-  boxShadow: "0 8px 24px rgba(15, 23, 42, 0.10)",
-  maxHeight: `${MAX_VISIBLE * 40}px`,
-  overflowY: "auto",
-};
-
-const itemStyle: React.CSSProperties = {
-  padding: "9px 14px",
-  fontSize: "13.5px",
-  color: "#334155",
-  fontWeight: 500,
-  cursor: "pointer",
-  lineHeight: 1.4,
-  transition: "background 0.1s ease",
-  userSelect: "none",
-};
-
-const itemActiveStyle: React.CSSProperties = {
-  backgroundColor: "#eff6ff",
-  color: "#1e40af",
-};
+// Dropdown / item presentation is driven by `sakhi-menu-*` primitives in App.css for consistency.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EXPORT

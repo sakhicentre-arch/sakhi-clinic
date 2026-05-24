@@ -30,8 +30,22 @@ export default function AppShell({
     const mq = window.matchMedia("(max-width: 768px)");
     const update = () => setIsMobile(mq.matches);
     update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
+    // Some browser runtimes (and certain test harnesses) still expose the legacy MediaQueryList API.
+    // Support both to keep mobile orchestration deterministic without changing UX logic.
+    try {
+      (mq as any).addEventListener?.("change", update);
+      if (!(mq as any).addEventListener && (mq as any).addListener) (mq as any).addListener(update);
+    } catch {
+      // ignore
+    }
+    return () => {
+      try {
+        (mq as any).removeEventListener?.("change", update);
+        if (!(mq as any).removeEventListener && (mq as any).removeListener) (mq as any).removeListener(update);
+      } catch {
+        // ignore
+      }
+    };
   }, []);
 
   useEffect(() => {

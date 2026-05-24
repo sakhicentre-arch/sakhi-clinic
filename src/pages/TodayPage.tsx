@@ -193,8 +193,7 @@ function AddToQueueDropdown({ onAdd, onClose }:
       style={{ position: "absolute", top: "calc(100% + 8px)", left: 0, right: 0, zIndex: 200 }}
     >
       {/* Search */}
-      <div style={{ padding: "var(--space-2) var(--space-3)", borderBottom: "1px solid rgba(226, 232, 240, 0.8)",
-        display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+      <div style={{ padding: "var(--space-2) var(--space-3)", borderBottom: "1px solid rgba(226, 232, 240, 0.8)", display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
         <Search size={14} color="#94a3b8" />
         <input
           ref={inputRef}
@@ -202,48 +201,51 @@ function AddToQueueDropdown({ onAdd, onClose }:
           onChange={e => setQ(e.target.value)}
           data-testid="queue-search-input"
           placeholder="Search patient…"
-          style={{ border: "none", outline: "none", fontSize: 14,
-            fontFamily: "inherit", flex: 1, background: "transparent", color: "#0f172a", fontWeight: 700 }} />
-        <button onClick={onClose} className="sakhi-tap sakhi-focus-ring" style={{ background: "none", border: "none",
-          cursor: "pointer", color: "#94a3b8", padding: 0 }}>
+          className="sakhi-input"
+          style={{ border: "none", boxShadow: "none", padding: 0, outline: "none", flex: 1, background: "transparent", fontWeight: 800 }}
+        />
+        <button
+          type="button"
+          onClick={onClose}
+          className="sakhi-icon-action sakhi-tap sakhi-focus-ring sakhi-ripple"
+          style={{ width: 36, height: 36 }}
+          aria-label="Close search"
+        >
           <X size={14} />
         </button>
       </div>
       {/* Results */}
       <div style={{ maxHeight: "260px", overflowY: "auto" }}>
         {results.length === 0 ? (
-          <div style={{ padding: "20px", textAlign: "center", color: "#94a3b8",
-            fontSize: "13px", fontWeight: 600 }}>No patients found</div>
+          <div className="sakhi-caption" style={{ padding: "var(--space-4)", textAlign: "center", color: "#94a3b8" }}>
+            No patients found
+          </div>
         ) : results.map(p => {
           const inQueue = isInQueue(p.id);
           const av = avatarColor(p.gender);
           return (
-            <button key={p.id} onClick={() => !inQueue && onAdd(p.id)}
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => { if (!inQueue) { haptic("tap"); onAdd(p.id); } }}
               disabled={inQueue}
-              style={{ width: "100%", display: "flex", alignItems: "center", gap: "12px",
-                padding: "10px 14px", background: "transparent", border: "none",
-                cursor: inQueue ? "default" : "pointer", textAlign: "left",
-                opacity: inQueue ? 0.5 : 1, transition: "background 0.1s" }}
-              onMouseEnter={e => { if (!inQueue) (e.currentTarget as HTMLElement).style.background = "#f8fafc"; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
-              <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
-                background: av.bg, border: `1.5px solid ${av.border}`,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: "13px", fontWeight: 800, color: av.text }}>
+              className="sakhi-menu-row sakhi-tap sakhi-focus-ring sakhi-ripple"
+              data-active="false"
+              style={inQueue ? { opacity: 0.55, cursor: "default" } : undefined}
+            >
+              <div className="sakhi-queue-avatar" style={{ background: av.bg, border: `1.5px solid ${av.border}`, color: av.text }}>
                 {getInitials(p.name)}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a",
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div className="sakhi-queue-chip-name">
                   {p.name}
                 </div>
-                <div style={{ fontSize: "11px", color: "#94a3b8" }}>
+                <div className="sakhi-caption" style={{ color: "#94a3b8" }}>
                   {p.phone} · {p.age}Y · {p.gender}
                 </div>
               </div>
               {inQueue && (
-                <span style={{ fontSize: "10px", fontWeight: 700, color: "#0D7377",
-                  background: "#f0fdfd", padding: "2px 8px", borderRadius: "6px" }}>
+                <span className="sakhi-pill" data-tone="brand" style={{ fontSize: "var(--type-micro)" }}>
                   In Queue
                 </span>
               )}
@@ -1181,35 +1183,33 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
       >
         {/* Hero: Now Serving */}
         <MobileCard>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.18em", color: "#64748b", textTransform: "uppercase" }}>
-                Now Serving
-              </div>
-              <div style={{ marginTop: 8, fontSize: 20, fontWeight: 900, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="sakhi-label">Now Serving</div>
+              <div className="sakhi-title" style={{ marginTop: 8, fontSize: 20, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {heroPatient?.name || (nextEntry ? nextEntry.patientName : "Queue empty")}
               </div>
               {heroPatient && (
-                <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8, color: "#64748b", fontSize: 13, fontWeight: 700 }}>
+                <div className="sakhi-body" style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8, color: "#64748b", fontSize: 13 }}>
                   <span>{heroPatient.age ? `${heroPatient.age}Y` : "—"} · {heroPatient.gender || "—"}</span>
                   <span style={{ color: "#94a3b8" }}>·</span>
                   <span>{activeClinic}</span>
                 </div>
               )}
             </div>
-            <div style={{ flexShrink: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 800, color: "#94a3b8", textAlign: "right" }}>Waiting</div>
-              <div style={{ fontSize: 22, fontWeight: 900, color: "#0D7377", textAlign: "right" }}>{waitingCount}</div>
+            <div className="shrink-0 text-right">
+              <div className="sakhi-label" style={{ color: "#94a3b8" }}>Waiting</div>
+              <div style={{ fontSize: 22, fontWeight: 950, color: "var(--brand)" }}>{waitingCount}</div>
             </div>
           </div>
 
           {lastConsult && (
-            <div style={{ marginTop: 12, borderTop: "1px solid #eef2f6", paddingTop: 12 }}>
-              <div style={{ fontSize: 11, fontWeight: 900, color: "#94a3b8", letterSpacing: "0.12em", textTransform: "uppercase" }}>Last Visit</div>
-              <div style={{ marginTop: 8, fontSize: 13, fontWeight: 800, color: "#0f172a", lineHeight: 1.4 }}>
+            <div style={{ marginTop: 12, borderTop: "1px solid var(--border-muted)", paddingTop: 12 }}>
+              <div className="sakhi-label" style={{ color: "#94a3b8" }}>Last Visit</div>
+              <div className="sakhi-body" style={{ marginTop: 8, fontSize: 13, color: "#0f172a", lineHeight: 1.4 }}>
                 {lastConsult.chiefComplaint || lastConsult.caseText?.slice(0, 90) || "No complaint recorded"}
               </div>
-              <div style={{ marginTop: 8, fontSize: 12, color: "#94a3b8", fontWeight: 700 }}>
+              <div className="sakhi-caption" style={{ marginTop: 8, color: "#94a3b8" }}>
                 {fmtDate(lastConsult.date)} · {daysAgo(lastConsult.date)} days ago
               </div>
             </div>
@@ -1219,25 +1219,8 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
             data-testid={nextEntry ? `mobile-now-serving-start-${nextEntry.queueId}` : "mobile-now-serving-start-disabled"}
             onClick={startHeroConsultation}
             disabled={!nextEntry}
-            style={{
-              marginTop: 16,
-              width: "100%",
-              minHeight: 56,
-              borderRadius: 18,
-              border: "none",
-              background: nextEntry ? "#0D7377" : "#e2e8f0",
-              color: nextEntry ? "#fff" : "#64748b",
-              fontSize: 15,
-              fontWeight: 900,
-              letterSpacing: "-0.2px",
-              cursor: nextEntry ? "pointer" : "default",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              touchAction: "manipulation",
-            }}
-            className="sakhi-tap sakhi-focus-ring"
+            style={{ marginTop: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontSize: 15 }}
+            className="sakhi-btn-primary sakhi-tap sakhi-focus-ring sakhi-ripple"
           >
             <Stethoscope size={18} /> Start Consultation
           </button>
@@ -1245,21 +1228,21 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
 
         {/* Queue strip */}
         <MobileCard>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 900, color: "#0f172a" }}>Queue</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-              <span style={{ fontSize: 11, fontWeight: 900, color: "#0D7377", background: "#f0fdfd", border: "1px solid #99f6e4", padding: "4px 10px", borderRadius: 999 }}>
+          <div className="flex items-center justify-between gap-4" style={{ marginBottom: 16 }}>
+            <div className="sakhi-body" style={{ color: "#0f172a" }}>Queue</div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <span className="sakhi-pill" data-tone="brand" style={{ fontSize: "var(--type-micro)" }}>
                 {waitingCount} waiting
               </span>
-              <span style={{ fontSize: 11, fontWeight: 900, color: "#16a34a", background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "4px 10px", borderRadius: 999 }}>
+              <span className="sakhi-pill" data-tone="success" style={{ fontSize: "var(--type-micro)" }}>
                 {doneCount} seen
               </span>
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, WebkitOverflowScrolling: "touch" }}>
+          <div className="sakhi-chipstrip">
             {queue.length === 0 ? (
-              <div style={{ padding: "10px 4px", fontSize: 12, color: "#94a3b8", fontWeight: 700 }}>
+              <div className="sakhi-caption" style={{ padding: "10px 4px", color: "#94a3b8" }}>
                 No patients in queue.
               </div>
             ) : (
@@ -1267,60 +1250,30 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
                 const isActive = entry.queueId === activeQueueId;
                 const chipPatient = patients.find((p) => p.id === entry.patientId) || null;
                 const av = avatarColor(chipPatient?.gender || "");
-                const chipTone =
-                  entry.status === "done"
-                    ? { bg: "#f0fdf4", border: "#bbf7d0", text: "#166534" }
-                    : entry.status === "in-progress"
-                      ? { bg: "#f0fdfd", border: "#99f6e4", text: "#0D7377" }
-                      : { bg: "#fff", border: "#e2e8f0", text: "#0f172a" };
                 return (
                   <button
                     key={entry.queueId}
                     type="button"
                     onClick={() => entry.status !== "done" && setActiveQueueId(entry.queueId)}
-                    style={{
-                      flex: "0 0 auto",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      padding: "8px 16px",
-                      borderRadius: 16,
-                      border: `2px solid ${isActive ? "#0D7377" : chipTone.border}`,
-                      background: isActive ? "#f0fdfd" : chipTone.bg,
-                      color: chipTone.text,
-                      cursor: entry.status === "done" ? "default" : "pointer",
-                      minHeight: 48,
-                      minWidth: 180,
-                      maxWidth: 240,
-                      boxSizing: "border-box",
-                      touchAction: "manipulation",
-                      textAlign: "left",
-                    }}
-                    className="sakhi-tap sakhi-focus-ring"
+                    data-active={String(isActive)}
+                    data-status={entry.status}
+                    className="sakhi-queue-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
                   >
                     <div
+                      className="sakhi-queue-avatar"
                       style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: 999,
                         background: av.bg,
                         border: `1.5px solid ${av.border}`,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 13,
-                        fontWeight: 900,
                         color: av.text,
-                        flexShrink: 0,
                       }}
                     >
                       {getInitials(entry.patientName)}
                     </div>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <div className="min-w-0 flex-1">
+                      <div className="sakhi-queue-chip-name">
                         {entry.patientName}
                       </div>
-                      <div style={{ marginTop: 2, fontSize: 11, fontWeight: 800, color: "#64748b" }}>
+                      <div className="sakhi-queue-chip-sub">
                         <StatusChip status={entry.status} />
                       </div>
                     </div>
@@ -1353,22 +1306,8 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
               }
               setShowAdd((s) => !s);
             }}
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 20,
-              border: "none",
-              background: "#0D7377",
-              color: "#fff",
-              boxShadow: "0 12px 28px rgba(15, 23, 42, 0.18)",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              touchAction: "manipulation",
-            }}
             aria-label="Add walk-in patient"
-            className="sakhi-tap sakhi-focus-ring"
+            className="sakhi-fab sakhi-tap sakhi-focus-ring sakhi-ripple"
           >
             <Plus size={22} />
           </button>
