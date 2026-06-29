@@ -1,77 +1,82 @@
 /**
  * DictationButton.tsx
- * Sakhi Clinic — Per-field Voice Dictation Button
+ * Sakhi Clinic — Continuous clinical dictation
  *
- * Uses browser Web Speech API only — zero dependencies.
- * Appends transcribed text to whatever the parent field holds.
- * Hides itself silently if the browser does not support SpeechRecognition.
- *
- * Usage:
- *   <DictationButton
- *     onText={(spoken) => patch({ chiefComplaint: formData.chiefComplaint + " " + spoken })}
- *   />
+ * Uses the browser Web Speech API only — zero dependencies.
+ * Keeps a single speech-recognition session alive while the doctor is speaking,
+ * and only stops when the doctor explicitly presses Stop.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BROWSER COMPAT SHIM
-// Normalise vendor-prefixed SpeechRecognition into one reference.
-// ─────────────────────────────────────────────────────────────────────────────
-
-const SpeechRecognitionAPI: typeof SpeechRecognition | null =
-  typeof window !== "undefined"
-    ? (window.SpeechRecognition ?? (window as any).webkitSpeechRecognition ?? null)
-    : null;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TYPES
-// ─────────────────────────────────────────────────────────────────────────────
+const getSpeechRecognitionAPI = (): typeof SpeechRecognition | null => {
+  if (typeof window === "undefined") return null;
+  return window.SpeechRecognition ?? (window as any).webkitSpeechRecognition ?? null;
+};
 
 type RecordingState = "idle" | "recording" | "error" | "unsupported";
 
 export interface DictationButtonProps {
-  /**
-   * Called with the final transcribed text segment.
-   * Parent is responsible for appending it to the field value.
-   */
   onText: (text: string) => void;
-
-  /** Disables the button — useful when the parent field is disabled. */
   disabled?: boolean;
-
-  /**
-   * BCP-47 language tag passed to SpeechRecognition.lang.
-   * Defaults to the document language or "en-IN".
-   * Pass "gu-IN" for Gujarati, "hi-IN" for Hindi.
-   */
   lang?: string;
-
-  /** aria-label for the button. Defaults to "Start dictation". */
   label?: string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// COMPONENT
-// ─────────────────────────────────────────────────────────────────────────────
+const formatDuration = (seconds: number) => {
+  const mins = Math.floor(seconds / 60).toString().padStart(2, "0");
+  const secs = (seconds % 60).toString().padStart(2, "0");
+  return `${mins}:${secs}`;
+};
 
 const DictationButton: React.FC<DictationButtonProps> = ({
   onText,
   disabled = false,
   lang,
-  label = "Start dictation",
+  label = "Start Recording",
 }) => {
   const [recordingState, setRecordingState] = useState<RecordingState>(
-    SpeechRecognitionAPI === null ? "unsupported" : "idle"
+    getSpeechRecognitionAPI() === null ? "unsupported" : "idle"
   );
   const [errorMsg, setErrorMsg] = useState<string>("");
+  const [statusText, setStatusText] = useState<string>("Ready");
+  const [durationSeconds, setDurationSeconds] = useState<number>(0);
 
-  // Stable ref so event handlers never capture a stale instance
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const manualStopRef = useRef(false);
+  const durationTimerRef = useRef<number | null>(null);
+  const restartTimerRef = useRef<number | null>(null);
+  const activeSessionRef = useRef(0);
 
-  // ── Cleanup on unmount ────────────────────────────────────────────────
+  const clearTimers = useCallback(() => {
+    if (durationTimerRef.current !== null) {
+      window.clearInterval(durationTimerRef.current);
+      durationTimerRef.current = null;
+    }
+    if (restartTimerRef.current !== null) {
+      window.clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+  }, []);
+
+  const stopDurationTimer = useCallback(() => {
+    if (durationTimerRef.current !== null) {
+      window.clearInterval(durationTimerRef.current);
+      durationTimerRef.current = null;
+    }
+  }, []);
+
+  const startDurationTimer = useCallback(() => {
+    stopDurationTimer();
+    setDurationSeconds(0);
+    durationTimerRef.current = window.setInterval(() => {
+      setDurationSeconds((value) => value + 1);
+    }, 1000);
+  }, [stopDurationTimer]);
+
   useEffect(() => {
     return () => {
+      clearTimers();
       if (recognitionRef.current) {
         recognitionRef.current.onresult = null;
         recognitionRef.current.onerror = null;
@@ -80,83 +85,118 @@ const DictationButton: React.FC<DictationButtonProps> = ({
         recognitionRef.current = null;
       }
     };
-  }, []);
+  }, [clearTimers]);
 
-  // ── Start recording ───────────────────────────────────────────────────
   const startRecording = useCallback(() => {
-    if (!SpeechRecognitionAPI) return;
-
-    // Abort any leftover session defensively
-    if (recognitionRef.current) {
-      recognitionRef.current.abort();
-      recognitionRef.current = null;
+    const SpeechRecognitionAPI = getSpeechRecognitionAPI();
+    if (!SpeechRecognitionAPI) {
+      setRecordingState("unsupported");
+      setStatusText("Voice dictation unavailable");
+      return;
     }
 
+    manualStopRef.current = false;
+    clearTimers();
+    setErrorMsg("");
+    setStatusText("Recording...");
+    setRecordingState("recording");
+    startDurationTimer();
+
     const recognition = new SpeechRecognitionAPI();
+    const sessionId = activeSessionRef.current + 1;
+    activeSessionRef.current = sessionId;
 
-    // Configuration
-    recognition.lang =
-      lang ?? document.documentElement.lang ?? "en-IN";
-    recognition.continuous = false;       // single utterance per click
-    recognition.interimResults = false;   // final transcript only
+    recognition.lang = lang ?? document.documentElement.lang ?? "en-IN";
+    recognition.continuous = true;
+    recognition.interimResults = true;
     recognition.maxAlternatives = 1;
-
-    // ── Handlers ──────────────────────────────────────────────────────
 
     recognition.onstart = () => {
       setRecordingState("recording");
+      setStatusText("Recording...");
       setErrorMsg("");
+      startDurationTimer();
     };
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const transcript = event.results[0]?.[0]?.transcript ?? "";
-      if (transcript.trim()) {
-        onText(transcript.trim());
+      const finalTranscript = Array.from(event.results || [])
+        .filter((result) => result.isFinal)
+        .map((result) => result[0]?.transcript?.trim() ?? "")
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+
+      if (finalTranscript) {
+        onText(finalTranscript);
+        setStatusText("Added to consultation");
+        window.setTimeout(() => {
+          setStatusText((current) => (current === "Added to consultation" ? "Recording..." : current));
+        }, 1200);
       }
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      // "aborted" fires when we call .abort() ourselves — not a real error
       if (event.error === "aborted") {
         setRecordingState("idle");
+        setStatusText("Stopped");
+        stopDurationTimer();
         return;
       }
 
-      let message = "Dictation failed.";
+      let message = "Dictation interrupted.";
       switch (event.error) {
         case "not-allowed":
         case "service-not-allowed":
           message = "Microphone permission denied.";
           break;
-        case "no-speech":
-          message = "No speech detected. Try again.";
+        case "audio-capture":
+          message = "Microphone unavailable.";
           break;
         case "network":
-          message = "Network error during dictation.";
+          message = "Recording interrupted.";
           break;
-        case "audio-capture":
-          message = "Microphone not found.";
+        case "no-speech":
+          message = "Recording active. Continue speaking.";
           break;
         default:
-          message = `Dictation error: ${event.error}`;
+          message = "Recording interrupted.";
       }
 
       setRecordingState("error");
       setErrorMsg(message);
+      setStatusText(message);
+      stopDurationTimer();
+      recognitionRef.current = null;
 
-      // Auto-clear error state after 3 seconds so button resets to idle
-      setTimeout(() => {
-        setRecordingState("idle");
-        setErrorMsg("");
-      }, 3000);
+      if (event.error !== "not-allowed" && event.error !== "service-not-allowed") {
+        restartTimerRef.current = window.setTimeout(() => {
+          if (!manualStopRef.current) {
+            startRecording();
+          }
+        }, 300);
+      }
     };
 
     recognition.onend = () => {
-      // onend always fires after onresult — safe to reset state here
-      setRecordingState((prev) =>
-        prev === "recording" ? "idle" : prev
-      );
+      if (manualStopRef.current) {
+        setRecordingState("idle");
+        setStatusText("Stopped");
+        stopDurationTimer();
+        recognitionRef.current = null;
+        return;
+      }
+
+      if (activeSessionRef.current !== sessionId) return;
+
+      setRecordingState("recording");
+      setStatusText("Recording...");
+      startDurationTimer();
       recognitionRef.current = null;
+      restartTimerRef.current = window.setTimeout(() => {
+        if (!manualStopRef.current) {
+          startRecording();
+        }
+      }, 120);
     };
 
     recognitionRef.current = recognition;
@@ -164,21 +204,27 @@ const DictationButton: React.FC<DictationButtonProps> = ({
     try {
       recognition.start();
     } catch {
-      // start() throws if called while already running
-      setRecordingState("idle");
+      setRecordingState("error");
+      setErrorMsg("Recording interrupted.");
+      setStatusText("Recording interrupted.");
+      stopDurationTimer();
       recognitionRef.current = null;
     }
-  }, [lang, onText]);
+  }, [clearTimers, lang, onText, startDurationTimer, stopDurationTimer]);
 
-  // ── Stop recording ────────────────────────────────────────────────────
   const stopRecording = useCallback(() => {
-    if (recognitionRef.current) {
-      // .stop() triggers onresult (if any speech) then onend
-      recognitionRef.current.stop();
+    manualStopRef.current = true;
+    clearTimers();
+    const recognition = recognitionRef.current;
+    if (recognition) {
+      recognition.stop();
+      recognitionRef.current = null;
     }
-  }, []);
+    setRecordingState("idle");
+    setStatusText("Stopped");
+    stopDurationTimer();
+  }, [clearTimers, stopDurationTimer]);
 
-  // ── Click handler ─────────────────────────────────────────────────────
   const handleClick = useCallback(() => {
     if (disabled) return;
     if (recordingState === "recording") {
@@ -188,18 +234,20 @@ const DictationButton: React.FC<DictationButtonProps> = ({
     }
   }, [disabled, recordingState, startRecording, stopRecording]);
 
-  // ── Don't render if browser has no support ────────────────────────────
-  if (recordingState === "unsupported") return null;
+  if (recordingState === "unsupported") {
+    return (
+      <div style={wrapperStyle}>
+        <span style={unsupportedLabelStyle}>Voice dictation unavailable</span>
+      </div>
+    );
+  }
 
-  // ── Derived UI state ─────────────────────────────────────────────────
   const isRecording = recordingState === "recording";
   const isError = recordingState === "error";
-  const isDisabled = disabled || isError;
-
   const buttonTitle = isError
-    ? errorMsg
+    ? errorMsg || "Recording interrupted"
     : isRecording
-    ? "Stop dictation"
+    ? "Stop Recording"
     : label;
 
   return (
@@ -207,7 +255,6 @@ const DictationButton: React.FC<DictationButtonProps> = ({
       <button
         type="button"
         onClick={handleClick}
-        disabled={isDisabled}
         title={buttonTitle}
         aria-label={buttonTitle}
         aria-pressed={isRecording}
@@ -215,59 +262,42 @@ const DictationButton: React.FC<DictationButtonProps> = ({
           ...btnStyle,
           ...(isRecording ? btnRecordingStyle : {}),
           ...(isError ? btnErrorStyle : {}),
-          ...(isDisabled ? btnDisabledStyle : {}),
+          ...(disabled ? btnDisabledStyle : {}),
         }}
       >
-        {isRecording ? (
-          // Pulsing red dot while recording
-          <span style={dotStyle} aria-hidden="true" />
-        ) : isError ? (
-          <span aria-hidden="true">⚠️</span>
-        ) : (
-          <span aria-hidden="true">🎤</span>
-        )}
+        {isRecording ? <span style={dotStyle} aria-hidden="true" /> : isError ? <span aria-hidden="true">⚠️</span> : <span aria-hidden="true">🎤</span>}
+        <span style={buttonLabelStyle}>{isRecording ? "Stop" : isError ? "Resume" : "Start Recording"}</span>
       </button>
 
-      {/* Recording label — visible only while active */}
-      {isRecording && (
-        <span style={recordingLabelStyle} aria-live="polite">
-          Listening…
-        </span>
-      )}
-
-      {/* Error message — visible briefly on error */}
-      {isError && errorMsg && (
-        <span style={errorLabelStyle} role="alert">
-          {errorMsg}
-        </span>
-      )}
+      <div style={metaStyle} aria-live="polite">
+        <span style={statusStyle(isRecording, isError)}>{isRecording ? "● Recording" : isError ? "⚠️ Interrupted" : "Ready"}</span>
+        <span style={mutedTextStyle}>{formatDuration(durationSeconds)}</span>
+        <span style={mutedTextStyle}>{statusText}</span>
+      </div>
     </div>
   );
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// STYLES
-// Intentionally minimal — fits inside any field label row without disruption.
-// ─────────────────────────────────────────────────────────────────────────────
-
 const wrapperStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
-  gap: 6,
+  gap: 8,
+  flexWrap: "wrap",
 };
 
 const btnStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  width: 28,
-  height: 28,
-  padding: 0,
+  gap: 6,
+  minHeight: 34,
+  padding: "0 10px",
   border: "1.5px solid #e2e8f0",
-  borderRadius: "50%",
+  borderRadius: 999,
   background: "#ffffff",
   cursor: "pointer",
-  fontSize: 13,
+  fontSize: 12,
+  fontWeight: 800,
   lineHeight: 1,
   transition: "all 0.15s ease",
   flexShrink: 0,
@@ -285,39 +315,45 @@ const btnErrorStyle: React.CSSProperties = {
 };
 
 const btnDisabledStyle: React.CSSProperties = {
-  opacity: 0.4,
+  opacity: 0.45,
   cursor: "not-allowed",
 };
 
-// Pulsing red dot shown inside button while recording
+const buttonLabelStyle: React.CSSProperties = {
+  fontWeight: 800,
+};
+
+const metaStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 11,
+  color: "#475569",
+};
+
+const statusStyle = (isRecording: boolean, isError: boolean): React.CSSProperties => ({
+  fontWeight: 800,
+  color: isRecording ? "#dc2626" : isError ? "#d97706" : "#0f172a",
+});
+
+const mutedTextStyle: React.CSSProperties = {
+  color: "#64748b",
+};
+
+const unsupportedLabelStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  color: "#64748b",
+};
+
 const dotStyle: React.CSSProperties = {
   display: "block",
-  width: 10,
-  height: 10,
+  width: 8,
+  height: 8,
   borderRadius: "50%",
   backgroundColor: "#ef4444",
   animation: "dictation-pulse 1s ease-in-out infinite",
 };
-
-const recordingLabelStyle: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 700,
-  color: "#ef4444",
-  letterSpacing: "0.02em",
-};
-
-const errorLabelStyle: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 600,
-  color: "#d97706",
-  maxWidth: 180,
-  lineHeight: 1.3,
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PULSE KEYFRAME
-// Injected once as a <style> tag — avoids needing a global CSS file.
-// ─────────────────────────────────────────────────────────────────────────────
 
 const PULSE_CSS = `
   @keyframes dictation-pulse {
@@ -326,14 +362,7 @@ const PULSE_CSS = `
   }
 `;
 
-const StyleInjector: React.FC = () => (
-  <style dangerouslySetInnerHTML={{ __html: PULSE_CSS }} />
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// WRAPPED EXPORT
-// StyleInjector renders the keyframe once alongside the first DictationButton.
-// ─────────────────────────────────────────────────────────────────────────────
+const StyleInjector: React.FC = () => <style dangerouslySetInnerHTML={{ __html: PULSE_CSS }} />;
 
 const DictationButtonWithStyle: React.FC<DictationButtonProps> = (props) => (
   <>
