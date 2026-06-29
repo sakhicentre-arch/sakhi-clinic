@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from "react";
-import useSafeViewport from '../../hooks/useSafeViewport';
 
 interface LayoutProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
   className?: string;
   style?: React.CSSProperties;
+}
+
+interface PullToRefreshScrollRegionProps extends LayoutProps {
+  onRefresh?: () => void | Promise<void>;
 }
 
 interface SplitPaneProps extends LayoutProps {
@@ -27,25 +30,18 @@ export function AppViewportFrame({
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
-  useSafeViewport();
-
   return (
     <main
       className={className}
       style={{
         marginLeft: isMobile ? 0 : '64px',
-        minHeight: isMobile
-          ? 'calc(var(--app-vh, 1vh) * 100 - 59px - 80px - env(safe-area-inset-bottom, 0px))'
-          : 'calc(var(--app-vh, 1vh) * 100 - 59px)',
+        minHeight: 'calc(100vh - 59px)',
         width: isMobile ? '100%' : 'calc(100% - 64px)',
         minWidth: 0,
         display: 'flex',
         flexDirection: 'column',
         background: '#f8fafc',
-        paddingTop: isMobile ? 'env(safe-area-inset-top, 0px)' : 0,
-        paddingBottom: isMobile ? 'calc(80px + env(safe-area-inset-bottom, 0px))' : 0,
-        overflowX: 'hidden',
-        boxSizing: 'border-box',
+        paddingBottom: isMobile ? 'calc(56px + env(safe-area-inset-bottom))' : 0,
         ...style,
       }}
       {...props}
@@ -111,75 +107,52 @@ export function PullToRefreshScrollRegion({
   className,
   style,
   onRefresh,
-  disabled,
   ...props
-}: LayoutProps & {
-  onRefresh: () => Promise<void> | void;
-  disabled?: boolean;
-}): React.ReactElement {
-  const [pullPx, setPullPx] = useState(0);
-  const [refreshing, setRefreshing] = useState(false);
+}: PullToRefreshScrollRegionProps): React.ReactElement {
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isPulling, setIsPulling] = useState(false);
   const startYRef = React.useRef<number | null>(null);
-  const scrollRef = React.useRef<HTMLDivElement>(null);
 
-  const threshold = 56;
-  const maxPull = 92;
-  const armed = pullPx >= threshold;
-  const prefersReducedMotion =
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  const reset = () => {
-    startYRef.current = null;
-    setPullPx(0);
+  const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1) return;
+    startYRef.current = event.touches[0].clientY;
   };
 
-  const runRefresh = async () => {
-    if (refreshing || disabled) return;
-    setRefreshing(true);
-    setPullPx(threshold);
-    try {
-      await onRefresh();
-    } finally {
-      setRefreshing(false);
-      reset();
+  const handleTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (!startYRef.current || event.touches.length !== 1) return;
+    const currentY = event.touches[0].clientY;
+    const delta = currentY - startYRef.current;
+    if (delta <= 0 || window.scrollY > 0) {
+      return;
     }
+
+    event.preventDefault();
+    setIsPulling(true);
+    setPullDistance(Math.min(delta, 88));
+  };
+
+  const handleTouchEnd = async () => {
+    if (pullDistance > 60 && onRefresh) {
+      try {
+        await onRefresh();
+      } catch {
+        // Preserve existing behavior: swallow refresh errors and reset UI.
+      }
+    }
+
+    startYRef.current = null;
+    setIsPulling(false);
+    setPullDistance(0);
   };
 
   return (
     <div
-      ref={scrollRef}
       className={className}
       {...props}
-      onTouchStart={(e) => {
-        if (disabled || refreshing) return;
-        const el = scrollRef.current;
-        if (!el) return;
-        if (el.scrollTop > 0) return;
-        startYRef.current = e.touches[0]?.clientY ?? null;
-      }}
-      onTouchMove={(e) => {
-        if (disabled || refreshing) return;
-        const el = scrollRef.current;
-        if (!el) return;
-        if (el.scrollTop > 0) return;
-        if (startYRef.current == null) return;
-        const y = e.touches[0]?.clientY ?? startYRef.current;
-        const dy = Math.max(0, y - startYRef.current);
-        if (dy <= 0) return;
-        e.preventDefault();
-        setPullPx(Math.min(maxPull, Math.round(dy * 0.65)));
-      }}
-      onTouchEnd={() => {
-        if (disabled) return;
-        if (refreshing) return;
-        if (armed) {
-          void runRefresh();
-          return;
-        }
-        reset();
-      }}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
       style={{
         flex: 1,
         minHeight: 0,
@@ -187,44 +160,11 @@ export function PullToRefreshScrollRegion({
         overflowY: "auto",
         overflowX: "hidden",
         WebkitOverflowScrolling: "touch",
-        overscrollBehaviorY: "contain",
+        transform: `translateY(${pullDistance}px)`,
+        transition: isPulling ? "none" : "transform 180ms ease-out",
         ...style,
       }}
     >
-      <div
-        style={{
-          height: pullPx,
-          display: "grid",
-          placeItems: "end center",
-          transition: prefersReducedMotion
-            ? "none"
-            : refreshing
-              ? "height 180ms cubic-bezier(0.2, 0.8, 0.2, 1)"
-              : "height 120ms cubic-bezier(0.2, 0.8, 0.2, 1)",
-        }}
-      >
-        <div
-          style={{
-            height: 28,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            color: "var(--muted, #64748b)",
-            fontSize: 12,
-            fontWeight: 900,
-            padding: "0 12px",
-            borderRadius: 999,
-            border: "1px solid rgba(226, 232, 240, 0.9)",
-            background: "rgba(2, 6, 23, 0.02)",
-            transform: `translateY(${Math.min(8, pullPx / 8)}px)`,
-            opacity: pullPx > 10 ? 1 : 0,
-            transition: prefersReducedMotion ? "none" : "opacity 120ms cubic-bezier(0.2, 0.8, 0.2, 1)",
-          }}
-        >
-          <span style={{ width: 10, height: 10, borderRadius: 999, background: armed ? "#0D7377" : "#94a3b8" }} />
-          {refreshing ? "Refreshing…" : armed ? "Release to refresh" : "Pull to refresh"}
-        </div>
-      </div>
       {children}
     </div>
   );

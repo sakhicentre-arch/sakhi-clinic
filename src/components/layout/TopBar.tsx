@@ -1,14 +1,14 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Clock, Menu, Search, X } from "lucide-react";
+import React, { useState, useEffect } from "react";
 import { useUIStore } from "../../store/uiStore";
+import GlobalSearch from "../shared/GlobalSearch";
 import ClinicBadge from "../shared/ClinicBadge";
+import { Clock, Menu, X } from "lucide-react";
 
 interface TopBarProps {
   onPatientSelect: (patientId: string) => void;
   isMobile?: boolean;
   mobileNavOpen?: boolean;
   onToggleMobileNav: () => void;
-  onOpenDiagnostics?: () => void;
 }
 
 export default function TopBar({
@@ -16,13 +16,10 @@ export default function TopBar({
   isMobile = false,
   mobileNavOpen = false,
   onToggleMobileNav,
-  onOpenDiagnostics,
 }: TopBarProps) {
   const activeClinic = useUIStore((s) => s.activeClinic);
   const draftStatus = useUIStore((s) => s.draftStatus);
-  const setGlobalSearchOpen = useUIStore((s) => s.setGlobalSearchOpen);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const devTapRef = useRef<{ count: number; lastAt: number }>({ count: 0, lastAt: 0 });
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -33,117 +30,135 @@ export default function TopBar({
 
   return (
     <>
-      <div className="sakhi-topbar-stripe" style={{ background: clinicColor }} />
-
+      {/* 3px Clinic Color Stripe */}
       <div
-        className="sakhi-topbar"
         style={{
-          paddingLeft: isMobile ? "var(--space-3)" : "var(--space-4)",
-          paddingRight: isMobile ? "var(--space-3)" : "var(--space-4)",
-          gap: isMobile ? "var(--space-3)" : "var(--space-4)",
+          position: "fixed",
+          top: "0",
+          left: "0",
+          right: "0",
+          height: "3px",
+          background: clinicColor,
+          zIndex: 1001,
+        }}
+      />
+
+      {/* Top Bar */}
+      <div
+        style={{
+          position: "fixed",
+          top: "3px",
+          left: "0",
+          right: "0",
+          height: "56px",
+          background: "#fff",
+          borderBottom: "1px solid #e2e8f0",
+          display: "flex",
+          alignItems: "center",
+          paddingLeft: isMobile ? "14px" : "24px",
+          paddingRight: isMobile ? "14px" : "24px",
+          gap: isMobile ? "12px" : "24px",
           flexWrap: isMobile ? "wrap" : "nowrap",
+          zIndex: 1000,
+          boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)",
         }}
       >
         {isMobile && (
           <button
             onClick={onToggleMobileNav}
             aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
-            className="sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple"
-            style={{ background: "var(--surface-muted)" }}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 12,
+              border: "none",
+              background: "#f1f5f9",
+              color: "#0f172a",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+            }}
           >
             {mobileNavOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
         )}
 
-        <div className="sakhi-row" style={{ gap: "var(--space-2)", minWidth: "fit-content" }}>
+        <div
+          style={{
+            fontSize: "18px",
+            fontWeight: "900",
+            color: "#0f172a",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            minWidth: "fit-content",
+          }}
+        >
           <div
-            className="sakhi-appmark sakhi-tap sakhi-focus-ring sakhi-ripple"
-            style={{ background: clinicColor, cursor: "pointer" }}
-            role="button"
-            tabIndex={0}
-            aria-label="Sakhi diagnostics trigger"
-            title="Tap 7x for diagnostics"
-            onClick={() => {
-              const now = Date.now();
-              const prev = devTapRef.current;
-              const withinWindow = now - prev.lastAt < 1200;
-              const nextCount = withinWindow ? prev.count + 1 : 1;
-              devTapRef.current = { count: nextCount, lastAt: now };
-              if (nextCount >= 7) {
-                devTapRef.current = { count: 0, lastAt: 0 };
-                onOpenDiagnostics?.();
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                (e.currentTarget as any).click();
-              }
+            style={{
+              width: "32px",
+              height: "32px",
+              borderRadius: "8px",
+              background: clinicColor,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#fff",
+              fontSize: "16px",
+              fontWeight: "900",
             }}
           >
             ⚕️
           </div>
-          <span className="sakhi-title">Sakhi</span>
+          Sakhi
         </div>
 
-        <div className="sakhi-divider" />
+        {/* Divider */}
+        <div
+          style={{
+            width: "1px",
+            height: "32px",
+            background: "#e2e8f0",
+          }}
+        />
 
         {!isMobile && <ClinicBadge />}
 
-        {!isMobile && (
-          <button
-            type="button"
-            onClick={() => setGlobalSearchOpen(true)}
-            className="sakhi-tap sakhi-focus-ring sakhi-ripple"
-            aria-label="Open search (Ctrl or Command plus K)"
-          >
-            <div className="sakhi-search-pill">
-              <Search size={16} color="#94a3b8" />
-              <span style={{ flex: 1, textAlign: "left", color: "#475569" }}>
-                Search patients, queue…
-              </span>
-              <span className="sakhi-kbd-hint">Ctrl K</span>
-            </div>
-          </button>
-        )}
+        {!isMobile && <GlobalSearch onSelectPatient={onPatientSelect} />}
 
         <div style={{ flex: 1 }} />
 
-        {isMobile && (
-          <button
-            type="button"
-            onClick={() => setGlobalSearchOpen(true)}
-            aria-label="Search"
-            data-testid="topbar-search-button"
-            className="sakhi-icon-btn sakhi-tap sakhi-focus-ring sakhi-ripple"
-            style={{ boxShadow: "0 1px 0 rgba(15, 23, 42, 0.03) inset" }}
-          >
-            <Search size={18} />
-          </button>
-        )}
-
-        <div className="sakhi-row" style={{ minWidth: "fit-content" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            fontSize: "13px",
+            color: "#475569",
+            fontWeight: "600",
+            minWidth: "fit-content",
+          }}
+        >
           <Clock size={16} color="#94a3b8" />
-          <span className="sakhi-caption" style={{ color: "#475569" }}>
-            {currentTime.toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-            })}
-          </span>
+          {currentTime.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })}
         </div>
 
+        {/* Draft Status Badge */}
         {!isMobile && draftStatus && (
           <div
             style={{
-              padding: "var(--space-1) var(--space-2)",
+              padding: "6px 12px",
               borderRadius: "999px",
               background: draftStatus === "Restored Draft" ? "#dcfce7" : "#fef3c7",
               color: draftStatus === "Restored Draft" ? "#166534" : "#b45309",
-              fontSize: "var(--type-caption)",
-              fontWeight: 800,
+              fontSize: "12px",
+              fontWeight: "700",
               minWidth: "fit-content",
-              border: "1px solid var(--border)",
             }}
           >
             {draftStatus}
@@ -151,7 +166,8 @@ export default function TopBar({
         )}
       </div>
 
-      <div className="sakhi-topbar-spacer" />
+      {/* Spacer to prevent content from going under TopBar */}
+      <div style={{ height: "59px" }} />
     </>
   );
 }

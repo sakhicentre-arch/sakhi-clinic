@@ -1,0 +1,22 @@
+project_name: Sakhi Clinic
+
+goal: >
+  Clinic management system for patient registration,
+  appointment booking,
+  queue management,
+  prescriptions,
+  patient history,
+  and future WhatsApp reminders.
+
+scope: >
+  End-to-end clinic workflow management.
+
+tech_stack: >
+  React, TypeScript, Dexie, PWA
+
+current_phase: >
+  Core modules operational.
+  Prescription and patient history modules under development.
+
+success_criteria: >
+  Production-ready clinic software usable daily by doctor.

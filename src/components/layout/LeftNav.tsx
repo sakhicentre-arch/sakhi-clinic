@@ -46,24 +46,22 @@ export default function LeftNav({ onNavigate, isMobile = false, isOpen = false, 
       style={{
         position: "fixed",
         left: 0,
-        top: isMobile ? "calc(59px + env(safe-area-inset-top, 0px))" : "59px",
+        top: isMobile ? "59px" : "59px",
         width: isMobile ? "min(280px, 100%)" : "64px",
-        height: isMobile
-          ? "calc(100vh - 59px - env(safe-area-inset-top, 0px))"
-          : "calc(100vh - 59px)",
+        height: isMobile ? "calc(100vh - 59px)" : `calc(100vh - 59px)`,
         background: "#ffffff",
         borderRight: isMobile ? "none" : "1px solid #e2e8f0",
         boxShadow: isMobile ? "2px 0 24px rgba(15, 23, 42, 0.16)" : undefined,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        paddingTop: "24px",
-        paddingBottom: "24px",
+        paddingTop: "20px",
+        paddingBottom: "20px",
         zIndex: 1000,
       }}
     >
       {/* Nav Items */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activePage === item.id;
@@ -83,8 +81,8 @@ export default function LeftNav({ onNavigate, isMobile = false, isOpen = false, 
                 style={{
                   width: isMobile ? "100%" : "48px",
                   height: "48px",
-                  padding: isMobile ? "0 16px" : undefined,
-                  borderRadius: "16px",
+                  padding: isMobile ? "0 12px" : undefined,
+                  borderRadius: "12px",
                   border: "none",
                   background: isActive ? clinicColor : "transparent",
                   color: isActive ? "#fff" : "#94a3b8",
@@ -92,11 +90,10 @@ export default function LeftNav({ onNavigate, isMobile = false, isOpen = false, 
                   display: "flex",
                   alignItems: "center",
                   justifyContent: isMobile ? "flex-start" : "center",
-                  gap: isMobile ? "16px" : undefined,
+                  gap: isMobile ? "12px" : undefined,
                   transition: "all 0.2s ease",
                   position: "relative",
                 }}
-                className="sakhi-tap sakhi-focus-ring"
               >
                 <Icon size={20} />
                 {isMobile && (
@@ -119,7 +116,7 @@ export default function LeftNav({ onNavigate, isMobile = false, isOpen = false, 
                   <div
                     style={{
                       position: "absolute",
-                      left: "-16px",
+                      left: "-12px",
                       top: "0",
                       bottom: "0",
                       width: "3px",
@@ -134,8 +131,8 @@ export default function LeftNav({ onNavigate, isMobile = false, isOpen = false, 
                   <div
                     style={{
                       position: "absolute",
-                      top: "-8px",
-                      right: "-8px",
+                      top: "-6px",
+                      right: "-6px",
                       width: "20px",
                       height: "20px",
                       borderRadius: "50%",
@@ -158,14 +155,14 @@ export default function LeftNav({ onNavigate, isMobile = false, isOpen = false, 
                   <div
                     style={{
                       position: "absolute",
-                      top: "-8px",
-                      left: "-8px",
+                      top: "-6px",
+                      left: "-6px",
                       fontSize: "8px",
                       fontWeight: "900",
                       background: "#ec4899",
                       color: "#fff",
-                      padding: "4px 8px",
-                      borderRadius: "8px",
+                      padding: "2px 4px",
+                      borderRadius: "4px",
                     }}
                   >
                     NEW
@@ -183,8 +180,8 @@ export default function LeftNav({ onNavigate, isMobile = false, isOpen = false, 
                     transform: "translateY(-50%)",
                     background: "#0f172a",
                     color: "#fff",
-                    padding: "8px 16px",
-                    borderRadius: "12px",
+                    padding: "6px 12px",
+                    borderRadius: "8px",
                     fontSize: "12px",
                     fontWeight: "700",
                     whiteSpace: "nowrap",

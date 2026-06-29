@@ -4,47 +4,37 @@ import { ActivePage } from '../../store/uiStore';
 interface Props {
   onNavigate: (page: ActivePage) => void;
   isMobile?: boolean;
-  onOpenSearch?: () => void;
 }
 
-export default function BottomNav({ onNavigate, isMobile = false, onOpenSearch }: Props) {
+export default function BottomNav({ onNavigate, isMobile = false }: Props) {
   if (!isMobile) {
     return null;
   }
 
-  const labels = ['Today', 'Patients', 'Consult', 'Appt', 'Search'];
-  const testIds = [
-    'bottom-nav-today-button',
-    'bottom-nav-patients-button',
-    'bottom-nav-consult-button',
-    'bottom-nav-appointments-button',
-    'bottom-nav-more-button',
-  ];
-
   return (
     <nav
-      data-testid="bottom-nav"
-      className="sakhi-bottom-nav sakhi-overlay-enter"
-      aria-label="Primary mobile navigation"
+      style={{
+        position: 'fixed',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: 'calc(56px + env(safe-area-inset-bottom))',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+        display: 'flex',
+        justifyContent: 'space-around',
+        alignItems: 'center',
+        background: '#ffffff',
+        borderTop: '1px solid #e5e7eb',
+        zIndex: 60,
+        WebkitTapHighlightColor: 'transparent',
+      }}
+      aria-hidden={false}
     >
-      {labels.map((label, index) => (
-        <button
-          key={label}
-          type="button"
-          data-testid={testIds[index]}
-          aria-label={label}
-          onClick={() => {
-            if (index === 4) {
-              onOpenSearch?.();
-              return;
-            }
-            onNavigate(['today', 'patients', 'consultation', 'appointments', 'dashboard'][index] as ActivePage);
-          }}
-          className="sakhi-bottom-nav-btn sakhi-tap sakhi-focus-ring sakhi-ripple"
-        >
-          {label}
-        </button>
-      ))}
+      <button onClick={() => onNavigate('today')} aria-label="Today" style={{ background: 'none', border: 'none' }}>Today</button>
+      <button onClick={() => onNavigate('patients')} aria-label="Patients" style={{ background: 'none', border: 'none' }}>Patients</button>
+      <button onClick={() => onNavigate('consultation')} aria-label="Consult" style={{ background: 'none', border: 'none' }}>Consult</button>
+      <button onClick={() => onNavigate('appointments')} aria-label="Appointments" style={{ background: 'none', border: 'none' }}>Appt</button>
+      <button onClick={() => onNavigate('dashboard')} aria-label="More" style={{ background: 'none', border: 'none' }}>More</button>
     </nav>
   );
 }
