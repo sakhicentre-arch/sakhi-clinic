@@ -47,6 +47,14 @@ const DictationButton: React.FC<DictationButtonProps> = ({
   const durationTimerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);
   const activeSessionRef = useRef(0);
+  const lastResultIndexRef = useRef(0);
+
+  // Refs to always access the latest callback/language — avoids stale closures
+  // in continuous mode where recognition.onresult fires across multiple renders.
+  const onTextRef = useRef(onText);
+  onTextRef.current = onText;
+  const langRef = useRef(lang);
+  langRef.current = lang;
 
   const clearTimers = useCallback(() => {
     if (durationTimerRef.current !== null) {
@@ -96,6 +104,7 @@ const DictationButton: React.FC<DictationButtonProps> = ({
     }
 
     manualStopRef.current = false;
+    lastResultIndexRef.current = 0;
     clearTimers();
     setErrorMsg("");
     setStatusText("Recording...");
@@ -106,7 +115,7 @@ const DictationButton: React.FC<DictationButtonProps> = ({
     const sessionId = activeSessionRef.current + 1;
     activeSessionRef.current = sessionId;
 
-    recognition.lang = lang ?? document.documentElement.lang ?? "en-IN";
+    recognition.lang = langRef.current ?? document.documentElement.lang ?? "en-IN";
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
@@ -119,15 +128,21 @@ const DictationButton: React.FC<DictationButtonProps> = ({
     };
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const finalTranscript = Array.from(event.results || [])
+      // Only process NEW results since the last onresult call.
+      // event.results is a cumulative live collection — iterating all entries
+      // would re-emit every previous chunk, causing massive duplication.
+      const newFinalTranscript = Array.from(event.results || [])
+        .slice(event.resultIndex ?? lastResultIndexRef.current)
         .filter((result) => result.isFinal)
         .map((result) => result[0]?.transcript?.trim() ?? "")
         .filter(Boolean)
         .join(" ")
         .trim();
 
-      if (finalTranscript) {
-        onText(finalTranscript);
+      lastResultIndexRef.current = (event.results?.length ?? lastResultIndexRef.current);
+
+      if (newFinalTranscript) {
+        onTextRef.current(newFinalTranscript);
         setStatusText("Added to consultation");
         window.setTimeout(() => {
           setStatusText((current) => (current === "Added to consultation" ? "Recording..." : current));
@@ -210,7 +225,7 @@ const DictationButton: React.FC<DictationButtonProps> = ({
       stopDurationTimer();
       recognitionRef.current = null;
     }
-  }, [clearTimers, lang, onText, startDurationTimer, stopDurationTimer]);
+  }, [clearTimers, startDurationTimer, stopDurationTimer]);
 
   const stopRecording = useCallback(() => {
     manualStopRef.current = true;
