@@ -46,7 +46,12 @@ const DictationButton: React.FC<DictationButtonProps> = ({
   const manualStopRef = useRef(false);
   const durationTimerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);
+  const statusResetTimerRef = useRef<number | null>(null);
   const activeSessionRef = useRef(0);
+  const networkRetryCountRef = useRef(0);
+  const restartScheduledRef = useRef(false);
+  const lastEmittedTranscriptRef = useRef("");
+  const isMountedRef = useRef(true);
 
   const clearTimers = useCallback(() => {
     if (durationTimerRef.current !== null) {
@@ -57,6 +62,18 @@ const DictationButton: React.FC<DictationButtonProps> = ({
       window.clearTimeout(restartTimerRef.current);
       restartTimerRef.current = null;
     }
+    if (statusResetTimerRef.current !== null) {
+      window.clearTimeout(statusResetTimerRef.current);
+      statusResetTimerRef.current = null;
+    }
+  }, []);
+
+  const cancelPendingRestart = useCallback(() => {
+    if (restartTimerRef.current !== null) {
+      window.clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+    restartScheduledRef.current = false;
   }, []);
 
   const stopDurationTimer = useCallback(() => {
@@ -75,8 +92,12 @@ const DictationButton: React.FC<DictationButtonProps> = ({
   }, [stopDurationTimer]);
 
   useEffect(() => {
+    isMountedRef.current = true;
+
     return () => {
+      isMountedRef.current = false;
       clearTimers();
+      cancelPendingRestart();
       if (recognitionRef.current) {
         recognitionRef.current.onresult = null;
         recognitionRef.current.onerror = null;
@@ -85,7 +106,7 @@ const DictationButton: React.FC<DictationButtonProps> = ({
         recognitionRef.current = null;
       }
     };
-  }, [clearTimers]);
+  }, [cancelPendingRestart, clearTimers]);
 
   const startRecording = useCallback(() => {
     const SpeechRecognitionAPI = getSpeechRecognitionAPI();
@@ -96,8 +117,11 @@ const DictationButton: React.FC<DictationButtonProps> = ({
     }
 
     manualStopRef.current = false;
+    cancelPendingRestart();
     clearTimers();
     setErrorMsg("");
+    networkRetryCountRef.current = 0;
+    lastEmittedTranscriptRef.current = "";
     setStatusText("Recording...");
     setRecordingState("recording");
     startDurationTimer();
@@ -126,10 +150,16 @@ const DictationButton: React.FC<DictationButtonProps> = ({
         .join(" ")
         .trim();
 
-      if (finalTranscript) {
+      if (finalTranscript && finalTranscript !== lastEmittedTranscriptRef.current) {
+        lastEmittedTranscriptRef.current = finalTranscript;
         onText(finalTranscript);
         setStatusText("Added to consultation");
-        window.setTimeout(() => {
+        if (statusResetTimerRef.current !== null) {
+          window.clearTimeout(statusResetTimerRef.current);
+        }
+        statusResetTimerRef.current = window.setTimeout(() => {
+          statusResetTimerRef.current = null;
+          if (!isMountedRef.current) return;
           setStatusText((current) => (current === "Added to consultation" ? "Recording..." : current));
         }, 1200);
       }
@@ -156,7 +186,7 @@ const DictationButton: React.FC<DictationButtonProps> = ({
           message = "Recording interrupted.";
           break;
         case "no-speech":
-          message = "Recording active. Continue speaking.";
+          message = "No speech detected. Continue speaking or stop recording.";
           break;
         default:
           message = "Recording interrupted.";
@@ -168,17 +198,21 @@ const DictationButton: React.FC<DictationButtonProps> = ({
       stopDurationTimer();
       recognitionRef.current = null;
 
-      if (event.error !== "not-allowed" && event.error !== "service-not-allowed") {
+      if (event.error === "network" && networkRetryCountRef.current === 0 && !restartScheduledRef.current) {
+        networkRetryCountRef.current += 1;
+        restartScheduledRef.current = true;
         restartTimerRef.current = window.setTimeout(() => {
-          if (!manualStopRef.current) {
+          restartTimerRef.current = null;
+          restartScheduledRef.current = false;
+          if (!manualStopRef.current && isMountedRef.current) {
             startRecording();
           }
-        }, 300);
+        }, 400);
       }
     };
 
     recognition.onend = () => {
-      if (manualStopRef.current) {
+      if (manualStopRef.current || !isMountedRef.current) {
         setRecordingState("idle");
         setStatusText("Stopped");
         stopDurationTimer();
@@ -186,14 +220,14 @@ const DictationButton: React.FC<DictationButtonProps> = ({
         return;
       }
 
-      if (activeSessionRef.current !== sessionId) return;
+      if (activeSessionRef.current !== sessionId || restartScheduledRef.current) return;
 
-      setRecordingState("recording");
-      setStatusText("Recording...");
-      startDurationTimer();
       recognitionRef.current = null;
+      restartScheduledRef.current = true;
       restartTimerRef.current = window.setTimeout(() => {
-        if (!manualStopRef.current) {
+        restartTimerRef.current = null;
+        restartScheduledRef.current = false;
+        if (!manualStopRef.current && isMountedRef.current) {
           startRecording();
         }
       }, 120);
@@ -210,10 +244,11 @@ const DictationButton: React.FC<DictationButtonProps> = ({
       stopDurationTimer();
       recognitionRef.current = null;
     }
-  }, [clearTimers, lang, onText, startDurationTimer, stopDurationTimer]);
+  }, [cancelPendingRestart, clearTimers, lang, onText, startDurationTimer, stopDurationTimer]);
 
   const stopRecording = useCallback(() => {
     manualStopRef.current = true;
+    cancelPendingRestart();
     clearTimers();
     const recognition = recognitionRef.current;
     if (recognition) {
@@ -223,7 +258,7 @@ const DictationButton: React.FC<DictationButtonProps> = ({
     setRecordingState("idle");
     setStatusText("Stopped");
     stopDurationTimer();
-  }, [clearTimers, stopDurationTimer]);
+  }, [cancelPendingRestart, clearTimers, stopDurationTimer]);
 
   const handleClick = useCallback(() => {
     if (disabled) return;
