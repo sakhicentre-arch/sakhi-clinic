@@ -1,5 +1,6 @@
 import React, { memo, useEffect, useRef, useState } from "react";
 import { Medicine } from "../services/db";
+import { generateId } from "../utils/generateId";
 
 interface Suggestion {
   name: string;
@@ -17,7 +18,7 @@ const PRIMARY_DOSAGE_PRESETS = ["1-0-1", "1-1-1", "SOS"];
 const MORE_DOSAGE_PRESETS = ["BD", "TDS", "0-0-1", "1-0-0", "0-1-0", "1-0-1 x 3 days"];
 
 const createMedicine = (): Medicine => ({
-  id: crypto.randomUUID(),
+  id: generateId(),
   name: "",
   potency: "30C",
   dosage: "1-1-1",

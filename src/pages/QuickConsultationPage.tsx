@@ -38,6 +38,7 @@ import PrintableConsultation from "../components/PrintableConsultation";
 import { generateRemedyExplanations } from "../services/aiReasoningEngine";
 import { usePatientStore } from "../store/usePatientStore";
 import { useConsultationStore } from "../store/useConsultationStore";
+import { generateId } from "../utils/generateId";
 
 export interface QuickConsultationPageProps {
   patientId: string;
@@ -47,10 +48,7 @@ export interface QuickConsultationPageProps {
   onSwitchMode: () => void;
 }
 
-interface FormData
-  extends Partial
-    Omit<Consultation, "id" | "patientId" | "date" | "followUpDate">
-  > {
+interface FormData extends Partial<Omit<Consultation, "id" | "patientId" | "date" | "followUpDate">> {
   formDate: string;
   formFollowUpDate: string;
   clinicId: Consultation["clinicId"];
@@ -384,7 +382,7 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
       surgicalHistory: formData.surgicalHistory || "",
       fee: formData.fee || 0,
       paymentStatus: formData.paymentStatus || "pending",
-      id: editingId || crypto.randomUUID(),
+      id: editingId || generateId(),
       patientId,
       date: new Date(formData.formDate).toISOString(),
       followUpDate: formData.formFollowUpDate

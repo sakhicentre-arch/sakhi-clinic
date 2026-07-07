@@ -1,6 +1,7 @@
 import type { SyncOutboxEntry } from "./db";
 import { db } from "./db";
 import { getDeviceId } from "../utils/deviceId";
+import { generateId } from "../utils/generateId";
 
 const nowIso = () => new Date().toISOString();
 
@@ -18,7 +19,7 @@ export type EnqueueOutboxInput = Omit<
 
 export function buildOutboxEntry(input: EnqueueOutboxInput): SyncOutboxEntry {
   return {
-    id: input.id || crypto.randomUUID(),
+    id: input.id || generateId(),
     entityType: input.entityType,
     entityId: input.entityId,
     operationType: input.operationType,

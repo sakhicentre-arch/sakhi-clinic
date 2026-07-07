@@ -1,4 +1,5 @@
 import { db, OperationalEvent, OperationalEventLevel } from "./db";
+import { generateId } from "../utils/generateId";
 
 const nowIso = () => new Date().toISOString();
 
@@ -13,7 +14,7 @@ export type LogOperationalEventInput = {
 
 export async function logOperationalEvent(input: LogOperationalEventInput): Promise<OperationalEvent> {
   const event: OperationalEvent = {
-    id: input.id || crypto.randomUUID(),
+    id: input.id || generateId(),
     timestamp: input.timestamp || nowIso(),
     level: input.level,
     type: input.type,

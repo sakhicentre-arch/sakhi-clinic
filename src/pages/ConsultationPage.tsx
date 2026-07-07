@@ -51,6 +51,7 @@ import { loadRemedyDefaults, saveRemedyDefaults } from "../utils/remedyDefaults"
 import { useQueueStore } from "../store/queueStore";
 import { useUIStore } from "../store/uiStore";
 import { deleteRxTemplate, loadRxTemplates, togglePinTemplate, upsertRxTemplate } from "../utils/rxTemplates";
+import { generateId } from "../utils/generateId";
 import { getOutboxHealthReport } from "../services/outboxMaintenanceService";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1062,7 +1063,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
         id: c.id,
         label: `${meds.length} remedies`,
         date: c.date,
-        meds: meds.map((m) => ({ ...m, id: crypto.randomUUID() })),
+        meds: meds.map((m) => ({ ...m, id: generateId() })),
       });
       if (templates.length >= 3) break;
     }
@@ -1101,7 +1102,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
   const addMedRow = (baseMeds: Medicine[] = formData.medicines) => {
     const defaults = remedyDefaults;
-    const newMed: Medicine = { id: crypto.randomUUID(), name: "", potency: defaults.potency, dosage: defaults.dosage, duration: defaults.duration, notes: "" };
+    const newMed: Medicine = { id: generateId(), name: "", potency: defaults.potency, dosage: defaults.dosage, duration: defaults.duration, notes: "" };
     const nextIndex = baseMeds.length;
     patch({ medicines: [...baseMeds, newMed] });
     setFocusMedIndex(nextIndex);
@@ -1141,7 +1142,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     if (action === "repeat") {
       if (previousConsultation?.medicines?.length) {
         patch({
-          medicines: previousConsultation.medicines.map((m) => ({ ...m, id: crypto.randomUUID() })),
+          medicines: previousConsultation.medicines.map((m) => ({ ...m, id: generateId() })),
         });
       }
       return;
@@ -1191,7 +1192,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
         allergy: formData.allergy || "", familyHistory: formData.familyHistory || "",
         pastHistory: formData.pastHistory || "", surgicalHistory: formData.surgicalHistory || "",
         fee: formData.fee || 0, paymentStatus: formData.paymentStatus || "pending",
-        id: editingId || crypto.randomUUID(), patientId,
+        id: editingId || generateId(), patientId,
         date: new Date(formData.formDate).toISOString(),
         followUpDate: formData.formFollowUpDate ? new Date(formData.formFollowUpDate).toISOString() : undefined,
       };
@@ -2195,7 +2196,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 {last && (last.medicines?.length || 0) > 0 && (
                   <button
                     type="button"
-                    onClick={() => patch({ medicines: (last.medicines || []).map((m) => ({ ...m, id: crypto.randomUUID() })) })}
+                    onClick={() => patch({ medicines: (last.medicines || []).map((m) => ({ ...m, id: generateId() })) })}
                     className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700"
                   >
                     🔁 Repeat Last
@@ -2547,7 +2548,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                       <button
                         key={i}
                         type="button"
-                        onClick={() => patch({ medicines: [...formData.medicines, { id: crypto.randomUUID(), name: r.name, potency: "30C", dosage: "1-1-1", duration: "5 Days", notes: "" }] })}
+                        onClick={() => patch({ medicines: [...formData.medicines, { id: generateId(), name: r.name, potency: "30C", dosage: "1-1-1", duration: "5 Days", notes: "" }] })}
                         className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
                         data-tone="brand"
                         data-selected="false"
@@ -3074,7 +3075,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                               return;
                             }
                             const name = (templateNameDraft || "").trim() || `Template (${meds.length} remedies)`;
-                            upsertRxTemplate({ id: crypto.randomUUID(), name, pinned: true, medicines: meds });
+                            upsertRxTemplate({ id: generateId(), name, pinned: true, medicines: meds });
                             setRxTemplatesVersion((v) => v + 1);
                             setTemplateNameDraft("");
                             haptic("success");
@@ -3130,7 +3131,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                                   haptic("success");
                                   patch({
                                     medicines: t.medicines.map((m: any) => ({
-                                      id: crypto.randomUUID(),
+                                      id: generateId(),
                                       name: m.name,
                                       potency: m.potency || remedyDefaults.potency,
                                       dosage: m.dosage || remedyDefaults.dosage,
@@ -3181,7 +3182,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                                     haptic("success");
                                     patch({
                                       medicines: t.medicines.map((m: any) => ({
-                                        id: crypto.randomUUID(),
+                                        id: generateId(),
                                         name: m.name,
                                         potency: m.potency || remedyDefaults.potency,
                                         dosage: m.dosage || remedyDefaults.dosage,

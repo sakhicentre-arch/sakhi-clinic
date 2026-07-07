@@ -1,3 +1,5 @@
+import { generateId } from "../utils/generateId";
+
 export type SyncEventType =
   | "patient:created"
   | "patient:updated"
@@ -21,9 +23,7 @@ export interface SyncMessage<T = Record<string, unknown>> {
 
 const STORAGE_KEY = "__sakhi_sync_message";
 const CHANNEL_NAME = "sakhi-sync";
-const clientId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-  ? crypto.randomUUID()
-  : `sakhi-${Date.now()}-${Math.random()}`;
+const clientId = generateId();
 
 const listeners = new Set<(message: SyncMessage) => void>();
 let channel: BroadcastChannel | null = null;

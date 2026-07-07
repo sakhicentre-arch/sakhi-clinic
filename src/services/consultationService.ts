@@ -8,6 +8,7 @@ import { learnFromConsultation } from "./learningEngine";
 import { syncPatientFollowUp } from "./patientService";
 import { broadcastSyncEvent } from "./syncService";
 import { getDeviceId } from "../utils/deviceId";
+import { generateId } from "../utils/generateId";
 import { enqueueOutbox } from "./outboxService";
 import { captureOperationError, logOperationAttempt, logOperationSuccess } from "./runtimeErrorCaptureService";
 
@@ -40,7 +41,7 @@ export async function saveConsultation(c: Consultation): Promise<boolean> {
       outcome: normalizeOutcome(c.outcome),
       medicines: (c.medicines || []).map((m) => ({
         ...m,
-        id: m.id || crypto.randomUUID(),
+        id: m.id || generateId(),
         name: (m.name || (m as any).remedy || "Unknown").trim(),
         createdAt: m.createdAt || timestamp,
         updatedAt: timestamp,

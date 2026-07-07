@@ -3,6 +3,7 @@ import { getAllPatients } from "./patientService";
 import type { Patient } from "./db";
 import { logOperationalEvent } from "./operationalEventLogService";
 import { captureOperationError } from "./runtimeErrorCaptureService";
+import { generateId } from "../utils/generateId";
 
 export type PatientImportMode = "skip-duplicates" | "merge-duplicates" | "import-all";
 
@@ -284,7 +285,7 @@ export async function importPatientsFromCsv(file: File, mode: PatientImportMode)
           }
         }
 
-        const id = crypto.randomUUID();
+        const id = generateId();
         await addPatient({
           id,
           name: incoming.name || "",
