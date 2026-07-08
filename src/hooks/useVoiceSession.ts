@@ -41,6 +41,7 @@ export function useVoiceSession() {
   const networkRetryCountRef = useRef(0);
   const restartScheduledRef = useRef(false);
   const lastCommittedRef = useRef<Record<string, string>>({});
+  const lastProcessedRef = useRef<Record<string, number>>({});
   const callbacksRef = useRef<Record<string, OnDeltaCallback>>({});
 
   useEffect(() => {
@@ -122,6 +123,7 @@ export function useVoiceSession() {
 
     activeFieldRef.current = fieldId;
     callbacksRef.current[fieldId] = onDelta;
+    lastProcessedRef.current[fieldId] = 0;
     if (!(fieldId in lastCommittedRef.current)) {
       lastCommittedRef.current[fieldId] = "";
     }
@@ -148,19 +150,30 @@ export function useVoiceSession() {
       const callback = callbacksRef.current[field];
       if (!callback) return;
 
-      const currentFull = getFullFinalTranscript(event.results);
-      if (!currentFull) return;
+      const resultIndex = event.resultIndex ?? 0;
+      const totalResults = event.results.length;
 
-      const previousFull = lastCommittedRef.current[field] || "";
+      const startIdx = Math.max(resultIndex, lastProcessedRef.current[field] ?? 0);
+      const newFinalTexts: string[] = [];
+      let maxIdx = lastProcessedRef.current[field] ?? 0;
 
-      if (currentFull !== previousFull) {
-        const delta = currentFull.slice(previousFull.length).trim();
-        if (delta) {
-          callback(delta);
-          lastCommittedRef.current[field] = currentFull;
-          setStatusText("Added to consultation");
-        }
+      for (let i = startIdx; i < totalResults; i++) {
+        const result = event.results[i];
+        if (!result.isFinal) continue;
+        const transcript = result[0]?.transcript?.trim();
+        if (!transcript) continue;
+        newFinalTexts.push(transcript);
+        maxIdx = i + 1;
       }
+
+      if (newFinalTexts.length === 0) return;
+
+      lastProcessedRef.current[field] = maxIdx;
+      const delta = newFinalTexts.join(" ");
+      callback(delta);
+      const currentFull = getFullFinalTranscript(event.results);
+      if (currentFull) lastCommittedRef.current[field] = currentFull;
+      setStatusText("Added to consultation");
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {

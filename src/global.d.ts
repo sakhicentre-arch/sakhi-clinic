@@ -17,6 +17,7 @@ type SpeechRecognitionErrorCode =
   | "service-not-allowed";
 
 interface SpeechRecognitionEvent extends Event {
+  resultIndex: number;
   results: SpeechRecognitionResultList;
 }
 
