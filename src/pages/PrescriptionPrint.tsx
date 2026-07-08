@@ -7,7 +7,8 @@
 
 import React, { useMemo, useEffect } from "react";
 import { useConsultationStore } from "../store/useConsultationStore";
-import { usePatientStore, Patient } from "../store/usePatientStore";
+import { usePatientStore } from "../store/usePatientStore";
+import type { Patient } from "../types/models";
 import { useAppointmentStore } from "../store/useAppointmentStore";
 import { generatePrescriptionPDF } from "../services/pdfService";
 import { shareOnWhatsApp } from "../services/whatsappService";

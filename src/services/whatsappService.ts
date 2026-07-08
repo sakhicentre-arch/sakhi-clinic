@@ -61,7 +61,7 @@ function showWhatsAppFallbackToast(opts: { onOpenWeb: () => void }) {
   root.style.gap = "12px";
   root.style.boxShadow = "0 12px 30px rgba(15, 23, 42, 0.28)";
   root.style.backdropFilter = "blur(12px)";
-  root.style.webkitBackdropFilter = "blur(12px)";
+
 
   const text = document.createElement("div");
   text.style.fontSize = "13px";

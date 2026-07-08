@@ -129,7 +129,7 @@ export default function CommandPalette({
           kind: "queue" as const,
           key: `queue:${e.queueId}`,
           title: e.patientName || `Patient ${e.patientId}`,
-          subtitle: e.complaint ? `Complaint: ${e.complaint}` : e.status,
+          subtitle: e.status,
           hint: e.status,
           entry: e,
           actionLabel: "Open",

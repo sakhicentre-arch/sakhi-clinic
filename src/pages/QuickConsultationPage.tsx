@@ -11,6 +11,7 @@ import React, {
   useReducer,
   useMemo,
   useState,
+  useRef,
 } from "react";
 import {
   Consultation,
@@ -28,6 +29,7 @@ import { getPatientById } from "../services/patientService";
 import PrescriptionEditor from "../components/PrescriptionEditor";
 import SmartInput from "../components/SmartInput";
 import DictationButton from "../components/DictationButton";
+import { VoiceSessionProvider } from "../hooks/VoiceSessionContext";
 import StickerPrint from "../components/StickerPrint";
 import { SUGGESTIONS } from "../data/clinicalSuggestions";
 import { getLearnedSuggestions } from "../services/learningEngine";
@@ -281,6 +283,14 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
   const patch = (p: Partial<FormData>) =>
     dispatch({ type: "PATCH_FORM", payload: p });
 
+  const formDataRef = useRef(formData);
+  formDataRef.current = formData;
+
+  const appendField = useCallback((fieldKey: string, delta: string) => {
+    const current = (formDataRef.current as any)[fieldKey] as string || "";
+    dispatch({ type: "PATCH_FORM", payload: { [fieldKey]: current ? current + " " + delta : delta } });
+  }, []);
+
   // ── Data loading (identical to ConsultationPage) ──
   const loadData = useCallback(async () => {
     dispatch({ type: "LOAD_START" });
@@ -435,6 +445,7 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
   if (loading) return <div style={loadingStyle}>Loading...</div>;
 
   return (
+    <VoiceSessionProvider>
     <div style={{ ...containerStyle, padding: isMobile ? "16px 20px" : "24px 32px" }}>
       <style>{css}</style>
 
@@ -516,12 +527,7 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
                 <option value="hi-IN">Hindi</option>
                 <option value="gu-IN">Gujarati</option>
               </select>
-              <DictationButton
-                lang={lang}
-                onText={(spoken) =>
-                  patch({ chiefComplaint: formData.chiefComplaint ? formData.chiefComplaint + " " + spoken : spoken })
-                }
-              />
+              <DictationButton fieldId="chiefComplaint" lang={lang} onDelta={(delta) => appendField("chiefComplaint", delta)} />
             </div>
             <SmartInput
               multiline
@@ -538,12 +544,7 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
           <div style={cardStyle}>
             <div style={cardTitleStyle}>
               Case Notes
-              <DictationButton
-                lang={lang}
-                onText={(spoken) =>
-                  patch({ caseText: formData.caseText ? formData.caseText + " " + spoken : spoken })
-                }
-              />
+              <DictationButton fieldId="caseText" lang={lang} onDelta={(delta) => appendField("caseText", delta)} />
             </div>
             <textarea
               style={{ ...INPUT, resize: "vertical" }}
@@ -648,7 +649,7 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
             <div style={{ padding: isMobile ? 0 : "0 4px" }}>
               <Field label="Mental & Emotional State">
                 <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-                  <DictationButton lang={lang} onText={(spoken) => patch({ mind: formData.mind ? formData.mind + " " + spoken : spoken })} />
+                  <DictationButton fieldId="mind" lang={lang} onDelta={(delta) => appendField("mind", delta)} />
                 </div>
                 <textarea style={INPUT} rows={2} value={formData.mind || ""} onChange={(e) => patch({ mind: e.target.value })} placeholder="Anxieties, fears, disposition..." />
               </Field>
@@ -828,6 +829,7 @@ const QuickConsultationPage: React.FC<QuickConsultationPageProps> = ({
         />
       )}
     </div>
+    </VoiceSessionProvider>
   );
 };
 

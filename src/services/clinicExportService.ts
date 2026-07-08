@@ -37,7 +37,7 @@ export type ClinicExportBundleV2 = {
 
 const nowIso = () => new Date().toISOString();
 
-function sortById<T extends { id: any }>(rows: T[]): T[] {
+function sortById<T extends { id?: any }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => String(a.id).localeCompare(String(b.id)));
 }
 
@@ -113,7 +113,7 @@ export async function exportClinicBundle(): Promise<ClinicExportBundleV2> {
       appointments: sortById(appointments.map((a) => ensureMeta(a as any, { exportedAt }))),
       drafts,
       learning,
-      caseMemory: sortById(caseMemory.map((m) => ensureMeta(m as any, { exportedAt })) as any),
+      caseMemory: sortById(caseMemory.map((m) => ensureMeta(m, { exportedAt }))),
       syncOutbox: sortOutbox(syncOutbox),
       operationalEvents: sortById((operationalEvents || []) as any),
     },

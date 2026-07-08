@@ -11,6 +11,7 @@ import React, {
   useMemo,
   useState,
   useRef,
+  useId,
 } from "react";
 import { Banknote, MessageCircle, Printer, Star } from "lucide-react";
 import {
@@ -30,6 +31,7 @@ import { getPatientById } from "../services/patientService";
 import PrescriptionEditor from "../components/PrescriptionEditor";
 import SmartInput from "../components/SmartInput";
 import DictationButton from "../components/DictationButton";
+import { VoiceSessionProvider } from "../hooks/VoiceSessionContext";
 import StickerPrint from "../components/StickerPrint";
 import LetterPad from "../components/LetterPad";
 import { SUGGESTIONS } from "../data/clinicalSuggestions";
@@ -490,15 +492,22 @@ interface HybridFieldProps {
   isMobile?: boolean;
 }
 
-const HybridField: React.FC<HybridFieldProps> = ({ value, onChange, lang, options, placeholder = "Type or speak...", rows = 2, isMobile = false }) => {
+const HybridField: React.FC<HybridFieldProps> = ({ fieldKey, value, onChange, lang, options, placeholder = "Type or speak...", rows = 2, isMobile = false }) => {
   const [open, setOpen] = useState(false);
   const quick = options.slice(0, 8);
+  const valueRef = useRef(value);
+  valueRef.current = value;
 
   const append = (next: string) => {
     const trimmed = (next || "").trim();
     if (!trimmed) return;
     onChange(value ? `${value}, ${trimmed}` : trimmed);
   };
+
+  const handleDelta = useCallback((delta: string) => {
+    const current = valueRef.current;
+    onChange(current ? current + " " + delta : delta);
+  }, [onChange]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
@@ -560,7 +569,7 @@ const HybridField: React.FC<HybridFieldProps> = ({ value, onChange, lang, option
             {options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
           </select>
         )}
-        <DictationButton lang={lang} onText={(spoken) => onChange(value ? value + " " + spoken : spoken)} />
+        <DictationButton fieldId={fieldKey} lang={lang} onDelta={handleDelta} />
       </div>
       <textarea
         className="sakhi-input sakhi-input-muted sakhi-focus-ring"
@@ -863,6 +872,14 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const lang = (formData as any).language || "en-IN";
 
   const patch = (p: Partial<FormData>) => dispatch({ type: "PATCH_FORM", payload: p });
+
+  const formDataRef = useRef(formData);
+  formDataRef.current = formData;
+
+  const appendField = useCallback((fieldKey: string, delta: string) => {
+    const current = (formDataRef.current as any)[fieldKey] as string || "";
+    dispatch({ type: "PATCH_FORM", payload: { [fieldKey]: current ? current + " " + delta : delta } });
+  }, []);
 
   // ── Data loading ──
   const loadData = useCallback(async () => {
@@ -1726,6 +1743,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     };
 
     return (
+      <VoiceSessionProvider>
       <div data-testid="consultation-root" data-ui-phase={uiPhase} className="min-h-screen bg-slate-50 text-slate-900">
         <style>{customCSS}</style>
         <div data-testid="consultation-debug-panel" aria-hidden="true" style={{ position: "absolute", left: -10000, top: 0 }}>
@@ -2078,7 +2096,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                         <option value="gu-IN">Gujarati</option>
                       </select>
                     )}
-                    <DictationButton lang={lang} onText={(spoken) => patch({ chiefComplaint: formData.chiefComplaint ? formData.chiefComplaint + " " + spoken : spoken })} />
+                    <DictationButton fieldId="chiefComplaint" lang={lang} onDelta={(delta) => appendField("chiefComplaint", delta)} />
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {Object.entries(TEMPLATE_META).map(([key, meta]) => (
@@ -3225,6 +3243,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
           />
         )}
       </div>
+      </VoiceSessionProvider>
     );
   }
 
@@ -3233,6 +3252,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
+    <VoiceSessionProvider>
     <div style={{ ...containerStyle, padding: isMobile ? "16px 20px" : "24px 40px" }}>
       <style>{customCSS}</style>
       <div data-testid="consultation-debug-panel" aria-hidden="true" style={{ position: "absolute", left: -10000, top: 0 }}>
@@ -3309,7 +3329,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     <option value="hi-IN">Hindi</option>
                     <option value="gu-IN">Gujarati</option>
                   </select>
-                  <DictationButton lang={lang} onText={(spoken) => patch({ chiefComplaint: formData.chiefComplaint ? formData.chiefComplaint + " " + spoken : spoken })} />
+                  <DictationButton fieldId="chiefComplaint" lang={lang} onDelta={(delta) => appendField("chiefComplaint", delta)} />
                 </div>
                 <SmartInput multiline rows={2} style={INPUT} value={formData.chiefComplaint} onChange={(val) => patch({ chiefComplaint: val })} suggestions={SUGGESTIONS.chiefComplaint} placeholder="Type or speak complaint..." />
               </Field>
@@ -3318,25 +3338,25 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               </Field>
               <Field label="Case Story" span>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
-                  <DictationButton lang={lang} onText={(spoken) => patch({ caseText: formData.caseText ? formData.caseText + " " + spoken : spoken })} />
+                  <DictationButton fieldId="caseText" lang={lang} onDelta={(delta) => appendField("caseText", delta)} />
                 </div>
                 <textarea style={INPUT} rows={3} value={formData.caseText} onChange={(e) => patch({ caseText: e.target.value })} placeholder="Full description of symptoms..." />
               </Field>
               <Field label="Family History" span>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
-                  <DictationButton lang={lang} onText={(spoken) => patch({ familyHistory: formData.familyHistory ? formData.familyHistory + " " + spoken : spoken })} />
+                  <DictationButton fieldId="familyHistory" lang={lang} onDelta={(delta) => appendField("familyHistory", delta)} />
                 </div>
                 <textarea style={INPUT} rows={2} value={formData.familyHistory || ""} onChange={(e) => patch({ familyHistory: e.target.value })} placeholder="Hereditary conditions, family ailments..." />
               </Field>
               <Field label="Past Medical History" span>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
-                  <DictationButton lang={lang} onText={(spoken) => patch({ pastHistory: formData.pastHistory ? formData.pastHistory + " " + spoken : spoken })} />
+                  <DictationButton fieldId="pastHistory" lang={lang} onDelta={(delta) => appendField("pastHistory", delta)} />
                 </div>
                 <textarea style={INPUT} rows={2} value={formData.pastHistory || ""} onChange={(e) => patch({ pastHistory: e.target.value })} placeholder="Previous illnesses, vaccinations, treatments..." />
               </Field>
               <Field label="Surgical History" span>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
-                  <DictationButton lang={lang} onText={(spoken) => patch({ surgicalHistory: formData.surgicalHistory ? formData.surgicalHistory + " " + spoken : spoken })} />
+                  <DictationButton fieldId="surgicalHistory" lang={lang} onDelta={(delta) => appendField("surgicalHistory", delta)} />
                 </div>
                 <textarea style={INPUT} rows={2} value={formData.surgicalHistory || ""} onChange={(e) => patch({ surgicalHistory: e.target.value })} placeholder="Surgeries, dates, complications..." />
               </Field>
@@ -3380,7 +3400,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               <Field label="Allergies">
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <input style={{ ...INPUT, flex: 1 }} value={formData.allergy || ""} onChange={(e) => patch({ allergy: e.target.value })} placeholder="Drug, food, environmental allergies..." />
-                  <DictationButton lang={lang} onText={(spoken) => patch({ allergy: formData.allergy ? formData.allergy + " " + spoken : spoken })} />
+                  <DictationButton fieldId="allergy" lang={lang} onDelta={(delta) => appendField("allergy", delta)} />
                 </div>
               </Field>
               <Field label="Miasm">
@@ -3507,6 +3527,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
         />
       )}
     </div>
+    </VoiceSessionProvider>
   );
 };
 

@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import React from "react";
 import DictationButton from "../../components/DictationButton";
+import { VoiceSessionProvider } from "../../hooks/VoiceSessionContext";
 
 class MockSpeechRecognition {
   public continuous = false;
@@ -8,8 +10,8 @@ class MockSpeechRecognition {
   public maxAlternatives = 1;
   public lang = "";
   public onstart: ((event: Event) => void) | null = null;
-  public onresult: ((event: Event) => void) | null = null;
-  public onerror: ((event: Event) => void) | null = null;
+  public onresult: ((event: any) => void) | null = null;
+  public onerror: ((event: any) => void) | null = null;
   public onend: ((event: Event) => void) | null = null;
 
   public start = vi.fn(() => {
@@ -23,197 +25,128 @@ class MockSpeechRecognition {
   public abort = vi.fn();
 }
 
+function renderWithProvider(ui: React.ReactElement) {
+  return render(<VoiceSessionProvider>{ui}</VoiceSessionProvider>);
+}
+
 describe("DictationButton", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.useFakeTimers();
-  });
-
-  it("uses continuous recognition and stays recording across session restarts", () => {
     const recognition = new MockSpeechRecognition();
     const RecognitionCtor = vi.fn(() => recognition);
-
     (window as any).SpeechRecognition = RecognitionCtor;
     (window as any).webkitSpeechRecognition = RecognitionCtor;
+  });
 
-    render(<DictationButton onText={() => undefined} />);
+  it("shows Start button when idle", () => {
+    renderWithProvider(
+      <DictationButton fieldId="test" onDelta={() => undefined} />
+    );
+
+    expect(screen.getByRole("button", { name: /start recording/i })).toBeInTheDocument();
+  });
+
+  it("starts recording and shows Stop button", () => {
+    renderWithProvider(
+      <DictationButton fieldId="test" onDelta={() => undefined} />
+    );
 
     fireEvent.click(screen.getByRole("button"));
 
-    expect(recognition.continuous).toBe(true);
-    expect(recognition.interimResults).toBe(true);
-    expect(recognition.start).toHaveBeenCalledTimes(1);
-
-    act(() => {
-      recognition.onend?.(new Event("end"));
-      vi.advanceTimersByTime(150);
-    });
-
-    expect(recognition.start).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /stop recording/i })).toBeInTheDocument();
   });
 
-  it("does not auto-restart after a no-speech error", () => {
-    const recognition = new MockSpeechRecognition();
-    const RecognitionCtor = vi.fn(() => recognition);
-
-    (window as any).SpeechRecognition = RecognitionCtor;
-    (window as any).webkitSpeechRecognition = RecognitionCtor;
-
-    render(<DictationButton onText={() => undefined} />);
+  it("stops recording when Stop is clicked", () => {
+    renderWithProvider(
+      <DictationButton fieldId="test" onDelta={() => undefined} />
+    );
 
     fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(screen.getByRole("button", { name: /stop recording/i }));
 
-    act(() => {
-      recognition.onerror?.({ error: "no-speech" } as Event);
-      vi.advanceTimersByTime(400);
-    });
-
-    expect(recognition.start).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/No speech detected/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /start recording/i })).toBeInTheDocument();
   });
 
-  it("retries network errors only once", () => {
-    const recognition = new MockSpeechRecognition();
-    const RecognitionCtor = vi.fn(() => recognition);
+  it("shows unsupported state when SpeechRecognition API is missing", () => {
+    delete (window as any).SpeechRecognition;
+    delete (window as any).webkitSpeechRecognition;
 
-    (window as any).SpeechRecognition = RecognitionCtor;
-    (window as any).webkitSpeechRecognition = RecognitionCtor;
+    renderWithProvider(
+      <DictationButton fieldId="test" onDelta={() => undefined} />
+    );
 
-    render(<DictationButton onText={() => undefined} />);
-
-    fireEvent.click(screen.getByRole("button"));
-
-    act(() => {
-      recognition.onerror?.({ error: "network" } as Event);
-    });
-
-    expect(recognition.start).toHaveBeenCalledTimes(1);
-
-    act(() => {
-      vi.advanceTimersByTime(400);
-      vi.advanceTimersByTime(4000);
-    });
-
-    expect(recognition.start).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Voice dictation unavailable")).toBeInTheDocument();
   });
 
-  it("cancels a pending restart when recording is stopped manually", () => {
+  it("calls onDelta with transcript text", () => {
     const recognition = new MockSpeechRecognition();
-    const RecognitionCtor = vi.fn(() => recognition);
+    (window as any).SpeechRecognition = vi.fn(() => recognition);
+    (window as any).webkitSpeechRecognition = vi.fn(() => recognition);
 
-    (window as any).SpeechRecognition = RecognitionCtor;
-    (window as any).webkitSpeechRecognition = RecognitionCtor;
+    const onDelta = vi.fn();
 
-    render(<DictationButton onText={() => undefined} />);
-
-    fireEvent.click(screen.getByRole("button"));
-
-    act(() => {
-      recognition.onerror?.({ error: "network" } as Event);
-    });
-
-    fireEvent.click(screen.getByRole("button"));
-
-    act(() => {
-      vi.advanceTimersByTime(1000);
-    });
-
-    expect(recognition.start).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole("button", { name: /stop recording/i })).toBeInTheDocument();
-  });
-
-  it("cleans up timers on unmount", () => {
-    const recognition = new MockSpeechRecognition();
-    const RecognitionCtor = vi.fn(() => recognition);
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-
-    (window as any).SpeechRecognition = RecognitionCtor;
-    (window as any).webkitSpeechRecognition = RecognitionCtor;
-
-    const { unmount } = render(<DictationButton onText={() => undefined} />);
-
-    fireEvent.click(screen.getByRole("button"));
-
-    act(() => {
-      recognition.onerror?.({ error: "network" } as Event);
-    });
-
-    unmount();
-
-    act(() => {
-      vi.runOnlyPendingTimers();
-    });
-
-    expect(consoleErrorSpy).not.toHaveBeenCalled();
-  });
-
-  it("shows a permission-denied message and does not auto-restart", () => {
-    const recognition = new MockSpeechRecognition();
-    const RecognitionCtor = vi.fn(() => recognition);
-
-    (window as any).SpeechRecognition = RecognitionCtor;
-    (window as any).webkitSpeechRecognition = RecognitionCtor;
-
-    render(<DictationButton onText={() => undefined} />);
-
-    fireEvent.click(screen.getByRole("button"));
-
-    act(() => {
-      recognition.onerror?.({ error: "not-allowed" } as Event);
-      vi.advanceTimersByTime(400);
-    });
-
-    expect(recognition.start).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/Microphone permission denied/i)).toBeInTheDocument();
-  });
-
-  it("emits a transcript callback only once for the same final text", () => {
-    const recognition = new MockSpeechRecognition();
-    const RecognitionCtor = vi.fn(() => recognition);
-    const onText = vi.fn();
-
-    (window as any).SpeechRecognition = RecognitionCtor;
-    (window as any).webkitSpeechRecognition = RecognitionCtor;
-
-    render(<DictationButton onText={onText} />);
+    renderWithProvider(
+      <DictationButton fieldId="test" lang="gu-IN" onDelta={onDelta} />
+    );
 
     fireEvent.click(screen.getByRole("button"));
 
     act(() => {
       recognition.onresult?.({
-        results: [{ isFinal: true, 0: { transcript: "fever" } }],
-      } as any);
-      recognition.onresult?.({
-        results: [{ isFinal: true, 0: { transcript: "fever" } }],
+        results: [
+          { isFinal: true, 0: { transcript: "શું તકલીફ છે" } },
+        ],
       } as any);
     });
 
-    expect(onText).toHaveBeenCalledTimes(1);
-    expect(onText).toHaveBeenCalledWith("fever");
+    expect(onDelta).toHaveBeenCalledWith("શું તકલીફ છે");
   });
 
-  it("cancels a pending restart when a new recording session starts", () => {
+  it("shows Switch button when another field is recording", () => {
+    const recognition = new MockSpeechRecognition();
+    (window as any).SpeechRecognition = vi.fn(() => recognition);
+    (window as any).webkitSpeechRecognition = vi.fn(() => recognition);
+
+    const onDelta = vi.fn();
+
+    renderWithProvider(
+      <div>
+        <DictationButton fieldId="field1" lang="en-IN" onDelta={onDelta} />
+        <DictationButton fieldId="field2" lang="en-IN" onDelta={onDelta} />
+      </div>
+    );
+
+    const buttons = screen.getAllByRole("button");
+    fireEvent.click(buttons[0]);
+
+    expect(screen.getByRole("button", { name: /switch recording/i })).toBeInTheDocument();
+  });
+
+  it("correctly counts multiple DictationButtons without duplicate instances", () => {
     const recognition = new MockSpeechRecognition();
     const RecognitionCtor = vi.fn(() => recognition);
-
     (window as any).SpeechRecognition = RecognitionCtor;
     (window as any).webkitSpeechRecognition = RecognitionCtor;
 
-    render(<DictationButton onText={() => undefined} />);
+    const onDelta = vi.fn();
 
-    fireEvent.click(screen.getByRole("button"));
+    renderWithProvider(
+      <div>
+        <DictationButton fieldId="a" lang="en-IN" onDelta={onDelta} />
+        <DictationButton fieldId="b" lang="en-IN" onDelta={onDelta} />
+        <DictationButton fieldId="c" lang="en-IN" onDelta={onDelta} />
+      </div>
+    );
 
-    act(() => {
-      recognition.onerror?.({ error: "network" } as Event);
-    });
+    const buttons = screen.getAllByRole("button");
+    fireEvent.click(buttons[0]);
 
-    fireEvent.click(screen.getByRole("button"));
+    expect(RecognitionCtor).toHaveBeenCalledTimes(1);
 
-    act(() => {
-      vi.advanceTimersByTime(500);
-    });
+    fireEvent.click(buttons[1]);
 
-    expect(recognition.start).toHaveBeenCalledTimes(2);
+    expect(recognition.abort).toHaveBeenCalled();
+    expect(RecognitionCtor).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,275 +1,41 @@
-/**
- * DictationButton.tsx
- * Sakhi Clinic — Continuous clinical dictation
- *
- * Uses the browser Web Speech API only — zero dependencies.
- * Keeps a single speech-recognition session alive while the doctor is speaking,
- * and only stops when the doctor explicitly presses Stop.
- */
-
-import React, { useCallback, useEffect, useRef, useState } from "react";
-
-const getSpeechRecognitionAPI = (): typeof SpeechRecognition | null => {
-  if (typeof window === "undefined") return null;
-  return window.SpeechRecognition ?? (window as any).webkitSpeechRecognition ?? null;
-};
-
-type RecordingState = "idle" | "recording" | "error" | "unsupported";
+import React, { useCallback } from "react";
+import { useVoiceSessionContext } from "../hooks/VoiceSessionContext";
 
 export interface DictationButtonProps {
-  onText: (text: string) => void;
+  fieldId: string;
+  onDelta: (text: string) => void;
   disabled?: boolean;
   lang?: string;
   label?: string;
+  compact?: boolean;
 }
 
-const formatDuration = (seconds: number) => {
-  const mins = Math.floor(seconds / 60).toString().padStart(2, "0");
-  const secs = (seconds % 60).toString().padStart(2, "0");
-  return `${mins}:${secs}`;
-};
-
 const DictationButton: React.FC<DictationButtonProps> = ({
-  onText,
+  fieldId,
+  onDelta,
   disabled = false,
   lang,
   label = "Start Recording",
+  compact = false,
 }) => {
-  const [recordingState, setRecordingState] = useState<RecordingState>(
-    getSpeechRecognitionAPI() === null ? "unsupported" : "idle"
-  );
-  const [errorMsg, setErrorMsg] = useState<string>("");
-  const [statusText, setStatusText] = useState<string>("Ready");
-  const [durationSeconds, setDurationSeconds] = useState<number>(0);
+  const { state, startRecording, stopRecording, isFieldActive } = useVoiceSessionContext();
 
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const manualStopRef = useRef(false);
-  const durationTimerRef = useRef<number | null>(null);
-  const restartTimerRef = useRef<number | null>(null);
-  const statusResetTimerRef = useRef<number | null>(null);
-  const activeSessionRef = useRef(0);
-  const networkRetryCountRef = useRef(0);
-  const restartScheduledRef = useRef(false);
-  const lastEmittedTranscriptRef = useRef("");
-  const isMountedRef = useRef(true);
-
-  const clearTimers = useCallback(() => {
-    if (durationTimerRef.current !== null) {
-      window.clearInterval(durationTimerRef.current);
-      durationTimerRef.current = null;
-    }
-    if (restartTimerRef.current !== null) {
-      window.clearTimeout(restartTimerRef.current);
-      restartTimerRef.current = null;
-    }
-    if (statusResetTimerRef.current !== null) {
-      window.clearTimeout(statusResetTimerRef.current);
-      statusResetTimerRef.current = null;
-    }
-  }, []);
-
-  const cancelPendingRestart = useCallback(() => {
-    if (restartTimerRef.current !== null) {
-      window.clearTimeout(restartTimerRef.current);
-      restartTimerRef.current = null;
-    }
-    restartScheduledRef.current = false;
-  }, []);
-
-  const stopDurationTimer = useCallback(() => {
-    if (durationTimerRef.current !== null) {
-      window.clearInterval(durationTimerRef.current);
-      durationTimerRef.current = null;
-    }
-  }, []);
-
-  const startDurationTimer = useCallback(() => {
-    stopDurationTimer();
-    setDurationSeconds(0);
-    durationTimerRef.current = window.setInterval(() => {
-      setDurationSeconds((value) => value + 1);
-    }, 1000);
-  }, [stopDurationTimer]);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-
-    return () => {
-      isMountedRef.current = false;
-      clearTimers();
-      cancelPendingRestart();
-      if (recognitionRef.current) {
-        recognitionRef.current.onresult = null;
-        recognitionRef.current.onerror = null;
-        recognitionRef.current.onend = null;
-        recognitionRef.current.abort();
-        recognitionRef.current = null;
-      }
-    };
-  }, [cancelPendingRestart, clearTimers]);
-
-  const startRecording = useCallback(() => {
-    const SpeechRecognitionAPI = getSpeechRecognitionAPI();
-    if (!SpeechRecognitionAPI) {
-      setRecordingState("unsupported");
-      setStatusText("Voice dictation unavailable");
-      return;
-    }
-
-    manualStopRef.current = false;
-    cancelPendingRestart();
-    clearTimers();
-    setErrorMsg("");
-    networkRetryCountRef.current = 0;
-    lastEmittedTranscriptRef.current = "";
-    setStatusText("Recording...");
-    setRecordingState("recording");
-    startDurationTimer();
-
-    const recognition = new SpeechRecognitionAPI();
-    const sessionId = activeSessionRef.current + 1;
-    activeSessionRef.current = sessionId;
-
-    recognition.lang = lang ?? document.documentElement.lang ?? "en-IN";
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
-
-    recognition.onstart = () => {
-      setRecordingState("recording");
-      setStatusText("Recording...");
-      setErrorMsg("");
-      startDurationTimer();
-    };
-
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const finalTranscript = Array.from(event.results || [])
-        .filter((result) => result.isFinal)
-        .map((result) => result[0]?.transcript?.trim() ?? "")
-        .filter(Boolean)
-        .join(" ")
-        .trim();
-
-      if (finalTranscript && finalTranscript !== lastEmittedTranscriptRef.current) {
-        lastEmittedTranscriptRef.current = finalTranscript;
-        onText(finalTranscript);
-        setStatusText("Added to consultation");
-        if (statusResetTimerRef.current !== null) {
-          window.clearTimeout(statusResetTimerRef.current);
-        }
-        statusResetTimerRef.current = window.setTimeout(() => {
-          statusResetTimerRef.current = null;
-          if (!isMountedRef.current) return;
-          setStatusText((current) => (current === "Added to consultation" ? "Recording..." : current));
-        }, 1200);
-      }
-    };
-
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      if (event.error === "aborted") {
-        setRecordingState("idle");
-        setStatusText("Stopped");
-        stopDurationTimer();
-        return;
-      }
-
-      let message = "Dictation interrupted.";
-      switch (event.error) {
-        case "not-allowed":
-        case "service-not-allowed":
-          message = "Microphone permission denied.";
-          break;
-        case "audio-capture":
-          message = "Microphone unavailable.";
-          break;
-        case "network":
-          message = "Recording interrupted.";
-          break;
-        case "no-speech":
-          message = "No speech detected. Continue speaking or stop recording.";
-          break;
-        default:
-          message = "Recording interrupted.";
-      }
-
-      setRecordingState("error");
-      setErrorMsg(message);
-      setStatusText(message);
-      stopDurationTimer();
-      recognitionRef.current = null;
-
-      if (event.error === "network" && networkRetryCountRef.current === 0 && !restartScheduledRef.current) {
-        networkRetryCountRef.current += 1;
-        restartScheduledRef.current = true;
-        restartTimerRef.current = window.setTimeout(() => {
-          restartTimerRef.current = null;
-          restartScheduledRef.current = false;
-          if (!manualStopRef.current && isMountedRef.current) {
-            startRecording();
-          }
-        }, 400);
-      }
-    };
-
-    recognition.onend = () => {
-      if (manualStopRef.current || !isMountedRef.current) {
-        setRecordingState("idle");
-        setStatusText("Stopped");
-        stopDurationTimer();
-        recognitionRef.current = null;
-        return;
-      }
-
-      if (activeSessionRef.current !== sessionId || restartScheduledRef.current) return;
-
-      recognitionRef.current = null;
-      restartScheduledRef.current = true;
-      restartTimerRef.current = window.setTimeout(() => {
-        restartTimerRef.current = null;
-        restartScheduledRef.current = false;
-        if (!manualStopRef.current && isMountedRef.current) {
-          startRecording();
-        }
-      }, 120);
-    };
-
-    recognitionRef.current = recognition;
-
-    try {
-      recognition.start();
-    } catch {
-      setRecordingState("error");
-      setErrorMsg("Recording interrupted.");
-      setStatusText("Recording interrupted.");
-      stopDurationTimer();
-      recognitionRef.current = null;
-    }
-  }, [cancelPendingRestart, clearTimers, lang, onText, startDurationTimer, stopDurationTimer]);
-
-  const stopRecording = useCallback(() => {
-    manualStopRef.current = true;
-    cancelPendingRestart();
-    clearTimers();
-    const recognition = recognitionRef.current;
-    if (recognition) {
-      recognition.stop();
-      recognitionRef.current = null;
-    }
-    setRecordingState("idle");
-    setStatusText("Stopped");
-    stopDurationTimer();
-  }, [cancelPendingRestart, clearTimers, stopDurationTimer]);
+  const isRecording = state.recording && state.activeField === fieldId;
+  const isOtherRecording = state.recording && state.activeField !== null && state.activeField !== fieldId;
+  const isError = !state.recording && state.errorMsg !== "" && state.activeField === null;
 
   const handleClick = useCallback(() => {
-    if (disabled) return;
-    if (recordingState === "recording") {
+    if (disabled || state.unsupported) return;
+    if (isRecording) {
       stopRecording();
+    } else if (isOtherRecording) {
+      startRecording(fieldId, lang || "en-IN", onDelta);
     } else {
-      startRecording();
+      startRecording(fieldId, lang || "en-IN", onDelta);
     }
-  }, [disabled, recordingState, startRecording, stopRecording]);
+  }, [disabled, state.unsupported, isRecording, isOtherRecording, stopRecording, startRecording, fieldId, lang, onDelta]);
 
-  if (recordingState === "unsupported") {
+  if (state.unsupported) {
     return (
       <div style={wrapperStyle}>
         <span style={unsupportedLabelStyle}>Voice dictation unavailable</span>
@@ -277,13 +43,16 @@ const DictationButton: React.FC<DictationButtonProps> = ({
     );
   }
 
-  const isRecording = recordingState === "recording";
-  const isError = recordingState === "error";
   const buttonTitle = isError
-    ? errorMsg || "Recording interrupted"
+    ? state.errorMsg || "Recording interrupted"
     : isRecording
     ? "Stop Recording"
+    : isOtherRecording
+    ? `Switch recording to this field`
     : label;
+
+  const showTimer = isRecording && !compact;
+  const showStatus = !compact;
 
   return (
     <div style={wrapperStyle}>
@@ -293,22 +62,41 @@ const DictationButton: React.FC<DictationButtonProps> = ({
         title={buttonTitle}
         aria-label={buttonTitle}
         aria-pressed={isRecording}
+        disabled={disabled || state.unsupported}
         style={{
           ...btnStyle,
           ...(isRecording ? btnRecordingStyle : {}),
           ...(isError ? btnErrorStyle : {}),
-          ...(disabled ? btnDisabledStyle : {}),
+          ...(disabled || state.unsupported ? btnDisabledStyle : {}),
+          ...(isOtherRecording ? btnOtherRecordingStyle : {}),
         }}
       >
-        {isRecording ? <span style={dotStyle} aria-hidden="true" /> : isError ? <span aria-hidden="true">⚠️</span> : <span aria-hidden="true">🎤</span>}
-        <span style={buttonLabelStyle}>{isRecording ? "Stop" : isError ? "Resume" : "Start Recording"}</span>
+        {isRecording ? (
+          <span style={dotStyle} aria-hidden="true" />
+        ) : isOtherRecording ? (
+          <span aria-hidden="true">🎤</span>
+        ) : isError ? (
+          <span aria-hidden="true">⚠️</span>
+        ) : (
+          <span aria-hidden="true">🎤</span>
+        )}
+        <span style={buttonLabelStyle}>
+          {isRecording ? "Stop" : isOtherRecording ? "Switch" : isError ? "Retry" : "Start"}
+        </span>
       </button>
 
-      <div style={metaStyle} aria-live="polite">
-        <span style={statusStyle(isRecording, isError)}>{isRecording ? "● Recording" : isError ? "⚠️ Interrupted" : "Ready"}</span>
-        <span style={mutedTextStyle}>{formatDuration(durationSeconds)}</span>
-        <span style={mutedTextStyle}>{statusText}</span>
-      </div>
+      {showTimer && (
+        <div style={metaStyle} aria-live="polite">
+          <span style={statusStyle(true, false)}>● Recording</span>
+          <span style={mutedTextStyle}>{state.durationFormatted}</span>
+        </div>
+      )}
+
+      {showStatus && !isRecording && state.statusText && state.statusText !== "Ready" && (
+        <div style={metaStyle}>
+          <span style={mutedTextStyle}>{state.statusText}</span>
+        </div>
+      )}
     </div>
   );
 };
@@ -342,6 +130,11 @@ const btnRecordingStyle: React.CSSProperties = {
   background: "#fee2e2",
   borderColor: "#fca5a5",
   boxShadow: "0 0 0 3px rgba(239,68,68,0.15)",
+};
+
+const btnOtherRecordingStyle: React.CSSProperties = {
+  background: "#fefce8",
+  borderColor: "#fde68a",
 };
 
 const btnErrorStyle: React.CSSProperties = {
@@ -397,11 +190,9 @@ const PULSE_CSS = `
   }
 `;
 
-const StyleInjector: React.FC = () => <style dangerouslySetInnerHTML={{ __html: PULSE_CSS }} />;
-
 const DictationButtonWithStyle: React.FC<DictationButtonProps> = (props) => (
   <>
-    <StyleInjector />
+    <style>{PULSE_CSS}</style>
     <DictationButton {...props} />
   </>
 );

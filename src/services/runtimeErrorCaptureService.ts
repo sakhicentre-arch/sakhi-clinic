@@ -1,13 +1,14 @@
 import { logOperationalEvent } from "./operationalEventLogService";
 
-type OperationName =
+export type OperationName =
   | "consultation.save"
   | "appointment.create"
   | "appointment.update"
   | "patient.create"
   | "patient.update"
   | "queue.action"
-  | "runtime.unhandled";
+  | "runtime.unhandled"
+  | "patients.csv_import";
 
 const nowIso = () => new Date().toISOString();
 
