@@ -107,6 +107,15 @@ export function useVoiceSession() {
     setErrorMsg("");
     networkRetryCountRef.current = 0;
     setStatusText("Recording...");
+    const timestamp = new Date().toISOString();
+    console.log(
+      `[VoiceSession START] fieldId="${fieldId}" lang="${lang}"`,
+      {
+        timestamp,
+        existingSessionId: sessionIdRef.current,
+      }
+    );
+
     setRecording(true);
     setActiveField(fieldId);
     setDuration(0);
@@ -119,6 +128,10 @@ export function useVoiceSession() {
     const recognition = new SpeechRecognitionAPI();
     const sessionId = sessionIdRef.current + 1;
     sessionIdRef.current = sessionId;
+    console.log(
+      `[VoiceSession NEW] sessionId=${sessionId} fieldId="${fieldId}" lastProcessedReset=0`,
+      { timestamp }
+    );
 
     const resolvedLang = lang ?? document.documentElement.lang ?? "en-IN";
     langRef.current = resolvedLang;
@@ -135,6 +148,19 @@ export function useVoiceSession() {
     };
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const timestamp = new Date().toISOString();
+
+      // CRITICAL FIX: Check if this event is from the current session
+      // On Android, old recognition's onresult can fire after new session starts
+      if (sessionIdRef.current !== sessionId) {
+        console.log(`[VoiceSession STALE] sessionId=${sessionId} vs current=${sessionIdRef.current} IGNORED`, {
+          timestamp,
+          resultIndex: event.resultIndex ?? 0,
+          resultsLength: event.results.length,
+        });
+        return;
+      }
+
       const field = activeFieldRef.current;
       if (!field) return;
       const callback = callbacksRef.current[field];
@@ -142,24 +168,53 @@ export function useVoiceSession() {
 
       const resultIndex = event.resultIndex ?? 0;
       const totalResults = event.results.length;
+      const lastProcessed = lastProcessedRef.current[field] ?? 0;
+      const startIdx = Math.max(resultIndex, lastProcessed);
 
-      const startIdx = Math.max(resultIndex, lastProcessedRef.current[field] ?? 0);
+      // DIAGNOSTIC: Log complete event for debugging
+      const diagnosticResults = Array.from(event.results).map((r, idx) => ({
+        idx,
+        isFinal: r.isFinal,
+        transcript: r[0]?.transcript ?? "",
+      }));
+
+      console.log(`[VoiceSession CURRENT] sessionId=${sessionId} field=${field}`, {
+        timestamp,
+        resultIndex,
+        totalResults,
+        lastProcessed,
+        startIdx,
+        results: diagnosticResults,
+        currentSessionId: sessionIdRef.current,
+      });
+
       const newFinalTexts: string[] = [];
-      let maxIdx = lastProcessedRef.current[field] ?? 0;
+      let maxIdx = lastProcessed;
 
       for (let i = startIdx; i < totalResults; i++) {
         const result = event.results[i];
         if (!result.isFinal) continue;
         const transcript = result[0]?.transcript?.trim();
         if (!transcript) continue;
+        console.log(
+          `[VoiceSession PROCESS] sessionId=${sessionId} field=${field} resultIndex=${i} transcript="${transcript}"`,
+          { timestamp, isFinal: result.isFinal }
+        );
         newFinalTexts.push(transcript);
         maxIdx = i + 1;
       }
 
-      if (newFinalTexts.length === 0) return;
+      if (newFinalTexts.length === 0) {
+        console.log(`[VoiceSession SKIP] sessionId=${sessionId} field=${field} no new finals`, { timestamp });
+        return;
+      }
 
       lastProcessedRef.current[field] = maxIdx;
       const delta = newFinalTexts.join(" ");
+      console.log(
+        `[VoiceSession EMIT] sessionId=${sessionId} field=${field} delta="${delta}" maxIdx=${maxIdx}`,
+        { timestamp }
+      );
       callback(delta);
       setStatusText("Added to consultation");
     };
@@ -229,7 +284,17 @@ export function useVoiceSession() {
     };
 
     recognition.onend = () => {
+      console.log("[VoiceSession] onend:", {
+        sessionId,
+        currentSessionId: sessionIdRef.current,
+        manualStop: manualStopRef.current,
+        isMounted: isMountedRef.current,
+        restartScheduled: restartScheduledRef.current,
+        timestamp: new Date().toISOString().split("T")[1],
+      });
+
       if (manualStopRef.current || !isMountedRef.current) {
+        console.log("[VoiceSession] onend skipped (manual stop or unmounted)");
         setRecording(false);
         setActiveField(null);
         activeFieldRef.current = null;
@@ -239,8 +304,12 @@ export function useVoiceSession() {
         return;
       }
 
-      if (sessionIdRef.current !== sessionId || restartScheduledRef.current) return;
+      if (sessionIdRef.current !== sessionId || restartScheduledRef.current) {
+        console.log("[VoiceSession] onend skipped (stale session or already scheduled)");
+        return;
+      }
 
+      console.log("[VoiceSession] Scheduling restart from onend");
       recognitionRef.current = null;
       restartScheduledRef.current = true;
       restartTimerRef.current = window.setTimeout(() => {
@@ -249,6 +318,7 @@ export function useVoiceSession() {
         if (!manualStopRef.current && isMountedRef.current && activeFieldRef.current) {
           const field = activeFieldRef.current;
           const cb = callbacksRef.current[field];
+          console.log("[VoiceSession] Executing onend restart:", { field, sessionId });
           if (cb) startRecording(field, langRef.current, cb);
         }
       }, 120);

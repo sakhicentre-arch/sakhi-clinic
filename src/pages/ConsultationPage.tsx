@@ -879,8 +879,23 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   formDataRef.current = formData;
 
   const appendField = useCallback((fieldKey: string, delta: string) => {
+    const timestamp = new Date().toISOString();
     const current = (formDataRef.current as any)[fieldKey] as string || "";
-    dispatch({ type: "PATCH_FORM", payload: { [fieldKey]: current ? current + " " + delta : delta } });
+    const newValue = current ? current + " " + delta : delta;
+
+    console.log(
+      `[AppendField] field="${fieldKey}" delta="${delta}"`,
+      {
+        timestamp,
+        before: current,
+        delta: delta,
+        after: newValue,
+        beforeLength: current.length,
+        afterLength: newValue.length,
+      }
+    );
+
+    dispatch({ type: "PATCH_FORM", payload: { [fieldKey]: newValue } });
   }, []);
 
   // ── Data loading ──
