@@ -13,6 +13,33 @@ const formatDuration = (seconds: number) => {
 
 const words = (s: string): string[] => s.trim().split(/\s+/).filter(Boolean);
 
+// Zero-width joiners/non-joiners appear inconsistently in Indic output and are
+// invisible, so they must not affect whether two words are considered equal.
+const ZERO_WIDTH = /[\u200B-\u200D\uFEFF]/g;
+// Latin punctuation plus the Devanagari/Gujarati danda and double danda. Chrome
+// finalises a result with punctuation that the interim form did not carry.
+const PUNCTUATION = /[.,!?;:।॥'"“”‘’()[\]{}—–-]/g;
+
+/**
+ * Comparison form of a word. Never emitted — only used to decide equality.
+ * Chrome capitalises and punctuates on finalisation ("i have" -> "I have."),
+ * and Indic text arrives in inconsistent Unicode composition, so raw string
+ * equality misses overlaps that are plainly the same word.
+ */
+const normalizeWord = (w: string): string =>
+  w.normalize("NFC").replace(ZERO_WIDTH, "").replace(PUNCTUATION, "").toLowerCase();
+
+// Overlap can only ever occur at the seam between what was just committed and
+// what is arriving, so comparing against the whole transcript is wasted work.
+// Bounding it keeps cost constant instead of growing with dictation length —
+// without this, a five-minute dictation degrades to O(n²) on every result event.
+const OVERLAP_WINDOW_WORDS = 120;
+
+export const tailWords = (s: string, limit = OVERLAP_WINDOW_WORDS): string => {
+  const w = words(s);
+  return w.length <= limit ? w.join(" ") : w.slice(-limit).join(" ");
+};
+
 /**
  * Android Chrome's speech engine does not deliver disjoint final results.
  * Consecutive finals overlap: after committing "મને", the next final arrives as
@@ -32,24 +59,31 @@ const words = (s: string): string[] => s.trim().split(/\s+/).filter(Boolean);
  *   ("મને તાવ",   "મને તાવ")   -> ""      (pure replay, emit nothing)
  */
 export const stripOverlap = (committed: string, incoming: string): string => {
-  const next = words(incoming);
-  if (next.length === 0) return "";
+  const nextRaw = words(incoming);
+  if (nextRaw.length === 0) return "";
 
-  const prev = words(committed);
-  if (prev.length === 0) return next.join(" ");
+  const prevRaw = words(committed);
+  if (prevRaw.length === 0) return nextRaw.join(" ");
 
-  const max = Math.min(prev.length, next.length);
+  const max = Math.min(prevRaw.length, nextRaw.length);
+  // Only the first `max` words of the incoming result can ever participate in a
+  // match, so normalising beyond that is wasted work on every result event.
+  const prev = prevRaw.slice(-max).map(normalizeWord);
+  const next = nextRaw.slice(0, max).map(normalizeWord);
+
   for (let k = max; k > 0; k--) {
     let matches = true;
     for (let i = 0; i < k; i++) {
-      if (prev[prev.length - k + i] !== next[i]) {
+      if (prev[max - k + i] !== next[i]) {
         matches = false;
         break;
       }
     }
-    if (matches) return next.slice(k).join(" ");
+    // Emit the RAW words, never the normalised ones — normalisation exists only
+    // to decide equality and would otherwise strip the doctor's punctuation.
+    if (matches) return nextRaw.slice(k).join(" ");
   }
-  return next.join(" ");
+  return nextRaw.join(" ");
 };
 
 export interface VoiceSessionState {
@@ -266,7 +300,8 @@ export function useVoiceSession() {
         if (!fresh) continue;
 
         newFinalTexts.push(fresh);
-        committed = committed ? `${committed} ${fresh}` : fresh;
+        // Bounded: only the seam can overlap, so older text is dead weight.
+        committed = tailWords(committed ? `${committed} ${fresh}` : fresh);
       }
 
       lastProcessedRef.current[field] = maxIdx;

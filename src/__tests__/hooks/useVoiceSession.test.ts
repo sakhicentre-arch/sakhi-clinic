@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useVoiceSession } from "../../hooks/useVoiceSession";
+import { useVoiceSession, stripOverlap, tailWords } from "../../hooks/useVoiceSession";
 
 class MockSpeechRecognition {
   public continuous = false;
@@ -740,5 +740,82 @@ describe("useVoiceSession", () => {
     });
 
     expect(delta.mock.calls.map((c) => c[0])).toEqual(["શરદી", "શરદી"]);
+  });
+});
+
+describe("stripOverlap", () => {
+  // ── 1 & 2: genuine repetition must survive ────────────────────────────
+  it("keeps a repeated word that arrives inside one final", () => {
+    expect(stripOverlap("", "બહુ બહુ")).toBe("બહુ બહુ");
+  });
+
+  it("keeps a repeated word across Android's accumulating finals", () => {
+    // ["બહુ"] then ["બહુ", "બહુ બહુ"]
+    expect(stripOverlap("બહુ", "બહુ બહુ")).toBe("બહુ");
+  });
+
+  it("keeps a repeated phrase across accumulating finals", () => {
+    expect(
+      stripOverlap("તાવ આવે છે", "તાવ આવે છે તાવ આવે છે")
+    ).toBe("તાવ આવે છે");
+  });
+
+  // ── 3: KNOWN LIMITATION, asserted so it can never change silently ─────
+  it("KNOWN LIMITATION: drops a genuine repeat split exactly on a segment seam", () => {
+    // Byte-identical to a real Android replay, so content alone cannot tell
+    // them apart. Bounded in practice: Android segments at pauses, and an
+    // intensifier like "બહુ બહુ" is spoken without one.
+    expect(stripOverlap("તાવ બહુ", "બહુ છે")).toBe("છે");
+  });
+
+  // ── 4 & 7: punctuation and capitalisation ─────────────────────────────
+  it("matches across Chrome's finalisation capitalisation", () => {
+    expect(stripOverlap("i have", "I have fever")).toBe("fever");
+  });
+
+  it("matches across Chrome's finalisation punctuation, emitting raw text", () => {
+    expect(stripOverlap("I have fever", "I have fever. It is high")).toBe("It is high");
+  });
+
+  it("does not strip punctuation from the text it emits", () => {
+    expect(stripOverlap("patient says", "patient says: fever, cough.")).toBe("fever, cough.");
+  });
+
+  // ── 5 & 6: Unicode normalisation, Indic punctuation ───────────────────
+  it("matches across NFC/NFD composition differences", () => {
+    expect(stripOverlap("café", "café open")).toBe("open");
+  });
+
+  it("ignores zero-width joiners when comparing", () => {
+    expect(stripOverlap("તાવ", "તા\u200Cવ આવે")).toBe("આવે");
+  });
+
+  it("matches across the Devanagari danda", () => {
+    expect(stripOverlap("मुझे बुखार", "बुखार। दर्द है")).toBe("दर्द है");
+  });
+
+  // ── 8: mixed language ─────────────────────────────────────────────────
+  it("handles mixed-script overlap", () => {
+    expect(stripOverlap("patient તાવ", "તાવ since morning")).toBe("since morning");
+  });
+
+  // ── 9: long dictation ─────────────────────────────────────────────────
+  it("bounds retained history so long dictation stays constant-cost", () => {
+    const long = Array.from({ length: 500 }, (_, i) => `w${i}`).join(" ");
+    expect(tailWords(long).split(" ")).toHaveLength(120);
+    expect(tailWords(long).endsWith("w499")).toBe(true);
+  });
+
+  it("still strips at the seam after a very long dictation", () => {
+    const long = Array.from({ length: 500 }, (_, i) => `w${i}`).join(" ");
+    expect(stripOverlap(tailWords(long), "w499 next")).toBe("next");
+  });
+
+  it("returns the whole result when nothing overlaps", () => {
+    expect(stripOverlap("alpha beta", "gamma delta")).toBe("gamma delta");
+  });
+
+  it("emits nothing for a pure replay", () => {
+    expect(stripOverlap("તાવ આવે", "તાવ આવે")).toBe("");
   });
 });
