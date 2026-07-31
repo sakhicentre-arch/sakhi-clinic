@@ -32,6 +32,7 @@ import PrescriptionEditor from "../components/PrescriptionEditor";
 import SmartInput from "../components/SmartInput";
 import DictationButton from "../components/DictationButton";
 import { useVoiceSessionContext } from "../hooks/VoiceSessionContext";
+import { joinDelta } from "../hooks/useVoiceSession";
 import StickerPrint from "../components/StickerPrint";
 import LetterPad from "../components/LetterPad";
 import { SUGGESTIONS } from "../data/clinicalSuggestions";
@@ -881,7 +882,10 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const appendField = useCallback((fieldKey: string, delta: string) => {
     const timestamp = new Date().toISOString();
     const current = (formDataRef.current as any)[fieldKey] as string || "";
-    const newValue = current ? current + " " + delta : delta;
+    // joinDelta, shared with useVoiceSession, so punctuation the engine carried
+    // ("।", ".") attaches to the previous word instead of floating after a
+    // space — and so the hook's overlap history matches this text exactly.
+    const newValue = joinDelta(current, delta);
 
     console.log(
       `[AppendField] field="${fieldKey}" delta="${delta}"`,

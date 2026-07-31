@@ -29,6 +29,39 @@ const PUNCTUATION = /[.,!?;:।॥'"“”‘’()[\]{}—–-]/g;
 const normalizeWord = (w: string): string =>
   w.normalize("NFC").replace(ZERO_WIDTH, "").replace(PUNCTUATION, "").toLowerCase();
 
+// Punctuation that attaches to the END of the word before it, so a delta
+// starting with one of these must not be preceded by a space.
+const LEADING_PUNCT = /^[.,!?;:।॥]/;
+const TRAILING_PUNCT = /[.,!?;:।॥]+$/;
+
+/**
+ * Joins an emitted delta onto existing text. The single source of truth for
+ * how deltas are concatenated: the hook uses it to keep its overlap history in
+ * step with what the textarea actually contains, and the page uses it to build
+ * the textarea. If these two ever disagreed, the next comparison would be made
+ * against text that was never written and the duplicate would return.
+ */
+export const joinDelta = (base: string, delta: string): string => {
+  if (!base) return delta;
+  if (!delta) return base;
+  return LEADING_PUNCT.test(delta) ? base + delta : `${base} ${delta}`;
+};
+
+/**
+ * Trailing punctuation present on the incoming word but not on the committed
+ * word it matched. Chrome adds sentence punctuation when it finalises, so the
+ * refinement "मुझे बुखार है" -> "मुझे बुखार है।" is pure overlap at the word
+ * level and would otherwise be dropped whole, losing the danda.
+ *
+ * The return value is drawn from the punctuation set only and can therefore
+ * never re-emit a word. That is what makes carrying it safe.
+ */
+const carriedPunct = (incomingWord: string, committedWord: string): string => {
+  if (TRAILING_PUNCT.test(committedWord)) return ""; // already punctuated
+  const m = incomingWord.match(TRAILING_PUNCT);
+  return m ? m[0] : "";
+};
+
 // Overlap can only ever occur at the seam between what was just committed and
 // what is arriving, so comparing against the whole transcript is wasted work.
 // Bounding it keeps cost constant instead of growing with dictation length —
@@ -81,7 +114,14 @@ export const stripOverlap = (committed: string, incoming: string): string => {
     }
     // Emit the RAW words, never the normalised ones — normalisation exists only
     // to decide equality and would otherwise strip the doctor's punctuation.
-    if (matches) return nextRaw.slice(k).join(" ");
+    if (matches) {
+      const rest = nextRaw.slice(k).join(" ");
+      // next[k-1] is the last word of the overlap, and by construction it
+      // matched the LAST committed word, so that is what to compare against.
+      const punct = carriedPunct(nextRaw[k - 1], prevRaw[prevRaw.length - 1]);
+      if (!punct) return rest;
+      return rest ? `${punct} ${rest}` : punct;
+    }
   }
   return nextRaw.join(" ");
 };
@@ -300,8 +340,11 @@ export function useVoiceSession() {
         if (!fresh) continue;
 
         newFinalTexts.push(fresh);
-        // Bounded: only the seam can overlap, so older text is dead weight.
-        committed = tailWords(committed ? `${committed} ${fresh}` : fresh);
+        // joinDelta, not plain concatenation: a carried "।" attaches to the
+        // previous word exactly as it will in the textarea. If history and
+        // textarea diverged, the next overlap check would compare against text
+        // that was never written and the duplicate would come back.
+        committed = tailWords(joinDelta(committed, fresh));
       }
 
       lastProcessedRef.current[field] = maxIdx;
@@ -312,7 +355,9 @@ export function useVoiceSession() {
       }
 
       committedRef.current[field] = committed;
-      const delta = newFinalTexts.join(" ");
+      // Same joining rule again: a later piece may itself begin with carried
+      // punctuation that must attach rather than sit after a space.
+      const delta = newFinalTexts.reduce((a, b) => joinDelta(a, b), "");
       console.log(
         `[VoiceSession EMIT] sessionId=${sessionId} field=${field} delta="${delta}" maxIdx=${maxIdx}`,
         { timestamp }

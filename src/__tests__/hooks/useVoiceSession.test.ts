@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useVoiceSession, stripOverlap, tailWords } from "../../hooks/useVoiceSession";
+import { useVoiceSession, stripOverlap, tailWords, joinDelta } from "../../hooks/useVoiceSession";
 
 class MockSpeechRecognition {
   public continuous = false;
@@ -774,11 +774,11 @@ describe("stripOverlap", () => {
   });
 
   it("matches across Chrome's finalisation punctuation, emitting raw text", () => {
-    expect(stripOverlap("I have fever", "I have fever. It is high")).toBe("It is high");
+    expect(stripOverlap("I have fever", "I have fever. It is high")).toBe(". It is high");
   });
 
   it("does not strip punctuation from the text it emits", () => {
-    expect(stripOverlap("patient says", "patient says: fever, cough.")).toBe("fever, cough.");
+    expect(stripOverlap("patient says", "patient says: fever, cough.")).toBe(": fever, cough.");
   });
 
   // ── 5 & 6: Unicode normalisation, Indic punctuation ───────────────────
@@ -791,7 +791,7 @@ describe("stripOverlap", () => {
   });
 
   it("matches across the Devanagari danda", () => {
-    expect(stripOverlap("मुझे बुखार", "बुखार। दर्द है")).toBe("दर्द है");
+    expect(stripOverlap("मुझे बुखार", "बुखार। दर्द है")).toBe("। दर्द है");
   });
 
   // ── 8: mixed language ─────────────────────────────────────────────────
@@ -817,5 +817,143 @@ describe("stripOverlap", () => {
 
   it("emits nothing for a pure replay", () => {
     expect(stripOverlap("તાવ આવે", "તાવ આવે")).toBe("");
+  });
+});
+
+describe("punctuation carrying", () => {
+  // Chrome adds sentence punctuation when it finalises, so the refinement
+  // "मुझे बुखार है" -> "मुझे बुखार है।" is pure overlap at the word level.
+  // Dropping it whole loses the danda from the medical record.
+  it("carries sentence-final punctuation that the committed text lacks", () => {
+    expect(stripOverlap("मुझे बुखार है", "मुझे बुखार है।")).toBe("।");
+  });
+
+  it("carries an English full stop", () => {
+    expect(stripOverlap("I have fever", "I have fever.")).toBe(".");
+  });
+
+  it("carries mid-sentence punctuation ahead of the new words", () => {
+    expect(stripOverlap("मुझे बुखार", "मुझे बुखार। दर्द है")).toBe("। दर्द है");
+  });
+
+  // THE INVARIANT. Carrying punctuation changes the committed text, so the
+  // next comparison is made against the changed form. If history and textarea
+  // ever diverged here, every later result would miss its overlap and the word
+  // duplication would return in full.
+  it("is idempotent: a repeated punctuated final emits nothing", () => {
+    const once = "मुझे बुखार है";
+    const punctuated = "मुझे बुखार है।";
+    const carried = stripOverlap(once, punctuated);
+    expect(carried).toBe("।");
+    const committed = joinDelta(once, carried);
+    expect(committed).toBe(punctuated);
+    expect(stripOverlap(committed, punctuated)).toBe("");
+  });
+
+  it("does not double punctuation already present", () => {
+    expect(stripOverlap("I have fever.", "I have fever.")).toBe("");
+  });
+
+  it("carries nothing when the committed word is already punctuated", () => {
+    expect(stripOverlap("I have fever,", "I have fever, and cough")).toBe("and cough");
+  });
+});
+
+describe("joinDelta", () => {
+  it("attaches punctuation without a leading space", () => {
+    expect(joinDelta("मुझे बुखार है", "।")).toBe("मुझे बुखार है।");
+  });
+
+  it("attaches a punctuation-led phrase without a leading space", () => {
+    expect(joinDelta("patient says", ", cough")).toBe("patient says, cough");
+  });
+
+  it("separates ordinary words with a single space", () => {
+    expect(joinDelta("I have", "fever")).toBe("I have fever");
+  });
+
+  it("returns the delta when there is no base", () => {
+    expect(joinDelta("", "fever")).toBe("fever");
+  });
+
+  it("returns the base when the delta is empty", () => {
+    expect(joinDelta("fever", "")).toBe("fever");
+  });
+});
+
+describe("punctuation carrying through the hook", () => {
+  // The direct stripOverlap/joinDelta tests cannot see the hook's own history
+  // accumulation. This drives real onresult events so that a divergence between
+  // committedRef and the textarea is caught.
+  const finalR = (t: string) => ({ isFinal: true, 0: { transcript: t } });
+
+  it("carries the danda once and never re-emits words afterwards", () => {
+    const { recognition } = setupSpeechRecognitionMock();
+    const delta = vi.fn();
+    const { result } = renderHook(() => useVoiceSession());
+
+    act(() => {
+      result.current.startRecording("field1", "hi-IN", delta);
+    });
+
+    const plain = "मुझे बुखार है";
+    const punctuated = plain + "।";
+
+    act(() => {
+      recognition.onresult?.({ resultIndex: 0, results: [finalR(plain)] } as any);
+    });
+    act(() => {
+      recognition.onresult?.({
+        resultIndex: 1,
+        results: [finalR(plain), finalR(punctuated)],
+      } as any);
+    });
+    // Android replays the punctuated form again — must add nothing at all.
+    act(() => {
+      recognition.onresult?.({
+        resultIndex: 2,
+        results: [finalR(plain), finalR(punctuated), finalR(punctuated)],
+      } as any);
+    });
+
+    // Reconstruct the textarea exactly as ConsultationPage.appendField does.
+    const textarea = delta.mock.calls
+      .map((c) => c[0] as string)
+      .reduce((acc, d) => joinDelta(acc, d), "");
+
+    expect(textarea).toBe(punctuated);
+  });
+
+  it("keeps stripping correctly on the result after a carry", () => {
+    const { recognition } = setupSpeechRecognitionMock();
+    const delta = vi.fn();
+    const { result } = renderHook(() => useVoiceSession());
+
+    act(() => {
+      result.current.startRecording("field1", "hi-IN", delta);
+    });
+
+    const a = "मुझे बुखार है";
+    const b = a + "।";
+    const c = b + " दर्द है";
+
+    act(() => {
+      recognition.onresult?.({ resultIndex: 0, results: [finalR(a)] } as any);
+    });
+    act(() => {
+      recognition.onresult?.({ resultIndex: 1, results: [finalR(a), finalR(b)] } as any);
+    });
+    act(() => {
+      recognition.onresult?.({
+        resultIndex: 2,
+        results: [finalR(a), finalR(b), finalR(c)],
+      } as any);
+    });
+
+    const textarea = delta.mock.calls
+      .map((x) => x[0] as string)
+      .reduce((acc, d) => joinDelta(acc, d), "");
+
+    expect(textarea).toBe(c);
   });
 });
