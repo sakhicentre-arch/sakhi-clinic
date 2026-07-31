@@ -32,7 +32,7 @@ import PrescriptionEditor from "../components/PrescriptionEditor";
 import SmartInput from "../components/SmartInput";
 import DictationButton from "../components/DictationButton";
 import { useVoiceSessionContext } from "../hooks/VoiceSessionContext";
-import { joinDelta } from "../hooks/useVoiceSession";
+import { joinDelta, getCurrentVoiceEvent } from "../hooks/useVoiceSession";
 import StickerPrint from "../components/StickerPrint";
 import LetterPad from "../components/LetterPad";
 import { SUGGESTIONS } from "../data/clinicalSuggestions";
@@ -887,15 +887,25 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     // space — and so the hook's overlap history matches this text exactly.
     const newValue = joinDelta(current, delta);
 
+    // Read synchronously from the onresult frame that invoked this callback, so
+    // the whole chain CURRENT -> PROCESS -> EMIT -> AppendField shares one id.
+    const { eventId, sessionId, fieldId } = getCurrentVoiceEvent();
+
     console.log(
-      `[AppendField] field="${fieldKey}" delta="${delta}"`,
+      `[AppendField] eventId=${eventId} sessionId=${sessionId} fieldId="${fieldKey}" delta="${delta}" ${current.length}->${newValue.length}`,
       {
         timestamp,
-        before: current,
-        delta: delta,
-        after: newValue,
+        eventId,
+        sessionId,
+        fieldId: fieldKey,
+        // Mismatch against the hook's fieldId means the delta was routed to a
+        // field other than the one that was recording.
+        recordingFieldId: fieldId,
+        delta,
         beforeLength: current.length,
         afterLength: newValue.length,
+        beforeTail: current.slice(-40),
+        afterTail: newValue.slice(-40),
       }
     );
 

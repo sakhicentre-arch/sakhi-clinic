@@ -126,6 +126,54 @@ export const stripOverlap = (committed: string, incoming: string): string => {
   return nextRaw.join(" ");
 };
 
+// ── RVC-2 diagnostics ──────────────────────────────────────────────────────
+// Observability only. None of this participates in transcript processing.
+
+const isVerbose = (): boolean => {
+  try {
+    return (
+      (globalThis as any).DEBUG_VOICE_VERBOSE === true ||
+      window.localStorage?.getItem("DEBUG_VOICE_VERBOSE") === "true"
+    );
+  } catch {
+    return false;
+  }
+};
+
+// djb2. Cheap and stable — enough to tell at a glance whether two committed
+// states are identical without printing either of them.
+const hashText = (s: string): string => {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+};
+
+/**
+ * Compact description of the overlap history. The full text is printed only
+ * under DEBUG_VOICE_VERBOSE, because it is re-logged on every result event and
+ * dominates log volume on a long dictation.
+ *
+ * committedHash is the useful field: if it differs from the hash of the text
+ * the textarea actually holds, history and record have diverged.
+ */
+const describeCommitted = (s: string) => {
+  const base = {
+    committedLength: s.length,
+    committedHash: hashText(s),
+    committedTail: s.slice(-40),
+  };
+  return isVerbose() ? { ...base, committed: s } : base;
+};
+
+/**
+ * The onresult event currently being processed. `callback(delta)` runs
+ * synchronously inside onresult, so ConsultationPage.appendField can read this
+ * to tag its own log with the same eventId without changing the callback
+ * signature or rippling through every DictationButton call site.
+ */
+let currentEvent = { eventId: 0, sessionId: 0, fieldId: "" };
+export const getCurrentVoiceEvent = () => currentEvent;
+
 export interface VoiceSessionState {
   recording: boolean;
   activeField: string | null;
@@ -163,6 +211,8 @@ export function useVoiceSession() {
   // restart boundary); cleared only on a user-initiated start.
   const committedRef = useRef<Record<string, string>>({});
   const autoRestartRef = useRef(false);
+  // Diagnostics only: groups every log emitted while one onresult is processed.
+  const eventIdRef = useRef(0);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -229,9 +279,12 @@ export function useVoiceSession() {
     setStatusText("Recording...");
     const timestamp = new Date().toISOString();
     console.log(
-      `[VoiceSession START] fieldId="${fieldId}" lang="${lang}"`,
+      `[VoiceSession START] fieldId="${fieldId}" lang="${lang}" lastEventId=${eventIdRef.current}`,
       {
         timestamp,
+        fieldId,
+        lang,
+        lastEventId: eventIdRef.current,
         existingSessionId: sessionIdRef.current,
       }
     );
@@ -258,8 +311,15 @@ export function useVoiceSession() {
     const sessionId = sessionIdRef.current + 1;
     sessionIdRef.current = sessionId;
     console.log(
-      `[VoiceSession NEW] sessionId=${sessionId} fieldId="${fieldId}" lastProcessedReset=0`,
-      { timestamp }
+      `[VoiceSession NEW] sessionId=${sessionId} fieldId="${fieldId}" lastEventId=${eventIdRef.current} lastProcessedReset=0 autoRestart=${isAutoRestart}`,
+      {
+        timestamp,
+        sessionId,
+        fieldId,
+        lastEventId: eventIdRef.current,
+        autoRestart: isAutoRestart,
+        ...describeCommitted(committedRef.current[fieldId] ?? ""),
+      }
     );
 
     const resolvedLang = lang ?? document.documentElement.lang ?? "en-IN";
@@ -278,15 +338,23 @@ export function useVoiceSession() {
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       const timestamp = new Date().toISOString();
+      const eventId = ++eventIdRef.current;
 
       // CRITICAL FIX: Check if this event is from the current session
       // On Android, old recognition's onresult can fire after new session starts
       if (sessionIdRef.current !== sessionId) {
-        console.log(`[VoiceSession STALE] sessionId=${sessionId} vs current=${sessionIdRef.current} IGNORED`, {
-          timestamp,
-          resultIndex: event.resultIndex ?? 0,
-          resultsLength: event.results.length,
-        });
+        console.log(
+          `[VoiceSession STALE] eventId=${eventId} sessionId=${sessionId} fieldId="${activeFieldRef.current ?? ""}" vs current=${sessionIdRef.current} IGNORED`,
+          {
+            timestamp,
+            eventId,
+            sessionId,
+            fieldId: activeFieldRef.current,
+            currentSessionId: sessionIdRef.current,
+            resultIndex: event.resultIndex ?? 0,
+            resultsLength: event.results.length,
+          }
+        );
         return;
       }
 
@@ -294,6 +362,10 @@ export function useVoiceSession() {
       if (!field) return;
       const callback = callbacksRef.current[field];
       if (!callback) return;
+
+      // Read synchronously inside onresult by appendField, so its log carries
+      // the same eventId as the logs above and below it.
+      currentEvent = { eventId, sessionId, fieldId: field };
 
       const resultIndex = event.resultIndex ?? 0;
       const totalResults = event.results.length;
@@ -307,15 +379,21 @@ export function useVoiceSession() {
         transcript: r[0]?.transcript ?? "",
       }));
 
-      console.log(`[VoiceSession CURRENT] sessionId=${sessionId} field=${field}`, {
-        timestamp,
-        resultIndex,
-        totalResults,
-        lastProcessed,
-        startIdx,
-        results: diagnosticResults,
-        currentSessionId: sessionIdRef.current,
-      });
+      console.log(
+        `[VoiceSession CURRENT] eventId=${eventId} sessionId=${sessionId} fieldId="${field}"`,
+        {
+          timestamp,
+          eventId,
+          sessionId,
+          fieldId: field,
+          resultIndex,
+          totalResults,
+          lastProcessed,
+          startIdx,
+          results: diagnosticResults,
+          ...describeCommitted(committedRef.current[field] ?? ""),
+        }
+      );
 
       const newFinalTexts: string[] = [];
       let maxIdx = lastProcessed;
@@ -334,8 +412,18 @@ export function useVoiceSession() {
         // Emit only the genuinely new tail.
         const fresh = stripOverlap(committed, transcript);
         console.log(
-          `[VoiceSession PROCESS] sessionId=${sessionId} field=${field} resultIndex=${i} transcript="${transcript}" fresh="${fresh}"`,
-          { timestamp, isFinal: result.isFinal, committedTail: committed.slice(-40) }
+          `[VoiceSession PROCESS] eventId=${eventId} sessionId=${sessionId} fieldId="${field}" resultIndex=${i} transcript="${transcript}" fresh="${fresh}"`,
+          {
+            timestamp,
+            eventId,
+            sessionId,
+            fieldId: field,
+            resultIndex: i,
+            isFinal: result.isFinal,
+            transcript,
+            fresh,
+            ...describeCommitted(committed),
+          }
         );
         if (!fresh) continue;
 
@@ -350,7 +438,10 @@ export function useVoiceSession() {
       lastProcessedRef.current[field] = maxIdx;
 
       if (newFinalTexts.length === 0) {
-        console.log(`[VoiceSession SKIP] sessionId=${sessionId} field=${field} no new text`, { timestamp });
+        console.log(
+          `[VoiceSession SKIP] eventId=${eventId} sessionId=${sessionId} fieldId="${field}" no new text`,
+          { timestamp, eventId, sessionId, fieldId: field, maxIdx, ...describeCommitted(committed) }
+        );
         return;
       }
 
@@ -359,8 +450,8 @@ export function useVoiceSession() {
       // punctuation that must attach rather than sit after a space.
       const delta = newFinalTexts.reduce((a, b) => joinDelta(a, b), "");
       console.log(
-        `[VoiceSession EMIT] sessionId=${sessionId} field=${field} delta="${delta}" maxIdx=${maxIdx}`,
-        { timestamp }
+        `[VoiceSession EMIT] eventId=${eventId} sessionId=${sessionId} fieldId="${field}" delta="${delta}" maxIdx=${maxIdx}`,
+        { timestamp, eventId, sessionId, fieldId: field, delta, maxIdx, ...describeCommitted(committed) }
       );
       callback(delta);
       setStatusText("Added to consultation");
@@ -432,17 +523,25 @@ export function useVoiceSession() {
     };
 
     recognition.onend = () => {
-      console.log("[VoiceSession] onend:", {
-        sessionId,
-        currentSessionId: sessionIdRef.current,
-        manualStop: manualStopRef.current,
-        isMounted: isMountedRef.current,
-        restartScheduled: restartScheduledRef.current,
-        timestamp: new Date().toISOString().split("T")[1],
-      });
+      const endFieldId = activeFieldRef.current;
+      console.log(
+        `[VoiceSession ONEND] sessionId=${sessionId} fieldId="${endFieldId ?? ""}" lastEventId=${eventIdRef.current}`,
+        {
+          timestamp: new Date().toISOString(),
+          sessionId,
+          fieldId: endFieldId,
+          lastEventId: eventIdRef.current,
+          currentSessionId: sessionIdRef.current,
+          manualStop: manualStopRef.current,
+          isMounted: isMountedRef.current,
+          restartScheduled: restartScheduledRef.current,
+        }
+      );
 
       if (manualStopRef.current || !isMountedRef.current) {
-        console.log("[VoiceSession] onend skipped (manual stop or unmounted)");
+        console.log(
+          `[VoiceSession ONEND-STOP] sessionId=${sessionId} fieldId="${endFieldId ?? ""}" lastEventId=${eventIdRef.current} manual stop or unmounted`
+        );
         setRecording(false);
         setActiveField(null);
         activeFieldRef.current = null;
@@ -453,11 +552,15 @@ export function useVoiceSession() {
       }
 
       if (sessionIdRef.current !== sessionId || restartScheduledRef.current) {
-        console.log("[VoiceSession] onend skipped (stale session or already scheduled)");
+        console.log(
+          `[VoiceSession ONEND-SKIP] sessionId=${sessionId} fieldId="${endFieldId ?? ""}" lastEventId=${eventIdRef.current} stale session or restart already scheduled`
+        );
         return;
       }
 
-      console.log("[VoiceSession] Scheduling restart from onend");
+      console.log(
+        `[VoiceSession RESTART-SCHEDULED] sessionId=${sessionId} fieldId="${endFieldId ?? ""}" lastEventId=${eventIdRef.current} in 120ms`
+      );
       recognitionRef.current = null;
       restartScheduledRef.current = true;
       restartTimerRef.current = window.setTimeout(() => {
@@ -466,7 +569,10 @@ export function useVoiceSession() {
         if (!manualStopRef.current && isMountedRef.current && activeFieldRef.current) {
           const field = activeFieldRef.current;
           const cb = callbacksRef.current[field];
-          console.log("[VoiceSession] Executing onend restart:", { field, sessionId });
+          console.log(
+            `[VoiceSession RESTART-FIRE] sessionId=${sessionId} fieldId="${field}" lastEventId=${eventIdRef.current}`,
+            { fieldId: field, sessionId, lastEventId: eventIdRef.current, ...describeCommitted(committedRef.current[field] ?? "") }
+          );
           if (cb) {
             autoRestartRef.current = true; // continuation, keep overlap history
             startRecording(field, langRef.current, cb);
