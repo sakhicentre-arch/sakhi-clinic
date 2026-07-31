@@ -31,7 +31,7 @@ import { getPatientById } from "../services/patientService";
 import PrescriptionEditor from "../components/PrescriptionEditor";
 import SmartInput from "../components/SmartInput";
 import DictationButton from "../components/DictationButton";
-import { VoiceSessionProvider } from "../hooks/VoiceSessionContext";
+import { useVoiceSessionContext } from "../hooks/VoiceSessionContext";
 import StickerPrint from "../components/StickerPrint";
 import LetterPad from "../components/LetterPad";
 import { SUGGESTIONS } from "../data/clinicalSuggestions";
@@ -755,6 +755,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const setDraftStatus = useUIStore((s) => s.setDraftStatus);
   const queue = useQueueStore((s) => s.queue);
   const setQueueStatus = useQueueStore((s) => s.setStatus);
+  const voiceSession = useVoiceSessionContext();
 
   useEffect(() => {
     const mqMobile = window.matchMedia('(max-width: 768px)');
@@ -852,6 +853,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
     if (opts?.next && nextEntry) {
       haptic("success");
+      voiceSession.cancelRecording();
       setActiveConsultation(nextEntry.patientId, nextEntry.appointmentId);
       window.scrollTo({ top: 0, behavior: "instant" as any });
       setMobileStage("complaint");
@@ -1743,7 +1745,6 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     };
 
     return (
-      <VoiceSessionProvider>
       <div data-testid="consultation-root" data-ui-phase={uiPhase} className="min-h-screen bg-slate-50 text-slate-900">
         <style>{customCSS}</style>
         <div data-testid="consultation-debug-panel" aria-hidden="true" style={{ position: "absolute", left: -10000, top: 0 }}>
@@ -3243,7 +3244,6 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
           />
         )}
       </div>
-      </VoiceSessionProvider>
     );
   }
 
@@ -3252,7 +3252,6 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <VoiceSessionProvider>
     <div style={{ ...containerStyle, padding: isMobile ? "16px 20px" : "24px 40px" }}>
       <style>{customCSS}</style>
       <div data-testid="consultation-debug-panel" aria-hidden="true" style={{ position: "absolute", left: -10000, top: 0 }}>
@@ -3527,7 +3526,6 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
         />
       )}
     </div>
-    </VoiceSessionProvider>
   );
 };
 

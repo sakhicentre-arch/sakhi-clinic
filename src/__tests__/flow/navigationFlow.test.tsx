@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import App from "../../App";
 import ConsultationPage from "../../pages/ConsultationPage";
+import { VoiceSessionProvider } from "../../hooks/VoiceSessionContext";
 import { usePatientStore } from "../../store/usePatientStore";
 import { useConsultationStore } from "../../store/useConsultationStore";
 import { useAppointmentStore } from "../../store/useAppointmentStore";
@@ -123,7 +124,7 @@ describe("Navigation flow into Consultation", () => {
   it("should render Full Mode when this is the patient's first visit", async () => {
     seedStores([]);
 
-    render(<ConsultationPage patientId={patient.id} />);
+    render(<VoiceSessionProvider><ConsultationPage patientId={patient.id} /></VoiceSessionProvider>);
 
     expect(await screen.findByText("Consultation")).toBeInTheDocument();
     const debugPanel = screen.getByTestId("consultation-debug-panel");
@@ -134,7 +135,7 @@ describe("Navigation flow into Consultation", () => {
   it("should render Quick Mode when the patient has follow-up history", async () => {
     seedStores([previousConsultation]);
 
-    render(<ConsultationPage patientId={patient.id} appointmentId="APT-001" />);
+    render(<VoiceSessionProvider><ConsultationPage patientId={patient.id} appointmentId="APT-001" /></VoiceSessionProvider>);
 
     expect(await screen.findByText("Consultation")).toBeInTheDocument();
     const debugPanel = screen.getByTestId("consultation-debug-panel");

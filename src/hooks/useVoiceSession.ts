@@ -33,6 +33,7 @@ export function useVoiceSession() {
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const activeFieldRef = useRef<string | null>(null);
+  const langRef = useRef<string>("en-IN");
   const manualStopRef = useRef(false);
   const sessionIdRef = useRef(0);
   const isMountedRef = useRef(true);
@@ -40,7 +41,6 @@ export function useVoiceSession() {
   const restartTimerRef = useRef<number | null>(null);
   const networkRetryCountRef = useRef(0);
   const restartScheduledRef = useRef(false);
-  const lastCommittedRef = useRef<Record<string, string>>({});
   const lastProcessedRef = useRef<Record<string, number>>({});
   const callbacksRef = useRef<Record<string, OnDeltaCallback>>({});
 
@@ -83,15 +83,6 @@ export function useVoiceSession() {
     restartScheduledRef.current = false;
   }, []);
 
-  const getFullFinalTranscript = (results: SpeechRecognitionResultList): string => {
-    return Array.from(results)
-      .filter((r) => r.isFinal)
-      .map((r) => r[0]?.transcript?.trim() ?? "")
-      .filter(Boolean)
-      .join(" ")
-      .trim();
-  };
-
   const startRecording = useCallback((fieldId: string, lang: string, onDelta: OnDeltaCallback) => {
     const SpeechRecognitionAPI = getSpeechRecognitionAPI();
     if (!SpeechRecognitionAPI) {
@@ -124,15 +115,14 @@ export function useVoiceSession() {
     activeFieldRef.current = fieldId;
     callbacksRef.current[fieldId] = onDelta;
     lastProcessedRef.current[fieldId] = 0;
-    if (!(fieldId in lastCommittedRef.current)) {
-      lastCommittedRef.current[fieldId] = "";
-    }
 
     const recognition = new SpeechRecognitionAPI();
     const sessionId = sessionIdRef.current + 1;
     sessionIdRef.current = sessionId;
 
-    recognition.lang = lang ?? document.documentElement.lang ?? "en-IN";
+    const resolvedLang = lang ?? document.documentElement.lang ?? "en-IN";
+    langRef.current = resolvedLang;
+    recognition.lang = resolvedLang;
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
@@ -171,8 +161,6 @@ export function useVoiceSession() {
       lastProcessedRef.current[field] = maxIdx;
       const delta = newFinalTexts.join(" ");
       callback(delta);
-      const currentFull = getFullFinalTranscript(event.results);
-      if (currentFull) lastCommittedRef.current[field] = currentFull;
       setStatusText("Added to consultation");
     };
 
@@ -208,7 +196,15 @@ export function useVoiceSession() {
           message = "Recording interrupted.";
       }
 
-      if (event.error !== "network" || networkRetryCountRef.current > 0) {
+      // "no-speech" and a first "network" error recover on their own: the
+      // "end" event that always follows "error" will trigger the existing
+      // onend auto-restart, but only if activeFieldRef is still set. Every
+      // other error is fatal (permission denied, no mic, etc.) and must
+      // clear the field so no restart is attempted.
+      const willAutoRecover =
+        event.error === "no-speech" ||
+        (event.error === "network" && networkRetryCountRef.current === 0);
+      if (!willAutoRecover) {
         activeFieldRef.current = null;
       }
 
@@ -226,8 +222,7 @@ export function useVoiceSession() {
           restartTimerRef.current = null;
           restartScheduledRef.current = false;
           if (!manualStopRef.current && isMountedRef.current && savedField && savedCallback) {
-            const l = document.documentElement.lang || "en-IN";
-            startRecording(savedField, l, savedCallback);
+            startRecording(savedField, langRef.current, savedCallback);
           }
         }, 400);
       }
@@ -254,8 +249,7 @@ export function useVoiceSession() {
         if (!manualStopRef.current && isMountedRef.current && activeFieldRef.current) {
           const field = activeFieldRef.current;
           const cb = callbacksRef.current[field];
-          const l = document.documentElement.lang || "en-IN";
-          if (cb) startRecording(field, l, cb);
+          if (cb) startRecording(field, langRef.current, cb);
         }
       }, 120);
     };
@@ -281,10 +275,15 @@ export function useVoiceSession() {
     stopDurationTimer();
     const recognition = recognitionRef.current;
     if (recognition) {
+      // Do not null recognitionRef/activeFieldRef here: recognition.stop() is
+      // async and the engine may still deliver one trailing final onresult
+      // for audio already captured. Nulling the field ref now would cause
+      // that trailing result to be dropped (or, if a new field starts
+      // recording before it arrives, misrouted into the new field). The
+      // onend handler's manual-stop branch performs the ref cleanup once the
+      // engine actually finishes.
       recognition.stop();
-      recognitionRef.current = null;
     }
-    activeFieldRef.current = null;
     setRecording(false);
     setActiveField(null);
     setStatusText("Stopped");

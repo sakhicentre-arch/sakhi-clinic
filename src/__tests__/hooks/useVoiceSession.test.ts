@@ -16,9 +16,10 @@ class MockSpeechRecognition {
     this.onstart?.(new Event("start"));
   });
 
-  public stop = vi.fn(() => {
-    this.onend?.(new Event("end"));
-  });
+  // Real engines call stop() asynchronously: onend (and any final trailing
+  // onresult) fires later, not synchronously within stop(). Tests that need
+  // onend must fire it explicitly via recognition.onend?.(...).
+  public stop = vi.fn();
 
   public abort = vi.fn();
 }
@@ -187,6 +188,85 @@ describe("useVoiceSession", () => {
     expect(result.current.state.activeField).toBe(null);
   });
 
+  it("delivers a trailing final result received after stop() to the field that was recording", () => {
+    // Regression test: recognition.stop() is asynchronous in real browsers —
+    // the engine can still deliver one more final onresult for audio already
+    // captured before onend fires. That trailing result must reach the field
+    // that was recording, not be dropped.
+    const { recognition } = setupSpeechRecognitionMock();
+    const delta = vi.fn();
+
+    const { result } = renderHook(() => useVoiceSession());
+
+    act(() => {
+      result.current.startRecording("field1", "en-IN", delta);
+    });
+
+    act(() => {
+      result.current.stopRecording();
+    });
+
+    expect(result.current.state.recording).toBe(false);
+
+    act(() => {
+      recognition.onresult?.({
+        results: [{ isFinal: true, 0: { transcript: "trailing words" } }],
+      } as any);
+    });
+
+    expect(delta).toHaveBeenCalledWith("trailing words");
+
+    act(() => {
+      recognition.onend?.(new Event("end"));
+    });
+
+    expect(result.current.isFieldActive("field1")).toBe(false);
+  });
+
+  it("does not misroute a stopped field's trailing result into a newly started field", () => {
+    // Regression test: if the doctor stops field1 and immediately starts
+    // field2 before field1's recognition instance has fully ended, field1's
+    // late-arriving onresult must not be attributed to field2.
+    const instances: MockSpeechRecognition[] = [];
+    const RecognitionCtor = vi.fn(() => {
+      const instance = new MockSpeechRecognition();
+      instances.push(instance);
+      return instance;
+    });
+    (window as any).SpeechRecognition = RecognitionCtor;
+    (window as any).webkitSpeechRecognition = RecognitionCtor;
+
+    const delta1 = vi.fn();
+    const delta2 = vi.fn();
+
+    const { result } = renderHook(() => useVoiceSession());
+
+    act(() => {
+      result.current.startRecording("field1", "en-IN", delta1);
+    });
+    const recognitionField1 = instances[0];
+
+    act(() => {
+      result.current.stopRecording();
+    });
+
+    act(() => {
+      result.current.startRecording("field2", "en-IN", delta2);
+    });
+
+    expect(instances.length).toBe(2);
+    expect(recognitionField1.onresult).toBe(null);
+
+    act(() => {
+      recognitionField1.onresult?.({
+        results: [{ isFinal: true, 0: { transcript: "late field1 words" } }],
+      } as any);
+    });
+
+    expect(delta1).not.toHaveBeenCalled();
+    expect(delta2).not.toHaveBeenCalled();
+  });
+
   it("handles permission-denied error without auto-restart", () => {
     const { recognition } = setupSpeechRecognitionMock();
     const delta = vi.fn();
@@ -206,7 +286,7 @@ describe("useVoiceSession", () => {
     expect(result.current.state.errorMsg).toContain("Microphone permission denied");
   });
 
-  it("handles no-speech error without auto-restart", () => {
+  it("shows a stopped state immediately when no-speech fires, before the engine's end event", () => {
     const { recognition } = setupSpeechRecognitionMock();
     const delta = vi.fn();
 
@@ -221,6 +301,36 @@ describe("useVoiceSession", () => {
     });
 
     expect(result.current.state.recording).toBe(false);
+  });
+
+  it("auto-restarts after no-speech once the engine's end event follows (Android silence timeout)", () => {
+    // Per the Web Speech spec, "error" is always followed by "end". Android
+    // Chrome fires "no-speech" aggressively during ordinary dictation pauses;
+    // dictation must resume on its own via the existing onend restart path
+    // instead of silently staying stopped.
+    const { recognition } = setupSpeechRecognitionMock();
+    const delta = vi.fn();
+
+    const { result } = renderHook(() => useVoiceSession());
+
+    act(() => {
+      result.current.startRecording("field1", "en-IN", delta);
+    });
+
+    act(() => {
+      recognition.onerror?.({ error: "no-speech" } as any);
+    });
+
+    act(() => {
+      recognition.onend?.(new Event("end"));
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+
+    expect(result.current.state.recording).toBe(true);
+    expect(result.current.state.activeField).toBe("field1");
   });
 
   it("retries network error once", () => {
@@ -398,5 +508,75 @@ describe("useVoiceSession", () => {
     });
 
     expect(delta).toHaveBeenCalledWith("b");
+  });
+
+  it("cancelRecording immediately aborts and clears all refs", () => {
+    // Regression test for BUG-01: ensures that Save & Next flow cannot leak
+    // recognition deltas into a newly-switched patient's record.
+    const { recognition } = setupSpeechRecognitionMock();
+    const delta = vi.fn();
+
+    const { result } = renderHook(() => useVoiceSession());
+
+    act(() => {
+      result.current.startRecording("field1", "en-IN", delta);
+    });
+
+    expect(result.current.state.recording).toBe(true);
+    expect(result.current.state.activeField).toBe("field1");
+
+    act(() => {
+      result.current.cancelRecording();
+    });
+
+    expect(recognition.abort).toHaveBeenCalled();
+    expect(result.current.state.recording).toBe(false);
+    expect(result.current.state.activeField).toBe(null);
+
+    act(() => {
+      recognition.onresult?.({
+        results: [{ isFinal: true, 0: { transcript: "should not leak" } }],
+      } as any);
+    });
+
+    expect(delta).not.toHaveBeenCalled();
+  });
+
+  it("selected language persists after auto-restart (BUG-02 regression)", () => {
+    // Regression test for BUG-02: selected language must be preserved across
+    // any automatic restart (network error, no-speech, natural cycling).
+    const instances: MockSpeechRecognition[] = [];
+    const RecognitionCtor = vi.fn(() => {
+      const instance = new MockSpeechRecognition();
+      instances.push(instance);
+      return instance;
+    });
+    (window as any).SpeechRecognition = RecognitionCtor;
+    (window as any).webkitSpeechRecognition = RecognitionCtor;
+
+    const delta = vi.fn();
+    const { result } = renderHook(() => useVoiceSession());
+
+    act(() => {
+      result.current.startRecording("field1", "gu-IN", delta);
+    });
+
+    expect(instances[0].lang).toBe("gu-IN");
+
+    // Simulate onend, which triggers auto-restart
+    act(() => {
+      instances[0].onend?.(new Event("end"));
+    });
+
+    // Advance timers past the 120ms restart delay
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+
+    // Confirm a new instance was created via restart
+    expect(instances.length).toBeGreaterThan(1);
+
+    // The new instance must have the same language as the first
+    expect(instances[instances.length - 1].lang).toBe("gu-IN");
   });
 });

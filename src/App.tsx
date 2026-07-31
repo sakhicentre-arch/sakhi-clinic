@@ -12,6 +12,7 @@ import AppShell from "./components/layout/AppShell";
 import useSafeViewport from "./hooks/useSafeViewport";
 import { useUIStore, ActivePage } from "./store/uiStore";
 import TrashPage from "./pages/TrashPage";
+import { VoiceSessionProvider } from "./hooks/VoiceSessionContext";
 
 export default function App() {
   useSafeViewport();
@@ -79,11 +80,13 @@ export default function App() {
 
       {page === "consultation" && (
         activePatientId ? (
-          <ConsultationPage
-            patientId={activePatientId}
-            appointmentId={activeAppointmentId ?? undefined}
-            onFinish={() => setPage("today")}
-          />
+          <VoiceSessionProvider>
+            <ConsultationPage
+              patientId={activePatientId}
+              appointmentId={activeAppointmentId ?? undefined}
+              onFinish={() => setPage("today")}
+            />
+          </VoiceSessionProvider>
         ) : (
           <div style={{ padding: 40, color: "#64748b", fontWeight: 700 }}>
             Select a patient before opening consultation.
