@@ -11,6 +11,47 @@ const formatDuration = (seconds: number) => {
   return `${mins}:${secs}`;
 };
 
+const words = (s: string): string[] => s.trim().split(/\s+/).filter(Boolean);
+
+/**
+ * Android Chrome's speech engine does not deliver disjoint final results.
+ * Consecutive finals overlap: after committing "મને", the next final arrives as
+ * "મને તાવ" at a NEW result index. Index-based de-duplication cannot see this,
+ * because each index really is emitted only once — the duplication lives in the
+ * *content*, not the index.
+ *
+ * This returns the portion of `incoming` that is genuinely new, by finding the
+ * longest suffix of what has already been committed that is also a prefix of
+ * `incoming`, and dropping it. Comparison is word-wise, never character-wise,
+ * so Indic grapheme clusters are never split.
+ *
+ * Examples (all three observed on-device):
+ *   ("મને",       "મને તાવ")   -> "તાવ"
+ *   ("શરદી",      "શરદી છે")   -> "છે"
+ *   ("એકદ લેતા",  "લેતા આવશે") -> "આવશે"
+ *   ("મને તાવ",   "મને તાવ")   -> ""      (pure replay, emit nothing)
+ */
+export const stripOverlap = (committed: string, incoming: string): string => {
+  const next = words(incoming);
+  if (next.length === 0) return "";
+
+  const prev = words(committed);
+  if (prev.length === 0) return next.join(" ");
+
+  const max = Math.min(prev.length, next.length);
+  for (let k = max; k > 0; k--) {
+    let matches = true;
+    for (let i = 0; i < k; i++) {
+      if (prev[prev.length - k + i] !== next[i]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return next.slice(k).join(" ");
+  }
+  return next.join(" ");
+};
+
 export interface VoiceSessionState {
   recording: boolean;
   activeField: string | null;
@@ -43,6 +84,11 @@ export function useVoiceSession() {
   const restartScheduledRef = useRef(false);
   const lastProcessedRef = useRef<Record<string, number>>({});
   const callbacksRef = useRef<Record<string, OnDeltaCallback>>({});
+  // Text this field has already emitted, used to strip Android's overlapping
+  // finals. Survives automatic restarts (the overlap frequently straddles a
+  // restart boundary); cleared only on a user-initiated start.
+  const committedRef = useRef<Record<string, string>>({});
+  const autoRestartRef = useRef(false);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -125,6 +171,15 @@ export function useVoiceSession() {
     callbacksRef.current[fieldId] = onDelta;
     lastProcessedRef.current[fieldId] = 0;
 
+    // An automatic restart is a continuation of the same dictation, so the
+    // overlap history must carry over. A user-initiated start is a new
+    // dictation and begins with a clean slate.
+    const isAutoRestart = autoRestartRef.current;
+    autoRestartRef.current = false;
+    if (!isAutoRestart) {
+      committedRef.current[fieldId] = "";
+    }
+
     const recognition = new SpeechRecognitionAPI();
     const sessionId = sessionIdRef.current + 1;
     sessionIdRef.current = sessionId;
@@ -190,26 +245,38 @@ export function useVoiceSession() {
 
       const newFinalTexts: string[] = [];
       let maxIdx = lastProcessed;
+      // Local running copy so that when one event carries several new finals,
+      // each is stripped against the ones emitted earlier in this same loop.
+      let committed = committedRef.current[field] ?? "";
 
       for (let i = startIdx; i < totalResults; i++) {
         const result = event.results[i];
         if (!result.isFinal) continue;
         const transcript = result[0]?.transcript?.trim();
         if (!transcript) continue;
-        console.log(
-          `[VoiceSession PROCESS] sessionId=${sessionId} field=${field} resultIndex=${i} transcript="${transcript}"`,
-          { timestamp, isFinal: result.isFinal }
-        );
-        newFinalTexts.push(transcript);
         maxIdx = i + 1;
-      }
 
-      if (newFinalTexts.length === 0) {
-        console.log(`[VoiceSession SKIP] sessionId=${sessionId} field=${field} no new finals`, { timestamp });
-        return;
+        // Android re-states already-committed words inside the next final.
+        // Emit only the genuinely new tail.
+        const fresh = stripOverlap(committed, transcript);
+        console.log(
+          `[VoiceSession PROCESS] sessionId=${sessionId} field=${field} resultIndex=${i} transcript="${transcript}" fresh="${fresh}"`,
+          { timestamp, isFinal: result.isFinal, committedTail: committed.slice(-40) }
+        );
+        if (!fresh) continue;
+
+        newFinalTexts.push(fresh);
+        committed = committed ? `${committed} ${fresh}` : fresh;
       }
 
       lastProcessedRef.current[field] = maxIdx;
+
+      if (newFinalTexts.length === 0) {
+        console.log(`[VoiceSession SKIP] sessionId=${sessionId} field=${field} no new text`, { timestamp });
+        return;
+      }
+
+      committedRef.current[field] = committed;
       const delta = newFinalTexts.join(" ");
       console.log(
         `[VoiceSession EMIT] sessionId=${sessionId} field=${field} delta="${delta}" maxIdx=${maxIdx}`,
@@ -277,6 +344,7 @@ export function useVoiceSession() {
           restartTimerRef.current = null;
           restartScheduledRef.current = false;
           if (!manualStopRef.current && isMountedRef.current && savedField && savedCallback) {
+            autoRestartRef.current = true; // continuation, keep overlap history
             startRecording(savedField, langRef.current, savedCallback);
           }
         }, 400);
@@ -319,7 +387,10 @@ export function useVoiceSession() {
           const field = activeFieldRef.current;
           const cb = callbacksRef.current[field];
           console.log("[VoiceSession] Executing onend restart:", { field, sessionId });
-          if (cb) startRecording(field, langRef.current, cb);
+          if (cb) {
+            autoRestartRef.current = true; // continuation, keep overlap history
+            startRecording(field, langRef.current, cb);
+          }
         }
       }, 120);
     };

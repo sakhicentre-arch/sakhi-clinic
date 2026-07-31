@@ -579,4 +579,166 @@ describe("useVoiceSession", () => {
     // The new instance must have the same language as the first
     expect(instances[instances.length - 1].lang).toBe("gu-IN");
   });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Android Chrome result model.
+  //
+  // Android does NOT deliver disjoint finals. Consecutive final results
+  // overlap: after "મને" is final at index 0, the next final arrives at
+  // index 1 as "મને તાવ" — re-stating text already committed. Index-based
+  // de-duplication cannot see this because each index IS emitted only once.
+  //
+  // Each case below is a verbatim on-device reproduction.
+  // ───────────────────────────────────────────────────────────────────────
+  const final = (t: string) => ({ isFinal: true, 0: { transcript: t } });
+
+  it("Android overlapping finals: 'મને તાવ આવે છે' is not duplicated", () => {
+    const { recognition } = setupSpeechRecognitionMock();
+    const delta = vi.fn();
+    const { result } = renderHook(() => useVoiceSession());
+
+    act(() => {
+      result.current.startRecording("field1", "gu-IN", delta);
+    });
+
+    const events = [
+      ["મને"],
+      ["મને", "મને તાવ"],
+      ["મને", "મને તાવ", "મને તાવ આવે"],
+      ["મને", "મને તાવ", "મને તાવ આવે", "મને તાવ આવે છે"],
+    ];
+
+    events.forEach((transcripts, i) => {
+      act(() => {
+        recognition.onresult?.({
+          resultIndex: i,
+          results: transcripts.map(final),
+        } as any);
+      });
+    });
+
+    const emitted = delta.mock.calls.map((c) => c[0]).join(" ");
+    expect(emitted).toBe("મને તાવ આવે છે");
+  });
+
+  it("Android overlapping finals: 'શરદી છે' is not duplicated", () => {
+    const { recognition } = setupSpeechRecognitionMock();
+    const delta = vi.fn();
+    const { result } = renderHook(() => useVoiceSession());
+
+    act(() => {
+      result.current.startRecording("field1", "gu-IN", delta);
+    });
+
+    act(() => {
+      recognition.onresult?.({ resultIndex: 0, results: [final("શરદી")] } as any);
+    });
+    act(() => {
+      recognition.onresult?.({
+        resultIndex: 1,
+        results: [final("શરદી"), final("શરદી છે")],
+      } as any);
+    });
+
+    expect(delta.mock.calls.map((c) => c[0]).join(" ")).toBe("શરદી છે");
+  });
+
+  it("Android overlapping finals: partial tail overlap 'એકદ લેતા આવશે'", () => {
+    // Android re-segments mid-utterance, so the third final overlaps only the
+    // TAIL of the second ("લેતા"), not the whole committed prefix.
+    const { recognition } = setupSpeechRecognitionMock();
+    const delta = vi.fn();
+    const { result } = renderHook(() => useVoiceSession());
+
+    act(() => {
+      result.current.startRecording("field1", "gu-IN", delta);
+    });
+
+    const events = [
+      ["એકદ"],
+      ["એકદ", "એકદ લેતા"],
+      ["એકદ", "એકદ લેતા", "લેતા આવશે"],
+    ];
+
+    events.forEach((transcripts, i) => {
+      act(() => {
+        recognition.onresult?.({
+          resultIndex: i,
+          results: transcripts.map(final),
+        } as any);
+      });
+    });
+
+    expect(delta.mock.calls.map((c) => c[0]).join(" ")).toBe("એકદ લેતા આવશે");
+  });
+
+  it("overlap history survives an automatic restart", () => {
+    // Android ends the session constantly regardless of continuous=true, so the
+    // overlap routinely straddles a restart boundary. If history were cleared on
+    // restart the duplicate would reappear at exactly that seam.
+    const instances: any[] = [];
+    const RecognitionCtor = vi.fn(() => {
+      const r = new MockSpeechRecognition();
+      instances.push(r);
+      return r;
+    });
+    (window as any).SpeechRecognition = RecognitionCtor;
+    (window as any).webkitSpeechRecognition = RecognitionCtor;
+
+    const delta = vi.fn();
+    const { result } = renderHook(() => useVoiceSession());
+
+    act(() => {
+      result.current.startRecording("field1", "gu-IN", delta);
+    });
+    act(() => {
+      instances[0].onresult?.({ resultIndex: 0, results: [final("શરદી")] } as any);
+    });
+
+    act(() => {
+      instances[0].onend?.(new Event("end"));
+    });
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+
+    expect(instances.length).toBeGreaterThan(1);
+
+    // Fresh session replays the committed word ahead of the new one.
+    act(() => {
+      instances[instances.length - 1].onresult?.({
+        resultIndex: 0,
+        results: [final("શરદી છે")],
+      } as any);
+    });
+
+    expect(delta.mock.calls.map((c) => c[0]).join(" ")).toBe("શરદી છે");
+  });
+
+  it("a user-initiated start clears overlap history", () => {
+    // Otherwise a second dictation opening with the same word as the previous
+    // one ended would be silently swallowed.
+    const { recognition } = setupSpeechRecognitionMock();
+    const delta = vi.fn();
+    const { result } = renderHook(() => useVoiceSession());
+
+    act(() => {
+      result.current.startRecording("field1", "gu-IN", delta);
+    });
+    act(() => {
+      recognition.onresult?.({ resultIndex: 0, results: [final("શરદી")] } as any);
+    });
+
+    act(() => {
+      result.current.stopRecording();
+    });
+    act(() => {
+      result.current.startRecording("field1", "gu-IN", delta);
+    });
+    act(() => {
+      recognition.onresult?.({ resultIndex: 0, results: [final("શરદી")] } as any);
+    });
+
+    expect(delta.mock.calls.map((c) => c[0])).toEqual(["શરદી", "શરદી"]);
+  });
 });
