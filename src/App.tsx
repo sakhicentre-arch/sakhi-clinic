@@ -12,6 +12,7 @@ import AppShell from "./components/layout/AppShell";
 import useSafeViewport from "./hooks/useSafeViewport";
 import { useUIStore, ActivePage } from "./store/uiStore";
 import TrashPage from "./pages/TrashPage";
+import SettingsPage from "./pages/SettingsPage";
 import { VoiceSessionProvider } from "./hooks/VoiceSessionContext";
 import OriginMismatchBanner from "./components/OriginMismatchBanner";
 import { acknowledgeOriginChange, checkOriginIdentity, OriginCheckResult } from "./services/originIdentityService";
@@ -128,6 +129,7 @@ export default function App() {
         )
       )}
       {page === "revenue" && <RevenuePage />}
+      {page === "settings" && <SettingsPage />}
       </AppShell>
     </>
   );
