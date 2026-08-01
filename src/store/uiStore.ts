@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 // FIXED: Added "print" — used in App.tsx goToPrint()
-export type ActivePage = "today" | "patients" | "appointments" | "consultation" | "revenue" | "dashboard" | "settings" | "print";
+export type ActivePage = "today" | "patients" | "appointments" | "consultation" | "revenue" | "dashboard" | "settings" | "followups" | "print";
 export type ActiveClinic = "Dabholi" | "City Light";
 
 type UIStore = {

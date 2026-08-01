@@ -9,6 +9,7 @@ import {
   TrendingUp,
   Settings,
   LayoutDashboard, // Added Dashboard icon
+  CalendarClock,
 } from "lucide-react";
 import { ActivePage } from "../../store/uiStore";
 
@@ -25,6 +26,7 @@ const navItems = [
   { id: "patients", label: "Patients", icon: Users, badge: false },
   { id: "appointments", label: "Appointments", icon: Clock, badge: false },
   { id: "consultation", label: "Consultation", icon: Stethoscope, badge: false },
+  { id: "followups", label: "Follow-ups", icon: CalendarClock, badge: false },
   { id: "revenue", label: "Revenue", icon: TrendingUp, badge: false },
 ];
 
