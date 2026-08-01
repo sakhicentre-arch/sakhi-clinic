@@ -2,20 +2,39 @@
  * googleOAuthService.ts
  * Sakhi Clinic — Google OAuth implementation (Phase 3).
  *
- * Real Authorization Code + PKCE flow (the recommended flow for a
- * browser-only SPA -- no client secret required, so there is nothing
- * secret to hardcode or leak). This file is genuinely wired to Google's
- * real endpoints; what makes it inert today is purely configuration:
+ * Real Authorization Code + PKCE flow. PKCE removes the need for a client
+ * secret per the generic OAuth spec, but Google's "Web application" client
+ * type does not waive it: Google's token endpoint requires client_secret on
+ * every token request regardless of PKCE (see docs/GOOGLE_DRIVE_SETUP.md).
+ * Since a secret must never be shipped to the browser, the authorization
+ * redirect and callback handling below still happen entirely client-side,
+ * but the two calls that exchange/refresh a token go through this app's own
+ * serverless endpoints instead of Google directly:
+ *
+ *   exchangeAuthorizationCode() -> POST /api/oauth/google/exchange
+ *   refreshAccessToken()        -> POST /api/oauth/google/refresh
+ *
+ * Those two endpoints (api/oauth/google/exchange.ts, refresh.ts) are the
+ * only place client_secret is ever read, from a server-only
+ * GOOGLE_OAUTH_CLIENT_SECRET env var. This file -- and everything calling
+ * it, including the UI -- never sees that secret and never constructs a
+ * Google token-endpoint URL itself; it only knows about its own two
+ * endpoint paths, which are private implementation details of this module.
+ *
+ * What makes this inert today is purely configuration:
  *
  *   VITE_GOOGLE_OAUTH_CLIENT_ID is not set anywhere in this repository.
  *
  * No client ID is fabricated, guessed, or hardcoded here -- isConfigured()
  * reports that honestly, and every other method refuses to pretend
- * otherwise. Deploying this for real requires only: create a Google Cloud
+ * otherwise. Deploying this for real requires: create a Google Cloud
  * project, enable the Drive API, create an OAuth client ID (Web
  * application type, this app's real origin as an authorized redirect
- * URI), and set VITE_GOOGLE_OAUTH_CLIENT_ID at build time. No code change
- * would be needed.
+ * URI), set VITE_GOOGLE_OAUTH_CLIENT_ID at build time, and set
+ * GOOGLE_OAUTH_CLIENT_SECRET as a server-side environment variable
+ * wherever api/oauth/google/*.ts runs (e.g. the Vercel project's
+ * environment variables, never a VITE_-prefixed one). No further code
+ * change would be needed.
  *
  * Scope is deliberately minimal: drive.file (files this app creates),
  * never full Drive access.
@@ -24,7 +43,18 @@
 import type { OAuthAccountInfo, OAuthService, OAuthTokens } from "./oauthService";
 
 const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
-const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+// Google's "Web application" OAuth client type requires client_secret on
+// every token request, even with PKCE (see docs/GOOGLE_DRIVE_SETUP.md) --
+// client_secret must never reach the browser, so these two calls go through
+// our own serverless endpoints (api/oauth/google/exchange.ts and
+// refresh.ts -- one per grant type, deliberately not a single endpoint that
+// branches), which are the only places that hold the secret. Everything
+// else about this flow (PKCE generation, the authorization redirect,
+// callback handling) is unchanged and still happens entirely in the
+// browser. No caller of this module ever sees these paths -- see
+// exchangeAuthorizationCode()/refreshAccessToken() below.
+const EXCHANGE_ENDPOINT = "/api/oauth/google/exchange";
+const REFRESH_ENDPOINT = "/api/oauth/google/refresh";
 const USERINFO_ENDPOINT = "https://www.googleapis.com/oauth2/v3/userinfo";
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 
@@ -94,28 +124,151 @@ function maskClientId(clientId: string): string {
   return clientId.length <= 10 ? "***" : `${clientId.slice(0, 6)}...${clientId.slice(-4)}`;
 }
 
-/** Logs exactly what's being sent to Google's token endpoint, without ever
- * logging the authorization code, verifier, or any token/secret value --
- * only their lengths, so a bad/empty value is visible without exposing it. */
-function logTokenExchangeRequest(input: { redirectUri: string; clientId: string; grantType: string; codeLength: number; verifierLength: number }): void {
+/**
+ * Logging contract for this whole file (audited): every log call below
+ * takes ONLY specific, named, whitelisted fields -- lengths instead of the
+ * authorization code/verifier/refresh token themselves, a masked client
+ * id, and the SAFE message/error code this module already received from
+ * our own endpoint (never Google's raw error_description, and never a
+ * request/response body logged wholesale). If you add a log call to this
+ * file, it must follow the same rule.
+ */
+function logExchangeRequest(input: { redirectUri: string; clientId: string; codeLength: number; verifierLength: number }): void {
   console.info("[googleOAuthService] Token exchange request", {
     redirect_uri: input.redirectUri,
     client_id: maskClientId(input.clientId),
-    grant_type: input.grantType,
+    grant_type: "authorization_code",
     code_length: input.codeLength,
     code_verifier_length: input.verifierLength,
   });
 }
 
-/** Logs Google's actual rejection reason -- status/statusText/error/
- * error_description are never secrets, unlike the request fields above. */
-function logTokenExchangeFailure(input: { status: number; statusText: string; error?: string; errorDescription?: string }): void {
+function logExchangeFailure(input: { status: number; error?: string; message?: string }): void {
   console.error("[googleOAuthService] Token exchange failed", {
     status: input.status,
-    statusText: input.statusText,
     error: input.error,
-    error_description: input.errorDescription,
+    message: input.message,
   });
+}
+
+function logRefreshRequest(input: { clientId: string; refreshTokenLength: number }): void {
+  console.info("[googleOAuthService] Token refresh request", {
+    client_id: maskClientId(input.clientId),
+    grant_type: "refresh_token",
+    refresh_token_length: input.refreshTokenLength,
+  });
+}
+
+function logRefreshFailure(input: { status: number; error?: string; message?: string }): void {
+  console.error("[googleOAuthService] Token refresh failed", {
+    status: input.status,
+    error: input.error,
+    message: input.message,
+  });
+}
+
+/** Parses our own endpoint's failure body -- { error, message } (see
+ * api/oauth/google/_shared.ts) -- never Google's raw error_description.
+ * Falls back gracefully if the body isn't JSON for some reason (a
+ * mis-deployed function, a proxy in front of it, etc.). */
+async function parseFailureBody(response: Response): Promise<{ raw: string; error?: string; message?: string }> {
+  const raw = await response.text();
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      raw,
+      error: typeof parsed.error === "string" ? parsed.error : undefined,
+      message: typeof parsed.message === "string" ? parsed.message : undefined,
+    };
+  } catch {
+    return { raw };
+  }
+}
+
+/**
+ * Internal only -- exchanges an authorization code for tokens via our own
+ * /api/oauth/google/exchange endpoint. No caller of googleOAuthService
+ * (UI included) ever calls this directly or knows this endpoint exists;
+ * only handleRedirectCallback below does.
+ */
+async function exchangeAuthorizationCode(input: { clientId: string; code: string; codeVerifier: string; redirectUri: string }): Promise<OAuthTokens> {
+  logExchangeRequest({
+    redirectUri: input.redirectUri,
+    clientId: input.clientId,
+    codeLength: input.code.length,
+    verifierLength: input.codeVerifier.length,
+  });
+
+  const body = new URLSearchParams({
+    client_id: input.clientId,
+    code: input.code,
+    code_verifier: input.codeVerifier,
+    redirect_uri: input.redirectUri,
+    grant_type: "authorization_code",
+  });
+
+  const response = await fetch(EXCHANGE_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+
+  if (!response.ok) {
+    const { raw, error, message } = await parseFailureBody(response);
+    logExchangeFailure({ status: response.status, error, message });
+    const detail = message || error || raw || response.statusText;
+    throw new Error(`Google token exchange failed (${response.status}): ${detail}`);
+  }
+
+  const json = await response.json();
+  return {
+    accessToken: json.access_token,
+    refreshToken: json.refresh_token,
+    expiresAt: new Date(Date.now() + (Number(json.expires_in) || 0) * 1000).toISOString(),
+    scope: json.scope,
+  };
+}
+
+/**
+ * Internal only -- refreshes an access token via our own
+ * /api/oauth/google/refresh endpoint. Preserves the exact behavior
+ * getAccessToken() already had: a successful refresh writes the new
+ * tokens, an explicit rejection from the endpoint clears stored tokens
+ * (forcing a reconnect), and a network failure does neither, leaving
+ * whatever was stored untouched so a later retry can still use it.
+ */
+async function refreshAccessToken(input: { clientId: string; refreshToken: string; previousScope?: string }): Promise<OAuthTokens | null> {
+  logRefreshRequest({ clientId: input.clientId, refreshTokenLength: input.refreshToken.length });
+
+  try {
+    const body = new URLSearchParams({
+      client_id: input.clientId,
+      refresh_token: input.refreshToken,
+      grant_type: "refresh_token",
+    });
+    const response = await fetch(REFRESH_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+    if (!response.ok) {
+      const { error, message } = await parseFailureBody(response);
+      logRefreshFailure({ status: response.status, error, message });
+      writeTokens(null);
+      return null;
+    }
+    const json = await response.json();
+    const refreshed: OAuthTokens = {
+      accessToken: json.access_token,
+      refreshToken: input.refreshToken, // Google does not resend it on refresh
+      expiresAt: new Date(Date.now() + (Number(json.expires_in) || 0) * 1000).toISOString(),
+      scope: json.scope || input.previousScope,
+    };
+    writeTokens(refreshed);
+    return refreshed;
+  } catch {
+    return null;
+  }
 }
 
 export const googleOAuthService: OAuthService = {
@@ -204,47 +357,7 @@ export const googleOAuthService: OAuthService = {
       // ignore
     }
 
-    const redirectUri = getRedirectUri();
-    const grantType = "authorization_code";
-    logTokenExchangeRequest({ redirectUri, clientId, grantType, codeLength: code.length, verifierLength: verifier.length });
-
-    const body = new URLSearchParams({
-      client_id: clientId,
-      code,
-      code_verifier: verifier,
-      redirect_uri: redirectUri,
-      grant_type: grantType,
-    });
-
-    const response = await fetch(TOKEN_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
-    });
-    if (!response.ok) {
-      const errorBody = await response.text();
-      let googleError: string | undefined;
-      let googleErrorDescription: string | undefined;
-      try {
-        const parsed = JSON.parse(errorBody);
-        googleError = parsed.error;
-        googleErrorDescription = parsed.error_description;
-      } catch {
-        // Google almost always returns JSON on a 400 -- fall back to the
-        // raw text below if this particular response didn't.
-      }
-      logTokenExchangeFailure({ status: response.status, statusText: response.statusText, error: googleError, errorDescription: googleErrorDescription });
-      const detail = googleErrorDescription || googleError || errorBody || response.statusText;
-      throw new Error(`Google token exchange failed (${response.status}): ${detail}`);
-    }
-    const json = await response.json();
-
-    const tokens: OAuthTokens = {
-      accessToken: json.access_token,
-      refreshToken: json.refresh_token,
-      expiresAt: new Date(Date.now() + (Number(json.expires_in) || 0) * 1000).toISOString(),
-      scope: json.scope,
-    };
+    const tokens = await exchangeAuthorizationCode({ clientId, code, codeVerifier: verifier, redirectUri: getRedirectUri() });
     writeTokens(tokens);
     return tokens;
   },
@@ -261,33 +374,8 @@ export const googleOAuthService: OAuthService = {
       return null;
     }
 
-    try {
-      const body = new URLSearchParams({
-        client_id: clientId,
-        refresh_token: tokens.refreshToken,
-        grant_type: "refresh_token",
-      });
-      const response = await fetch(TOKEN_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: body.toString(),
-      });
-      if (!response.ok) {
-        writeTokens(null);
-        return null;
-      }
-      const json = await response.json();
-      const refreshed: OAuthTokens = {
-        accessToken: json.access_token,
-        refreshToken: tokens.refreshToken, // Google does not resend it on refresh
-        expiresAt: new Date(Date.now() + (Number(json.expires_in) || 0) * 1000).toISOString(),
-        scope: json.scope || tokens.scope,
-      };
-      writeTokens(refreshed);
-      return refreshed.accessToken;
-    } catch {
-      return null;
-    }
+    const refreshed = await refreshAccessToken({ clientId, refreshToken: tokens.refreshToken, previousScope: tokens.scope });
+    return refreshed ? refreshed.accessToken : null;
   },
 
   async getAccountInfo(): Promise<OAuthAccountInfo | null> {
