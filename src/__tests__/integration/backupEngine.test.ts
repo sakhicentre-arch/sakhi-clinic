@@ -289,6 +289,54 @@ describe("Backup Engine — end-to-end export/import through backupService.ts", 
     expect(patients.map((p) => p.id)).toContain("P-BACKUP-1");
   });
 
+  it("an overwrite restore does not wipe appMeta, reminderQueue, or backupJobs -- none of them are part of the bundle", async () => {
+    // Regression test for a real bug found while building BackupJob
+    // tracking: importClinicBundleWithOptions's "overwrite" mode used to
+    // clear() every db.tables entry, including operational/device state
+    // that has no representation in ClinicExportBundleV2 at all --
+    // appMeta (origin-identity), reminderQueue/reminderHistory, and
+    // backupJobs would all be silently wiped and never restored, since
+    // nothing repopulates them from the bundle. Fixed to clear only the
+    // 8 tables the bundle actually covers, matching what the "merge"
+    // branch already did correctly.
+    await db.appMeta.put({
+      id: "app-meta", installId: "install-survives", firstRunOrigin: "https://sakhi-clinic.vercel.app", firstRunAt: "2026-01-01T00:00:00.000Z",
+    });
+    await db.reminderQueue.put({
+      id: "R-SURVIVES", patientId: "P-BACKUP-1", patientName: "Backup Test Patient", type: "follow_up",
+      channel: "whatsapp", message: "test", dueAt: "2026-03-15T00:00:00.000Z", status: "pending",
+      retryCount: 0, createdAt: "2026-03-15T00:00:00.000Z", updatedAt: "2026-03-15T00:00:00.000Z",
+    });
+    await db.backupJobs.put({
+      id: "J-SURVIVES", kind: "export", providerId: "local", status: "succeeded",
+      createdAt: "2026-03-15T00:00:00.000Z", updatedAt: "2026-03-15T00:00:00.000Z", events: [],
+    });
+
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.spyOn(window, "alert").mockImplementation(() => {});
+
+    const legacyBundle = {
+      schemaVersion: 2, exportedAt: "2026-01-01T00:00:00.000Z", deviceId: "d1",
+      data: {
+        patients: [{ id: "P-RESTORED", name: "Restored Patient", phone: "9", gender: "Male" }],
+        consultations: [], appointments: [], drafts: [], learning: [], caseMemory: [], syncOutbox: [], operationalEvents: [],
+      },
+    };
+    const { importBackup } = await import("../../services/backupService");
+    const file = makeTestFile(JSON.stringify(legacyBundle), "backup.json");
+    await importBackup(file);
+
+    // The restore itself worked (old patient gone, new one present)...
+    const patients = await db.patients.toArray();
+    expect(patients.map((p) => p.id)).toEqual(["P-RESTORED"]);
+
+    // ...but operational/device state that isn't part of the bundle must
+    // survive untouched.
+    expect((await db.appMeta.get("app-meta"))?.installId).toBe("install-survives");
+    expect(await db.reminderQueue.get("R-SURVIVES")).toBeDefined();
+    expect(await db.backupJobs.get("J-SURVIVES")).toBeDefined();
+  });
+
   it("rejects an envelope whose checksum does not match (corruption detection)", async () => {
     vi.spyOn(window, "alert").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});

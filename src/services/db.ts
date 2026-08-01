@@ -316,6 +316,54 @@ export interface ReminderHistoryEntry {
   note?: string; // e.g. failure reason -- best-effort; no real delivery receipts exist without a WhatsApp Business API
 }
 
+// Pre-Phase-3 (Backup Engine): every backup/restore operation produces a
+// structured, persisted job record with lifecycle states and a progress
+// event log -- not just a fire-and-forget async function call. This is
+// what lets a future real Google Drive upload (slow, multi-step, needs a
+// progress indicator) plug into the SAME engine a synchronous local
+// download uses today: only backupManager.ts and backupJobService.ts know
+// this type exists. StorageProvider implementations (including a future
+// real GoogleDriveProvider) only ever see a plain onProgress callback --
+// see storageProvider.ts -- never this record itself.
+export type BackupJobKind = "export" | "auto" | "restore";
+export type BackupJobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type BackupJobStage =
+  | "queued"
+  | "planning"
+  | "serializing"
+  | "encrypting"
+  | "compressing"
+  | "validating"
+  | "saving"
+  | "parsing"
+  | "decrypting"
+  | "decompressing"
+  | "restoring"
+  | "done";
+
+export interface BackupJobEvent {
+  id: string;
+  stage: BackupJobStage;
+  message: string;
+  timestamp: string;
+  progressPercent?: number; // 0-100; most local stages are instant and omit this, a real Drive upload would report it per chunk
+  data?: Record<string, any>;
+}
+
+export interface BackupJob {
+  id: string;
+  kind: BackupJobKind;
+  providerId: string;
+  status: BackupJobStatus;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  error?: string;
+  sizeBytes?: number;
+  filename?: string;
+  events: BackupJobEvent[]; // append-only progress log for this job
+}
+
 class SakhiDB extends Dexie {
   patients!: Dexie.Table<Patient, string>;
   consultations!: Dexie.Table<Consultation, string>;
@@ -328,6 +376,7 @@ class SakhiDB extends Dexie {
   appMeta!: Dexie.Table<AppMeta, string>;
   reminderQueue!: Dexie.Table<ReminderQueueEntry, string>;
   reminderHistory!: Dexie.Table<ReminderHistoryEntry, string>;
+  backupJobs!: Dexie.Table<BackupJob, string>;
 
   constructor() {
     super("SakhiClinicDB");
@@ -469,6 +518,23 @@ class SakhiDB extends Dexie {
       appMeta: "id",
       reminderQueue: "id, patientId, type, status, dueAt, channel",
       reminderHistory: "id, reminderId, patientId, attemptedAt, action"
+    });
+
+    // V52 (pre-Phase-3 — Backup Engine job tracking): backupJobs. Purely
+    // additive, same pattern as V50/V51.
+    this.version(52).stores({
+      patients: "id, name, phone, nextFollowUpDate, lastVisit, deletedAt, createdAt, updatedAt",
+      consultations: "id, patientId, appointmentId, date, outcome, clinicId, learnedAt, deletedAt, createdAt, updatedAt",
+      learning: "++id, [remedy+symptomKey], remedy, symptomKey",
+      caseMemory: "++id, patientId, remedy, outcome, deletedAt, createdAt, updatedAt",
+      appointments: "id, date, patientId, status, clinic, [date+time+clinic], [clinic+date], deletedAt, createdAt, updatedAt",
+      drafts: "id, patientId, savedAt",
+      syncOutbox: "id, entityType, entityId, operationType, timestamp, syncStatus, retryCount",
+      operationalEvents: "id, timestamp, level, type",
+      appMeta: "id",
+      reminderQueue: "id, patientId, type, status, dueAt, channel",
+      reminderHistory: "id, reminderId, patientId, attemptedAt, action",
+      backupJobs: "id, kind, providerId, status, createdAt"
     });
   }
 }

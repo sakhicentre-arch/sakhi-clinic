@@ -60,7 +60,12 @@ describe("Phase 2 — v50 to v51 migration (reminderQueue/reminderHistory)", () 
     const { db } = await import("../../services/db");
     await db.open();
 
-    expect(db.verno).toBe(51);
+    // Opening the real (current) db.ts against a v50-seeded database
+    // replays v50->v51 AND v51->v52 in sequence -- this still exercises
+    // the v50->v51 step this test seeds for, it just lands on whatever
+    // the app's current version is afterward, same as a real doctor's
+    // browser would on first load post-upgrade.
+    expect(db.verno).toBe(52);
 
     // Pre-existing data is completely untouched.
     const patients = await db.patients.toArray();

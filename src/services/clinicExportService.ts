@@ -223,8 +223,20 @@ export async function importClinicBundleWithOptions(bundle: any, opts: { mode: I
   }
 
   if (opts.mode === "overwrite") {
-    await db.transaction("rw", db.tables, async () => {
-      for (const table of db.tables) {
+    // Clear only the tables this bundle actually covers -- NOT db.tables
+    // wholesale. appMeta (origin-identity), reminderQueue/reminderHistory,
+    // and backupJobs are operational/device state with no representation
+    // in ClinicExportBundleV2 at all: clearing them here would silently
+    // wipe origin-identity tracking and in-flight reminders/job history on
+    // every restore and never repopulate them (nothing below writes to
+    // those tables). The "merge" branch just below already scopes itself
+    // to exactly these 8 tables for the same reason -- this mirrors it.
+    const tablesToClear = [
+      db.patients, db.consultations, db.appointments, db.drafts,
+      db.learning, db.caseMemory, db.syncOutbox, db.operationalEvents,
+    ];
+    await db.transaction("rw", tablesToClear, async () => {
+      for (const table of tablesToClear) {
         await table.clear();
       }
 
