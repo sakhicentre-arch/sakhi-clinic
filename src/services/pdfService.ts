@@ -25,10 +25,6 @@ export const generatePrescriptionPDF = (data: any) => {
   doc.setTextColor(71, 85, 105);
   doc.text("Dr. Amisha (BHMS, Consultant Homeopath)", 105, y, { align: "center" });
   
-  y += 6;
-  doc.setFontSize(9);
-  doc.text("Clinical Authentication: " + (data.securityHash || "N/A"), 105, y, { align: "center" });
-  
   y += 5;
   doc.setDrawColor(37, 99, 235);
   doc.setLineWidth(1);
@@ -129,7 +125,7 @@ export const shareOnWhatsApp = (data: any) => {
   // Logic preserved from V9.1
   let message = `*Sakhi Homeopathic Clinic*\n*Dr. Amisha (BHMS)*\n`;
   message += `--------------------------\n`;
-  message += `*Patient:* ${data.patient}\n*Auth:* ${data.securityHash || "N/A"}\n`;
+  message += `*Patient:* ${data.patient}\n`;
   message += `--------------------------\n`;
   message += `*Rx / Prescription:*\n`;
   data.medicines.forEach((m: any) => { message += `💊 *${m.name}*\n   ${m.dosage} | ${m.duration}\n`; });

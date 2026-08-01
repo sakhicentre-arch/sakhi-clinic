@@ -728,7 +728,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const [showSticker, setShowSticker] = useState(false);
   const [showLetterPad, setShowLetterPad] = useState(false);
   const [showPrintMenu, setShowPrintMenu] = useState(false);
-  const [draftAutoSaveStatus, setDraftAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [draftAutoSaveStatus, setDraftAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const autosaveTimerRef = useRef<number | null>(null);
   const [draftRecovered, setDraftRecovered] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isTablet, setIsTablet] = useState(false);
@@ -990,19 +991,50 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     recoverDraft();
   }, [patientId, draftRecovered]);
 
-  // ✅ V1A: AUTO-SAVE DRAFT EVERY 30 SECONDS
+  // ✅ V1A: AUTO-SAVE DRAFT, DEBOUNCED 30s FROM THE LAST EDIT
+  //
+  // Module A fix: the previous implementation was a setInterval whose owning
+  // useEffect depended on [patientId, formData]. Since formData changes on
+  // every keystroke/dictation delta, React tears down and recreates the
+  // interval on every edit (cleanup runs before the effect re-runs) — so in
+  // practice the save only ever fired after 30s of true inactivity, but via
+  // interval-recreation rather than a real debounce. A setTimeout reset on
+  // every edit is the same duration, expressed as an actual debounce.
+  //
+  // Also: saveDraft() previously always resolved (swallowed its own errors),
+  // so a failed background save was indistinguishable from a successful one —
+  // the doctor would see nothing wrong while her last edits silently weren't
+  // backed up. saveDraft() now returns a boolean; failure is surfaced via the
+  // same draftStatus mechanism the primary Save & Next flow already uses
+  // (rendered in TopBar.tsx), so it's visible through an existing, familiar
+  // indicator rather than a new one.
   useEffect(() => {
-    const autoSaveInterval = setInterval(async () => {
-      if (formData.chiefComplaint || formData.caseText || formData.medicines.length > 0) {
+    if (autosaveTimerRef.current !== null) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
+    autosaveTimerRef.current = window.setTimeout(async () => {
+      autosaveTimerRef.current = null;
+      const current = formDataRef.current;
+      if (current.chiefComplaint || current.caseText || current.medicines.length > 0) {
         setDraftAutoSaveStatus("saving");
-        await saveDraft(patientId, formData);
-        setDraftAutoSaveStatus("saved");
-        setTimeout(() => setDraftAutoSaveStatus("idle"), 2000);
+        const ok = await saveDraft(patientId, current);
+        if (ok) {
+          setDraftAutoSaveStatus("saved");
+          setTimeout(() => setDraftAutoSaveStatus("idle"), 2000);
+        } else {
+          setDraftAutoSaveStatus("failed");
+          setDraftStatus("Draft save failed");
+        }
       }
-    }, 30000); // Auto-save every 30 seconds
+    }, 30000);
 
-    return () => clearInterval(autoSaveInterval);
-  }, [patientId, formData]);
+    return () => {
+      if (autosaveTimerRef.current !== null) {
+        window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    };
+  }, [patientId, formData, setDraftStatus]);
 
   // ── AI fetch ──
   useEffect(() => {

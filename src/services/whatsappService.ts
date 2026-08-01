@@ -196,14 +196,12 @@ export function openWhatsApp({ phone, message, windowName = DEFAULT_WINDOW }: Op
 export const shareOnWhatsApp = (data: any) => {
   const complaint = data.totality?.complaint || "-";
   const miasm = data.totality?.miasm || "Awaiting Analysis";
-  const auth = data.securityHash || "N/A";
 
   let message = `*Sakhi Homeopathic Clinic*\n`;
   message += `*Dr. Amisha (BHMS)*\n`;
   message += `--------------------------\n`;
   message += `*Patient:* ${data.patient}\n`;
   message += `*Date:* ${data.date}\n`;
-  message += `*Auth:* ${auth}\n`;
   message += `--------------------------\n`;
   message += `*Clinical Totality:*\n`;
   message += `• Complaint: ${complaint}\n`;

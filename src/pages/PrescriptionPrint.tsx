@@ -79,7 +79,6 @@ export default function PrescriptionPrint() {
   }
 
   const clinicalSummary = generateClinicalSummary(lastConsultation);
-  const securityHash = `SAKHI-${lastConsultation.id.slice(-4)}-${Math.random().toString(36).substring(7).toUpperCase()}`;
 
   const MASTER_PAYLOAD = {
     clinicName: "Sakhi Homeopathic Clinic",
@@ -88,7 +87,6 @@ export default function PrescriptionPrint() {
     bio: `${p.age}Y / ${p.gender}`,
     referredBy: p.referredBy,
     date: new Date(lastConsultation.date).toLocaleDateString(),
-    securityHash,
     totality: {
       complaint: lastConsultation.chiefComplaint || "-",
       miasm: lastConsultation.miasm || "Awaiting Analysis",
@@ -112,7 +110,6 @@ export default function PrescriptionPrint() {
           <div className="rx-header">
             <h1 className="rx-clinic-name">{MASTER_PAYLOAD.clinicName}</h1>
             <p className="rx-doctor">{MASTER_PAYLOAD.doctorName}</p>
-            <p className="rx-hash">Authentication Code: {MASTER_PAYLOAD.securityHash}</p>
           </div>
 
           {/* PATIENT INFO */}
@@ -234,7 +231,6 @@ const printCSS = `
   .rx-header { text-align: center; border-bottom: 4px solid #2563eb; padding-bottom: 20px; margin-bottom: 30px; }
   .rx-clinic-name { margin: 0; font-size: 32px; color: #1e3a8a; font-weight: 900; }
   .rx-doctor { margin: 5px 0; font-weight: 700; color: #475569; }
-  .rx-hash { margin: 0; font-size: 11px; color: #94a3b8; }
 
   /* ── Patient strip ── */
   .rx-patient-strip {

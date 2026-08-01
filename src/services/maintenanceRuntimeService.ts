@@ -1,5 +1,5 @@
 import { DEFAULT_MAINTENANCE_POLICIES, MaintenanceRuntimePolicies, mergeMaintenancePolicies } from "./maintenancePolicies";
-import { getOutboxHealthReport, pruneSynced, retryFailed } from "./outboxMaintenanceService";
+import { enforceOutboxCap, getOutboxHealthReport, pruneSynced, retryFailed } from "./outboxMaintenanceService";
 import { getBackupAgeDays, isBackupStale } from "./storageHealthService";
 import { runDexieHealthCheck, verifyExportBundle } from "./storageIntegrityService";
 import { exportClinicBundle } from "./clinicExportService";
@@ -14,6 +14,7 @@ export type MaintenanceRunResult = {
   actions: {
     prunedSynced: number;
     retriedFailed: number;
+    cappedOutbox: number;
     eventsPruned: number;
     integrityChecked: boolean;
   };
@@ -63,6 +64,7 @@ export async function runMaintenanceOnce(input?: {
   const errors: Array<{ area: string; message: string }> = [];
   let prunedSyncedCount = 0;
   let retriedFailedCount = 0;
+  let cappedOutboxCount = 0;
   let eventsPruned = 0;
   let integrityChecked = false;
 
@@ -86,6 +88,12 @@ export async function runMaintenanceOnce(input?: {
 
     // Retry only marks failed->pending (local-only); safe and future-replay-ready.
     retriedFailedCount = await retryFailed(policies.retry.maxRetryCount);
+
+    // Module A: enforce the declared row cap here, in the periodic background
+    // run -- NOT on the clinical write path (see outboxService.ts's comment
+    // for why: measured 100+ seconds at the real cap in this test harness,
+    // unacceptable to run inside the same await chain as a patient save).
+    cappedOutboxCount = await enforceOutboxCap(policies.maxOutboxEntries);
   } catch (error) {
     errors.push({
       area: "outbox",
@@ -138,6 +146,7 @@ export async function runMaintenanceOnce(input?: {
     actions: {
       prunedSynced: prunedSyncedCount,
       retriedFailed: retriedFailedCount,
+      cappedOutbox: cappedOutboxCount,
       eventsPruned,
       integrityChecked,
     },

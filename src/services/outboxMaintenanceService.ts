@@ -1,6 +1,93 @@
 import { db, SyncOutboxEntry } from "./db";
+import { DEFAULT_MAINTENANCE_POLICIES } from "./maintenancePolicies";
 
 const nowIso = () => new Date().toISOString();
+
+/**
+ * Module A: maxOutboxEntries was declared in maintenancePolicies.ts but never
+ * enforced anywhere — the queue could grow without bound. The outbox has no
+ * consumer today (nothing ever marks an entry "synced" from a real sync
+ * process, and no other code path reads it as a source of truth), so pruning
+ * it can never lose clinical data; patients/consultations/appointments are
+ * the source of truth and are never touched here.
+ *
+ * Policy: prefer discarding the oldest SYNCED entries first (already synced,
+ * so nothing un-synced is lost). Only if still over the cap after removing
+ * every synced row does this fall back to the oldest entries overall
+ * (pending/failed/conflict) — a bounded queue that never grows forever beats
+ * one that preserves every row indefinitely.
+ *
+ * Certification-pass measurement (see perfMeasurement.test.ts): a full
+ * enforceOutboxCap() run at the real 10,000-row cap measured 100+ SECONDS in
+ * this test harness -- this function must NEVER be called from a clinical
+ * write's await chain (it originally was; see outboxService.ts's comment on
+ * enqueueOutbox for why that was wrong and how it was corrected). It is only
+ * safe to call from the periodic background maintenance runtime
+ * (maintenanceRuntimeService.ts), never inline with a save.
+ *
+ * PRUNE_TARGET_RATIO prunes down to 90% of the cap rather than exactly the
+ * cap -- a hysteresis buffer, not a schema or architecture change -- so
+ * there is headroom (10% of the cap) before the NEXT background run needs to
+ * scan and prune again. This does not fix the underlying per-call cost; it
+ * only reduces how often that cost is paid.
+ */
+const PRUNE_TARGET_RATIO = 0.9;
+
+// Certification-pass measurement (see perfMeasurement.test.ts): a single
+// bulkDelete's cost was measured to scale SUPER-linearly with key count in
+// this test harness (fake-indexeddb) -- 18x the cost for only 4x the delete
+// volume, and deleting ~1,000 keys out of a 10,000-row table did not
+// complete within 100+ seconds even with this chunking applied. Whether real
+// browser IndexedDB shares this scaling characteristic is UNVERIFIED -- no
+// on-device measurement was possible in this environment. Chunking is kept
+// as a safe, well-known IndexedDB pattern regardless of engine, but it did
+// NOT resolve the underlying cost by itself (see the module comment above)
+// -- moving this function off the clinical write path is what did.
+const DELETE_CHUNK_SIZE = 200;
+
+async function chunkedBulkDelete(ids: string[]): Promise<void> {
+  for (let i = 0; i < ids.length; i += DELETE_CHUNK_SIZE) {
+    await db.syncOutbox.bulkDelete(ids.slice(i, i + DELETE_CHUNK_SIZE));
+  }
+}
+
+export async function enforceOutboxCap(
+  maxEntries: number = DEFAULT_MAINTENANCE_POLICIES.maxOutboxEntries
+): Promise<number> {
+  const total = await db.syncOutbox.count();
+  if (total <= maxEntries) return 0;
+
+  const target = Math.floor(maxEntries * PRUNE_TARGET_RATIO);
+  const excess = total - target;
+
+  // Secondary key on `id` makes this a total order even if two rows ever
+  // share a `timestamp` (nowIso() is monotonic for auto-generated timestamps,
+  // but callers may pass an explicit, non-unique one) -- deterministic beats
+  // "usually right", since a tie here previously fell back to random
+  // primary-key order (generateId()) and picked a different "oldest" row
+  // between otherwise-identical runs.
+  const byTimestampThenId = (a: SyncOutboxEntry, b: SyncOutboxEntry) =>
+    a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id);
+
+  const synced = await db.syncOutbox.where("syncStatus").equals("synced").toArray();
+  synced.sort(byTimestampThenId);
+  let toDelete = synced.slice(0, excess).map((r) => r.id);
+
+  const stillExcess = excess - toDelete.length;
+  if (stillExcess > 0) {
+    const alreadyMarked = new Set(toDelete);
+    const rest = await db.syncOutbox.toArray();
+    const fallback = rest
+      .filter((r) => !alreadyMarked.has(r.id))
+      .sort(byTimestampThenId)
+      .slice(0, stillExcess)
+      .map((r) => r.id);
+    toDelete = toDelete.concat(fallback);
+  }
+
+  if (toDelete.length) await chunkedBulkDelete(toDelete);
+  return toDelete.length;
+}
 
 export type OutboxHealthReport = {
   total: number;

@@ -104,18 +104,26 @@ export const appointmentService = {
       await markOverdueAppointmentsMissed();
       assertValidAppointment(appointment);
 
-      if (appointment.type === "scheduled") {
-        const duplicate = await checkDuplicate(appointment.date, appointment.time, appointment.clinic);
-        if (duplicate) throw new Error("[AppointmentService] Slot already booked");
-      }
-
-      const existing = await db.appointments.get(appointment.id);
-      if (existing && !existing.deletedAt) {
-        throw new Error("[AppointmentService] Appointment with this ID already exists");
-      }
-
       created = withMetadata(appointment);
+      // The duplicate-slot check and the id-collision check must run inside the
+      // SAME rw transaction as the insert, not before it. IndexedDB serializes
+      // concurrent rw transactions on a given object store, so a check and
+      // write that both live inside one transaction are atomic with respect to
+      // any other transaction on db.appointments. Reading the check result
+      // before opening the transaction (the previous shape) left a window
+      // where two near-simultaneous bookings could both pass the check and
+      // both insert, double-booking the slot.
       await db.transaction("rw", [db.appointments, db.syncOutbox], async () => {
+        if (appointment.type === "scheduled") {
+          const duplicate = await checkDuplicate(appointment.date, appointment.time, appointment.clinic);
+          if (duplicate) throw new Error("This slot was just taken by another booking. Please choose a different time.");
+        }
+
+        const existing = await db.appointments.get(appointment.id);
+        if (existing && !existing.deletedAt) {
+          throw new Error("[AppointmentService] Appointment with this ID already exists");
+        }
+
         await db.appointments.add(created as Appointment);
         try {
           await enqueueOutbox({

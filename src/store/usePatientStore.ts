@@ -7,17 +7,25 @@ interface PatientState {
   patients: Patient[];
   selectedPatientId: PatientId | null;
   hydrated: boolean;
+  // Module A: parity with useAppointmentStore's lastError. Set directly by
+  // PatientPage.tsx alongside its existing alert() on a save/delete failure —
+  // gives write-failure state a consistent, assertable shape across stores,
+  // rather than only a browser alert() that a test can't observe.
+  lastError: string | null;
   setSelectedPatientId: (id: PatientId | null) => void;
   loadPatients: () => Promise<void>;
   addPatient: (patient: Patient) => Promise<void>;
   updatePatient: (id: PatientId, updates: Partial<Patient>) => Promise<void>;
   deletePatient: (id: PatientId) => Promise<void>;
+  setLastError: (message: string | null) => void;
+  clearError: () => void;
 }
 
 export const usePatientStore = create<PatientState>()((set, get) => ({
   patients: [],
   selectedPatientId: null,
   hydrated: false,
+  lastError: null,
 
   setSelectedPatientId: (id: PatientId | null) => {
     set({ selectedPatientId: id ? String(id).trim() : null });
@@ -57,6 +65,9 @@ export const usePatientStore = create<PatientState>()((set, get) => ({
       selectedPatientId: get().selectedPatientId === id ? null : get().selectedPatientId,
     }));
   },
+
+  setLastError: (message) => set({ lastError: message }),
+  clearError: () => set({ lastError: null }),
 }));
 
 if (typeof window !== "undefined") {

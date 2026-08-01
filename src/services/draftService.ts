@@ -13,8 +13,14 @@ const nowIso = () => new Date().toISOString();
 /**
  * Save draft to IndexedDB
  * Called every 30 seconds while editing a consultation
+ *
+ * Returns false rather than throwing on failure: an autosave failure must
+ * never break the doctor's form or interrupt typing/dictation. The caller
+ * uses the boolean to decide whether to surface a status to the doctor —
+ * previously this always resolved (nothing thrown, nothing returned), so a
+ * failed write here was indistinguishable from a successful one to any caller.
  */
-export async function saveDraft(patientId: string, formData: any): Promise<void> {
+export async function saveDraft(patientId: string, formData: any): Promise<boolean> {
   try {
     const draftId = `draft-${patientId}`;
     const draft: ConsultationDraft = {
@@ -24,9 +30,10 @@ export async function saveDraft(patientId: string, formData: any): Promise<void>
       savedAt: nowIso(),
     };
     await db.drafts.put(draft);
+    return true;
   } catch (error) {
     console.error("[draftService] saveDraft failed:", error);
-    // Silently fail — don't break user's form
+    return false;
   }
 }
 

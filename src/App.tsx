@@ -13,12 +13,15 @@ import useSafeViewport from "./hooks/useSafeViewport";
 import { useUIStore, ActivePage } from "./store/uiStore";
 import TrashPage from "./pages/TrashPage";
 import { VoiceSessionProvider } from "./hooks/VoiceSessionContext";
+import OriginMismatchBanner from "./components/OriginMismatchBanner";
+import { acknowledgeOriginChange, checkOriginIdentity, OriginCheckResult } from "./services/originIdentityService";
 
 export default function App() {
   useSafeViewport();
   const isReviewPath = window.location.pathname === "/review";
 
   const [page, setPage] = useState(isReviewPath ? "review" : "today");
+  const [originCheck, setOriginCheck] = useState<OriginCheckResult | null>(null);
   const activePatientId = useUIStore((s) => s.activePatientId);
   const activeAppointmentId = useUIStore((s) => s.activeAppointmentId);
   const setActivePage = useUIStore((s) => s.setActivePage);
@@ -32,6 +35,23 @@ export default function App() {
       setActivePage(page as ActivePage);
     }
   }, [page, setActivePage, isReviewPath]);
+
+  // Module A: origin-identity self-check, once per app load. Detection only —
+  // never blocks rendering or navigation.
+  useEffect(() => {
+    let cancelled = false;
+    checkOriginIdentity()
+      .then((result) => {
+        if (!cancelled) setOriginCheck(result);
+      })
+      .catch(() => {
+        // checkOriginIdentity itself never throws, but guard anyway: a
+        // failure here must never break app startup.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const goToConsultation = (patientId: string, appointmentId: string) => {
     setPage("consultation");
@@ -56,8 +76,22 @@ export default function App() {
     return <PrescriptionPrint />;
   }
 
+  const originBanner =
+    originCheck?.status === "mismatch" ? (
+      <OriginMismatchBanner
+        currentOrigin={originCheck.currentOrigin}
+        recordedOrigin={originCheck.recordedOrigin}
+        onAcknowledge={async () => {
+          await acknowledgeOriginChange();
+          setOriginCheck({ ...originCheck, status: "match", recordedOrigin: originCheck.currentOrigin });
+        }}
+      />
+    ) : null;
+
   return (
-    <AppShell onNavigate={handleNavigate} onPatientSelect={handlePatientSelect}>
+    <>
+      {originBanner}
+      <AppShell onNavigate={handleNavigate} onPatientSelect={handlePatientSelect}>
       {page === "today" && (
         <TodayPage goToConsultation={goToConsultation} />
       )}
@@ -94,6 +128,7 @@ export default function App() {
         )
       )}
       {page === "revenue" && <RevenuePage />}
-    </AppShell>
+      </AppShell>
+    </>
   );
 }

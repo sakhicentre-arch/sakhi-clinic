@@ -3,6 +3,7 @@ import {
   normalizePatientPhone,
 } from "../utils/whatsapp";
 import { openWhatsApp } from "../services/whatsappService";
+import { generateId } from "../utils/generateId";
 import useKeyboardInset from "../hooks/useKeyboardInset";
 import { useAppointmentStore } from "../store/useAppointmentStore";
 import { usePatientStore } from "../store/usePatientStore";
@@ -257,7 +258,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
     if (isSlotBooked(date, time, clinic, appointments)) return alert("⚠️ This slot is already booked");
 
     const success = await addAppointment({
-      id: Date.now().toString(),
+      id: generateId(),
       patientId: patient.id,
       patientName: patient.name,
       clinic,
@@ -294,7 +295,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
     const now = new Date();
     const currentTimeStr = `${now.getHours()}:${now.getMinutes().toString().padStart(2, "0")}`;
     const success = await addAppointment({
-      id: Date.now().toString(),
+      id: generateId(),
       patientId: patient.id,
       patientName: patient.name,
       clinic,

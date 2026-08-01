@@ -31,6 +31,7 @@ import { PullToRefreshScrollRegion, SplitPane, ScrollRegion } from "../component
 import { normalizePatientPhone } from "../utils/whatsapp";
 import { openWhatsApp } from "../services/whatsappService";
 import { addPatient as saveNewPatient, updatePatient as saveUpdatedPatient, deletePatient as removePatient } from "../services/patientService";
+import { generateId } from "../utils/generateId";
 import type { Consultation, Report } from "../types/models";
 
 type PatientPageConsultation = Omit<Consultation, "outcome" | "medicines"> & {
@@ -221,6 +222,7 @@ export default function PatientPage(
   const loadPatients = usePatientStore((state) => state.loadPatients);
   const updatePatient = usePatientStore((state) => state.updatePatient);
   const deletePatient = usePatientStore((state) => state.deletePatient);
+  const setPatientStoreError = usePatientStore((state) => state.setLastError);
 
   const rawConsultations = useConsultationStore(
     (state) => state.consultations
@@ -498,16 +500,18 @@ export default function PatientPage(
         // ✅ V43: All new fields included in add payload
         await saveNewPatient({
           ...formData,
-          id: Date.now().toString(),
+          id: generateId(),
           createdAt: new Date().toISOString(),
           reports: reports as any,
         } as any);
       }
+      setPatientStoreError(null);
       setFormData(DEFAULT_FORM);
       setReports([]);
       syncSelectedId(null);
     } catch (error) {
       console.error("Error saving patient:", error);
+      setPatientStoreError(error instanceof Error ? error.message : "Error saving patient.");
       alert("Error saving patient. Please try again.");
     } finally {
       setIsSaving(false);
@@ -522,9 +526,11 @@ export default function PatientPage(
     if (!window.confirm("Delete this patient? This cannot be undone.")) return;
     try {
       await removePatient(id);
+      setPatientStoreError(null);
       if (selectedId === id) syncSelectedId(null);
     } catch (error) {
       console.error("Error deleting patient:", error);
+      setPatientStoreError(error instanceof Error ? error.message : "Error deleting patient.");
       alert("Error deleting patient. Please try again.");
     }
   };
@@ -544,7 +550,7 @@ export default function PatientPage(
     const file = e.target.files?.[0];
     if (!file) return;
     const newReport: Report = {
-      id: Date.now().toString(),
+      id: generateId(),
       name: file.name,
       fileUrl: URL.createObjectURL(file),
       uploadedAt: new Date().toISOString(),

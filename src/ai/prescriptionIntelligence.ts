@@ -107,7 +107,6 @@ export const preparePrintData = (patient: any, totality: any, medicines: any[]) 
       dosage: m.dosage,
       duration: m.duration,
       instructions: m.prescription?.instructions || m.notes
-    })),
-    securityHash: "SHA256-" + Math.random().toString(36).substring(7).toUpperCase()
+    }))
   };
 };

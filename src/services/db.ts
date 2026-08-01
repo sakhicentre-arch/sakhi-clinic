@@ -266,6 +266,18 @@ export interface ConsultationDraft {
   savedAt: string;  // ISO timestamp
 }
 
+// Module A: single-row install/identity record, used by originIdentityService
+// to detect a change of browser origin (the most probable mechanism behind a
+// prior patient-data-loss incident, since IndexedDB storage is scoped per
+// origin). Not an auth/account record -- see Module B for that.
+export interface AppMeta {
+  id: string; // fixed singleton key, "app-meta"
+  installId: string;
+  firstRunOrigin: string;
+  firstRunAt: string;
+  baselineIsPostUpgrade?: boolean; // true if firstRunOrigin was backfilled on v50 upgrade, not a true first run
+}
+
 class SakhiDB extends Dexie {
   patients!: Dexie.Table<Patient, string>;
   consultations!: Dexie.Table<Consultation, string>;
@@ -275,6 +287,7 @@ class SakhiDB extends Dexie {
   drafts!: Dexie.Table<ConsultationDraft, string>;
   syncOutbox!: Dexie.Table<SyncOutboxEntry, string>;
   operationalEvents!: Dexie.Table<OperationalEvent, string>;
+  appMeta!: Dexie.Table<AppMeta, string>;
 
   constructor() {
     super("SakhiClinicDB");
@@ -377,6 +390,27 @@ class SakhiDB extends Dexie {
       operationalEvents: "id, timestamp, level, type"
     }).upgrade(() => {
       // No migration - operational log starts empty
+    });
+
+    // V50 (Module A — Production Data Layer): single-row appMeta table for the
+    // origin-identity self-check. Purely additive -- no existing table's shape
+    // changes, no .upgrade() data transform, since there is nothing in any
+    // existing table to migrate INTO appMeta from. Populating the single row
+    // (with the "this is a post-upgrade baseline, not a true first run" flag)
+    // happens in originIdentityService.ts at app start, not here, since that
+    // logic needs logOperationalEvent() (in operationalEventLogService.ts),
+    // which itself imports `db` from this file -- importing it back here would
+    // be circular.
+    this.version(50).stores({
+      patients: "id, name, phone, nextFollowUpDate, lastVisit, deletedAt, createdAt, updatedAt",
+      consultations: "id, patientId, appointmentId, date, outcome, clinicId, learnedAt, deletedAt, createdAt, updatedAt",
+      learning: "++id, [remedy+symptomKey], remedy, symptomKey",
+      caseMemory: "++id, patientId, remedy, outcome, deletedAt, createdAt, updatedAt",
+      appointments: "id, date, patientId, status, clinic, [date+time+clinic], [clinic+date], deletedAt, createdAt, updatedAt",
+      drafts: "id, patientId, savedAt",
+      syncOutbox: "id, entityType, entityId, operationType, timestamp, syncStatus, retryCount",
+      operationalEvents: "id, timestamp, level, type",
+      appMeta: "id"
     });
   }
 }
