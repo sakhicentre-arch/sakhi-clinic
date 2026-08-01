@@ -91,10 +91,20 @@ describe("Settings navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: /^settings$/i }));
     await screen.findByTestId("settings-page");
 
-    expect(screen.getByText("Google Drive Sync")).toBeInTheDocument();
-    expect(screen.getByText("Automatic Backup")).toBeInTheDocument();
-    expect(screen.getByText("Cloud Sync")).toBeInTheDocument();
-    expect(screen.getAllByText("Coming Soon").length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText("Backup Version History")).toBeInTheDocument();
+    expect(screen.getByText("Multi-Device Sync")).toBeInTheDocument();
+    expect(screen.getAllByText("Coming Soon").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows the Cloud Backup section honestly as not configured when no OAuth client ID exists", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^settings$/i }));
+    await screen.findByTestId("settings-page");
+
+    expect(screen.getByText("Cloud Backup")).toBeInTheDocument();
+    expect(screen.getByText("Not configured")).toBeInTheDocument();
+    expect(screen.getByText("This device")).toBeInTheDocument();
   });
 
   it("lets the doctor switch the active clinic from Settings", async () => {

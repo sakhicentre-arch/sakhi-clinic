@@ -92,10 +92,39 @@ async function loadSnapshot(filename: string): Promise<string | null> {
   }
 }
 
+async function deleteSnapshot(filename: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    if (typeof caches === "undefined" || !caches.open) return { ok: false, error: "Cache Storage unavailable" };
+    const cache = await caches.open(CACHE_NAME);
+    const req = new Request(`${location.origin}/__sakhi_backup__/${filename}`);
+    const deleted = await cache.delete(req);
+    return { ok: deleted, error: deleted ? undefined : "File not found" };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function getSnapshotMetadata(filename: string) {
+  const items = await listSnapshots();
+  const match = items.find((i) => i.filename === filename);
+  return match ? { filename: match.filename, sizeBytes: match.sizeBytes } : null;
+}
+
 export const localBackupProvider: StorageProvider = {
   id: "local",
   label: "This device",
   available: true,
+  capabilities: {
+    supportsUpload: true, // "upload" here means "save" -- a local file download/snapshot
+    supportsDownload: true,
+    supportsDelete: true,
+    supportsList: true,
+    supportsVersioning: false, // Cache Storage keeps N latest snapshots, not named versions
+    supportsIncremental: false,
+    supportsStreaming: false,
+    supportsEncryption: false, // encryptionLayer.ts, not the provider, owns this -- see its own comment
+    supportsConflictResolution: false, // single device, nothing to conflict with
+  },
 
   async save(input: StorageProviderSaveInput): Promise<StorageProviderSaveResult> {
     try {
@@ -120,4 +149,6 @@ export const localBackupProvider: StorageProvider = {
   list: listSnapshots,
   load: loadSnapshot,
   prune: pruneSnapshots,
+  delete: deleteSnapshot,
+  getMetadata: getSnapshotMetadata,
 };

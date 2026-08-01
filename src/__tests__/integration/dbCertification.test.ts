@@ -59,7 +59,7 @@ describe("Module A — database certification", () => {
   it("ROLLBACK: reverting the app's code to a v49-only build, after the database has already been upgraded to v50, does not corrupt or hide existing data", async () => {
     const { db } = await import("../../services/db");
     await db.open();
-    expect(db.verno).toBe(52);
+    expect(db.verno).toBe(53);
     await db.patients.add({ id: "P-ROLLBACK-1", name: "Rollback Test", phone: "9000000099", createdAt: "x", updatedAt: "x" } as any);
     db.close();
 
@@ -69,15 +69,15 @@ describe("Module A — database certification", () => {
     // reverted.verno reflects THIS CLASS's own declared schema (49), not the
     // database's actual on-disk version -- confirmed by probing directly:
     // Dexie encodes its declared version as nativeVersion*10 internally, so
-    // the real stored version here is 520 (i.e. Dexie's current "52"),
+    // the real stored version here is 530 (i.e. Dexie's current "53"),
     // reachable via backendDB().version, not via .verno. Opening at a
     // declared version BELOW the stored one does not throw here, unlike a
-    // raw `indexedDB.open(name, 49)` against an already-v520 store, which
+    // raw `indexedDB.open(name, 49)` against an already-v530 store, which
     // DOES throw VersionError per spec (verified separately, outside this
     // test, by calling the raw API directly) -- Dexie is deliberately more
     // lenient than the raw platform for exactly this scenario.
     expect(reverted.verno).toBe(49);
-    expect((reverted as any).backendDB().version).toBe(520);
+    expect((reverted as any).backendDB().version).toBe(530);
 
     // The actual claim that matters: existing v49-shaped data is completely
     // intact and readable by the reverted code.
@@ -105,7 +105,7 @@ describe("Module A — database certification", () => {
     const secondLoad = await import("../../services/db");
     await secondLoad.db.open();
 
-    expect(secondLoad.db.verno).toBe(52);
+    expect(secondLoad.db.verno).toBe(53);
     const rows = await secondLoad.db.patients.toArray();
     expect(rows).toHaveLength(1); // not duplicated
     expect(rows[0].id).toBe("P-DUP-1");
@@ -113,7 +113,7 @@ describe("Module A — database certification", () => {
     secondLoad.db.close();
   });
 
-  it("SCHEMA INTEGRITY: every table declared through v52 exists and is queryable after the upgrade", async () => {
+  it("SCHEMA INTEGRITY: every table declared through v53 exists and is queryable after the upgrade", async () => {
     const { db } = await import("../../services/db");
     await db.open();
 

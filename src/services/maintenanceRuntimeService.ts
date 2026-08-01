@@ -6,6 +6,7 @@ import { exportClinicBundle } from "./clinicExportService";
 import { getRecentOperationalEvents, logOperationalEvent, pruneOperationalEvents } from "./operationalEventLogService";
 import { scheduleFollowUpReminders } from "./reminderSchedulerService";
 import { retryFailedReminders } from "./reminderMaintenanceService";
+import { retryEligibleBackupJobs } from "./backup/backupRetryService";
 
 export type MaintenanceRunReason = "manual" | "app-start" | "interval" | "pre-export" | "post-import" | "diagnostic";
 
@@ -21,6 +22,7 @@ export type MaintenanceRunResult = {
     integrityChecked: boolean;
     remindersScheduled: number;
     remindersRetried: number;
+    backupJobsRetried: number;
   };
   errors: Array<{ area: string; message: string }>;
 };
@@ -73,6 +75,7 @@ export async function runMaintenanceOnce(input?: {
   let integrityChecked = false;
   let remindersScheduled = 0;
   let remindersRetried = 0;
+  let backupJobsRetried = 0;
 
   await logOperationalEvent({
     level: "info",
@@ -118,6 +121,20 @@ export async function runMaintenanceOnce(input?: {
   } catch (error) {
     errors.push({
       area: "reminders",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  // Backup Engine (Phase 3): failed export/auto BackupJobs whose backoff
+  // window has arrived get retried on this same tick. Isolated in its own
+  // try/catch for the same reason as reminders above -- a Drive-connected
+  // provider having a bad day must never block outbox/reminder maintenance.
+  try {
+    const retrySummary = await retryEligibleBackupJobs();
+    backupJobsRetried = retrySummary.attempted;
+  } catch (error) {
+    errors.push({
+      area: "backupJobs",
       message: error instanceof Error ? error.message : String(error),
     });
   }
@@ -172,6 +189,7 @@ export async function runMaintenanceOnce(input?: {
       integrityChecked,
       remindersScheduled,
       remindersRetried,
+      backupJobsRetried,
     },
     errors,
   };

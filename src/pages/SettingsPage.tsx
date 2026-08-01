@@ -2,12 +2,14 @@
  * SettingsPage.tsx
  * Sakhi Clinic — Operational Control Center
  *
- * Release 1.0 scope only. Every action here calls into an existing service
- * (backupService, patientImportService, csvExportService,
- * storageIntegrityService, maintenanceRuntimeService) rather than
- * reimplementing backup/export/import logic. Sections not yet built
- * (Google Drive Sync, Automatic Backup, Cloud Sync) are shown disabled,
- * not hidden, per the roadmap's own module sequencing.
+ * Every action here calls into an existing service (backupService,
+ * patientImportService, csvExportService, storageIntegrityService,
+ * maintenanceRuntimeService, the Backup Engine) rather than reimplementing
+ * backup/export/import logic. The Cloud Backup section talks to Google
+ * Drive only through the StorageProvider/OAuthService abstractions --
+ * this file has no Drive-specific code of its own, and shows an honest
+ * "not configured" state rather than a fake "Connect" button, since no
+ * OAuth client ID exists in this deployment yet.
  */
 
 import React, { useEffect, useState } from "react";
@@ -18,8 +20,11 @@ import {
   Info,
   Activity,
   Cloud,
+  CloudOff,
   Download,
   Upload,
+  RefreshCw,
+  LogOut,
   type LucideIcon,
 } from "lucide-react";
 import { MobileCard, MobileSection, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
@@ -30,8 +35,19 @@ import { importPatientsFromCsv, PatientImportMode } from "../services/patientImp
 import { exportPatientsCsv } from "../services/csvExportService";
 import { runDexieHealthCheck, DexieHealthReport } from "../services/storageIntegrityService";
 import { getMaintenanceRuntimeReport, MaintenanceRuntimeReport } from "../services/maintenanceRuntimeService";
+import { getActiveProvider, setActiveProvider, resetActiveProviderToLocal } from "../services/backup/backupManager";
+import { listRecentJobs } from "../services/backup/backupJobService";
+import { retryEligibleBackupJobs } from "../services/backup/backupRetryService";
+import { googleDriveProvider } from "../services/backup/providers/googleDriveProvider";
+import { googleOAuthService } from "../services/backup/oauth/googleOAuthService";
+import type { BackupJob } from "../services/db";
 
 declare const __APP_VERSION__: string;
+
+function formatJobStage(job: BackupJob): string {
+  const last = job.events[job.events.length - 1];
+  return last ? `${last.stage}: ${last.message}` : job.status;
+}
 
 const CLINICS: ActiveClinic[] = ["Dabholi", "City Light"];
 
@@ -128,17 +144,45 @@ export default function SettingsPage() {
   const [importStatus, setImportStatus] = useState<string>("");
   const [busy, setBusy] = useState<string | null>(null);
 
+  const [driveConnected, setDriveConnected] = useState(false);
+  const [cloudJobs, setCloudJobs] = useState<BackupJob[]>([]);
+  const [failedJobCount, setFailedJobCount] = useState(0);
+  const [cloudNote, setCloudNote] = useState<string>("");
+
+  const driveConfigured = googleDriveProvider.available; // reflects isConfigured(), not sign-in state -- see the provider's own comment
+  const activeProviderId = getActiveProvider().id;
+
   const load = async () => {
     setLoading(true);
     try {
-      const [summary, dexieHealth, runtime] = await Promise.all([
+      try {
+        const rawConnectResult = window.localStorage.getItem("sakhi.driveConnectResult.v1");
+        if (rawConnectResult) {
+          window.localStorage.removeItem("sakhi.driveConnectResult.v1");
+          const connectResult = JSON.parse(rawConnectResult) as { ok: boolean; error?: string };
+          setCloudNote(
+            connectResult.ok
+              ? "Google Drive connected. New backups will now save to Drive."
+              : `Could not connect Google Drive: ${connectResult.error || "Unknown error"}`
+          );
+        }
+      } catch {
+        // ignore -- worst case the doctor just doesn't see the one-time note
+      }
+
+      const [summary, dexieHealth, runtime, connected, jobs] = await Promise.all([
         getLocalBackupSnapshotSummary(),
         runDexieHealthCheck(),
         getMaintenanceRuntimeReport({ includeRecentEvents: 0 }),
+        googleOAuthService.isAuthenticated(),
+        listRecentJobs(10),
       ]);
       setBackupSummary(summary);
       setHealth(dexieHealth);
       setRuntimeReport(runtime);
+      setDriveConnected(connected);
+      setCloudJobs(jobs.filter((j) => j.providerId !== "local"));
+      setFailedJobCount(jobs.filter((j) => j.status === "failed").length);
 
       if (typeof navigator !== "undefined" && (navigator as any).storage?.estimate) {
         try {
@@ -158,6 +202,52 @@ export default function SettingsPage() {
   useEffect(() => {
     void load();
   }, []);
+
+  const handleConnectDrive = async () => {
+    setCloudNote("");
+    if (!googleDriveProvider.available) {
+      setCloudNote("Google Drive requires setup by the developer (a Google OAuth Client ID) before it can be connected. Local backups are unaffected and remain fully functional.");
+      return;
+    }
+    setBusy("connect-drive");
+    try {
+      const url = await googleOAuthService.getAuthUrl();
+      if (!url) {
+        setCloudNote("Could not start Google sign-in.");
+        return;
+      }
+      window.location.href = url;
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleDisconnectDrive = async () => {
+    setBusy("disconnect-drive");
+    try {
+      await googleOAuthService.signOut();
+      resetActiveProviderToLocal();
+      setCloudNote("Disconnected. Backups will continue saving to this device.");
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleRetryFailedUploads = async () => {
+    setBusy("retry-uploads");
+    try {
+      const summary = await retryEligibleBackupJobs();
+      setCloudNote(
+        summary.attempted === 0
+          ? "No failed backups are due for retry right now."
+          : `Retried ${summary.attempted}: ${summary.succeeded} succeeded, ${summary.stillFailed} still failed.`
+      );
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const handleExportBackup = async () => {
     setBusy("export-backup");
@@ -264,6 +354,101 @@ export default function SettingsPage() {
                   />
                 </label>
               </div>
+            </MobileCard>
+
+            {/* ================= Cloud Backup ================= */}
+            <MobileCard>
+              <SectionHeader
+                icon={driveConnected ? Cloud : CloudOff}
+                title="Cloud Backup"
+                subtitle={driveConfigured ? "Google Drive" : "Google Drive — not yet configured for this deployment"}
+              />
+
+              <div className="sakhi-stack-tight">
+                <SettingRow
+                  label="Google Drive status"
+                  value={driveConnected ? "Connected" : driveConfigured ? "Not connected" : "Not configured"}
+                  tone={driveConnected ? "success" : "muted"}
+                />
+                <SettingRow label="Active backup destination" value={activeProviderId === "local" ? "This device" : "Google Drive"} />
+                {failedJobCount > 0 && (
+                  <SettingRow label="Failed backups" value={`${failedJobCount} awaiting retry`} tone="brand" />
+                )}
+              </div>
+
+              <div className="sakhi-caption" style={{ marginTop: "var(--space-2)" }}>
+                Capabilities: upload, download, delete, list
+                {googleDriveProvider.capabilities.supportsStreaming ? ", progress reporting" : ""}. No versioning, incremental sync, or
+                conflict resolution yet -- every backup is a full upload.
+              </div>
+
+              {cloudNote && (
+                <div className="sakhi-caption" style={{ marginTop: "var(--space-2)", color: "#475569", fontWeight: 800 }}>
+                  {cloudNote}
+                </div>
+              )}
+
+              <div className="sakhi-row" style={{ gap: 10, flexWrap: "wrap", marginTop: "var(--space-3)" }}>
+                {!driveConnected ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleConnectDrive()}
+                    disabled={busy === "connect-drive"}
+                    className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+                    style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}
+                  >
+                    <Cloud size={16} />
+                    {busy === "connect-drive" ? "Connecting…" : "Connect Drive"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleDisconnectDrive()}
+                    disabled={busy === "disconnect-drive"}
+                    className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+                    style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}
+                  >
+                    <LogOut size={16} />
+                    {busy === "disconnect-drive" ? "Disconnecting…" : "Disconnect Drive"}
+                  </button>
+                )}
+                {failedJobCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void handleRetryFailedUploads()}
+                    disabled={busy === "retry-uploads"}
+                    className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+                    style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}
+                  >
+                    <RefreshCw size={16} />
+                    {busy === "retry-uploads" ? "Retrying…" : "Retry Failed Uploads"}
+                  </button>
+                )}
+              </div>
+
+              {cloudJobs.length > 0 && (
+                <>
+                  <div className="sakhi-caption" style={{ marginTop: "var(--space-3)", marginBottom: "var(--space-2)" }}>
+                    Cloud backup history
+                  </div>
+                  <div className="sakhi-progress-rail">
+                    {cloudJobs.map((job) => (
+                      <div key={job.id} className="sakhi-progress-card">
+                        <div className="sakhi-progress-title">
+                          <div className="sakhi-progress-title-left">
+                            <span className="sakhi-progress-dot" data-state={job.status === "succeeded" ? "done" : job.status === "failed" ? "todo" : "active"} />
+                            <span className="sakhi-body" style={{ fontSize: 12, fontWeight: 950, color: "#0f172a" }}>{job.kind}</span>
+                          </div>
+                          <span className="sakhi-pill" data-tone={job.status === "succeeded" ? "success" : job.status === "failed" ? "brand" : "muted"}>
+                            {job.status}
+                          </span>
+                        </div>
+                        <div className="sakhi-progress-snippet">{formatJobStage(job)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </MobileCard>
 
             {/* ================= Patient Data ================= */}
@@ -418,9 +603,8 @@ export default function SettingsPage() {
             <MobileCard>
               <SectionHeader icon={Cloud} title="Coming Soon" subtitle="Planned for a future release" />
               <div className="sakhi-stack-tight">
-                <ComingSoonRow label="Google Drive Sync" description="Automatic off-device backup to your own Google Drive" />
-                <ComingSoonRow label="Automatic Backup" description="Scheduled backups without manual export" />
-                <ComingSoonRow label="Cloud Sync" description="Keep multiple devices in sync automatically" />
+                <ComingSoonRow label="Backup Version History" description="Browse and restore from multiple past cloud backups, not just the latest" />
+                <ComingSoonRow label="Multi-Device Sync" description="Keep multiple devices in sync automatically, with conflict resolution" />
               </div>
             </MobileCard>
           </MobileSection>

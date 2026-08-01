@@ -335,11 +335,19 @@ export type BackupJobStage =
   | "compressing"
   | "validating"
   | "saving"
+  | "verifying"
   | "parsing"
   | "decrypting"
   | "decompressing"
   | "restoring"
   | "done";
+
+// Phase 3: a coarse, machine-readable category alongside the free-text
+// `error` message -- lets retry logic (backupRetryService.ts) and the UI
+// distinguish "worth retrying automatically" (network) from "retrying
+// won't help without doctor action" (auth, quota) without parsing error
+// text.
+export type BackupJobFailureReason = "network" | "auth" | "quota" | "validation" | "corruption" | "cancelled" | "unknown";
 
 export interface BackupJobEvent {
   id: string;
@@ -361,7 +369,21 @@ export interface BackupJob {
   error?: string;
   sizeBytes?: number;
   filename?: string;
-  events: BackupJobEvent[]; // append-only progress log for this job
+  events: BackupJobEvent[]; // append-only progress log for this job -- events are only ever appended, never rewritten or removed
+
+  // Phase 3: cloud-ready fields. All optional/defaulted so existing v52
+  // job records (before this migration) remain valid without a data
+  // transform -- see the v53 .stores() block below, purely additive.
+  retryCount: number;
+  maxRetries: number;
+  nextRetryAt?: string;
+  failureReason?: BackupJobFailureReason;
+  /** Provider-specific data opaque to the engine (e.g. a Drive file ID). Never inspected by backupManager.ts's own logic. */
+  providerMetadata?: Record<string, any>;
+  /** Mirrors the most recent "saving" stage event's progressPercent, kept as its own field for cheap UI reads without scanning the full event log. */
+  uploadProgressPercent?: number;
+  /** Mirrors the most recent "verifying" stage event's progressPercent. */
+  verificationProgressPercent?: number;
 }
 
 class SakhiDB extends Dexie {
@@ -535,6 +557,31 @@ class SakhiDB extends Dexie {
       reminderQueue: "id, patientId, type, status, dueAt, channel",
       reminderHistory: "id, reminderId, patientId, attemptedAt, action",
       backupJobs: "id, kind, providerId, status, createdAt"
+    });
+
+    // V53 (Phase 3 — cloud-ready BackupJob fields): adds a nextRetryAt
+    // index to backupJobs so backupRetryService.ts can efficiently query
+    // "which jobs are due for retry" instead of scanning every job. The
+    // new BackupJob fields themselves (retryCount, maxRetries,
+    // failureReason, providerMetadata, uploadProgressPercent,
+    // verificationProgressPercent) are plain object properties, not new
+    // indexes -- they don't require a version bump on their own, but the
+    // new index does. Purely additive: existing v52 job rows are read
+    // with these fields simply absent/undefined, which every reader
+    // already treats as "not yet retried" / "no provider metadata."
+    this.version(53).stores({
+      patients: "id, name, phone, nextFollowUpDate, lastVisit, deletedAt, createdAt, updatedAt",
+      consultations: "id, patientId, appointmentId, date, outcome, clinicId, learnedAt, deletedAt, createdAt, updatedAt",
+      learning: "++id, [remedy+symptomKey], remedy, symptomKey",
+      caseMemory: "++id, patientId, remedy, outcome, deletedAt, createdAt, updatedAt",
+      appointments: "id, date, patientId, status, clinic, [date+time+clinic], [clinic+date], deletedAt, createdAt, updatedAt",
+      drafts: "id, patientId, savedAt",
+      syncOutbox: "id, entityType, entityId, operationType, timestamp, syncStatus, retryCount",
+      operationalEvents: "id, timestamp, level, type",
+      appMeta: "id",
+      reminderQueue: "id, patientId, type, status, dueAt, channel",
+      reminderHistory: "id, reminderId, patientId, attemptedAt, action",
+      backupJobs: "id, kind, providerId, status, createdAt, nextRetryAt"
     });
   }
 }

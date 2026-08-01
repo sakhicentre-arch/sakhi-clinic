@@ -65,7 +65,7 @@ describe("Phase 2 — v50 to v51 migration (reminderQueue/reminderHistory)", () 
     // the v50->v51 step this test seeds for, it just lands on whatever
     // the app's current version is afterward, same as a real doctor's
     // browser would on first load post-upgrade.
-    expect(db.verno).toBe(52);
+    expect(db.verno).toBe(53);
 
     // Pre-existing data is completely untouched.
     const patients = await db.patients.toArray();

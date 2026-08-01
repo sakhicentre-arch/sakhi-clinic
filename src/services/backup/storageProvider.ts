@@ -43,10 +43,48 @@ export interface StorageProviderListEntry {
   sizeBytes?: number;
 }
 
+export interface StorageProviderMetadata {
+  filename: string;
+  sizeBytes?: number;
+  createdAt?: string;
+  /** The provider's own identifier for this file, if it has one (e.g. a Drive file ID) -- opaque to the engine. */
+  providerFileId?: string;
+}
+
+export interface StorageProviderDeleteResult {
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * What a provider CAN do, independent of whether it's usable right now.
+ * Replaces a bare boolean because "available" conflates two different
+ * questions a provider previously had to answer with one flag: what it's
+ * capable of vs. whether it's currently connected. The UI reads this to
+ * decide which controls to even show -- e.g. only offer "Delete" for a
+ * provider that reports supportsDelete, rather than hardcoding
+ * per-provider UI branches (which would put provider-specific knowledge
+ * in the UI layer, the same mistake this abstraction exists to avoid at
+ * the engine layer).
+ */
+export interface ProviderCapabilities {
+  supportsUpload: boolean;
+  supportsDownload: boolean;
+  supportsDelete: boolean;
+  supportsList: boolean;
+  supportsVersioning: boolean;
+  supportsIncremental: boolean;
+  supportsStreaming: boolean;
+  supportsEncryption: boolean;
+  supportsConflictResolution: boolean;
+}
+
 export interface StorageProvider {
   readonly id: string;
   readonly label: string;
-  /** Whether this provider can actually be used right now (e.g. Drive requires a completed OAuth connection). */
+  /** What this provider is capable of, regardless of current connection state. */
+  readonly capabilities: ProviderCapabilities;
+  /** Whether this provider can actually be used right now (e.g. Drive requires a completed OAuth connection). Distinct from capabilities: a provider can support upload and still be unavailable because it isn't connected yet. */
   readonly available: boolean;
 
   save(input: StorageProviderSaveInput): Promise<StorageProviderSaveResult>;
@@ -59,4 +97,10 @@ export interface StorageProvider {
 
   /** Optional: bounded retention -- keep only the newest N snapshots. */
   prune?(keepLatest: number): Promise<void>;
+
+  /** Optional: remove a specific stored file (capabilities.supportsDelete gates whether the UI offers this). */
+  delete?(filename: string): Promise<StorageProviderDeleteResult>;
+
+  /** Optional: metadata about a stored file without downloading its content. */
+  getMetadata?(filename: string): Promise<StorageProviderMetadata | null>;
 }

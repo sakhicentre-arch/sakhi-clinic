@@ -79,7 +79,7 @@ describe("Module A — performance measurement (this environment only)", () => {
     await db.open();
     const migrationMs = performance.now() - t0;
 
-    expect(db.verno).toBe(52); // current schema version (v51 added reminder tables, v52 added backupJobs)
+    expect(db.verno).toBe(53); // current schema version (v51 added reminder tables, v52 added backupJobs, v53 extended backupJobs for retry/cloud)
     expect(await db.patients.count()).toBe(ROW_COUNT);
     expect(await db.consultations.count()).toBe(ROW_COUNT * 2);
 

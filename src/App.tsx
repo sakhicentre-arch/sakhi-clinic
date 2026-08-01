@@ -18,12 +18,34 @@ import RemindersPage from "./pages/RemindersPage";
 import { VoiceSessionProvider } from "./hooks/VoiceSessionContext";
 import OriginMismatchBanner from "./components/OriginMismatchBanner";
 import { acknowledgeOriginChange, checkOriginIdentity, OriginCheckResult } from "./services/originIdentityService";
+import { GOOGLE_OAUTH_CALLBACK_PATH, completeGoogleDriveConnection } from "./services/backup/oauth/completeGoogleDriveConnection";
+
+function hasPendingDriveConnectResult(): boolean {
+  try {
+    // Boolean(...), not "!== null": localStorage.getItem returns null for a
+    // genuinely absent key, but test environments that stub localStorage
+    // without an explicit implementation return undefined -- both must read
+    // as "nothing pending" here, only a real stored string means otherwise.
+    return Boolean(window.localStorage.getItem("sakhi.driveConnectResult.v1"));
+  } catch {
+    return false;
+  }
+}
 
 export default function App() {
   useSafeViewport();
   const isReviewPath = window.location.pathname === "/review";
+  const isOAuthCallbackPath = window.location.pathname === GOOGLE_OAUTH_CALLBACK_PATH;
+  // After the OAuth redirect's own full reload back to "/" (see the effect
+  // below), the doctor should land back on Settings -- where they started
+  // and where the connect/fail note is shown -- not on the default Today
+  // page. The result flag left in localStorage is the only signal this
+  // fresh page load has that it's a landing from that round trip.
+  const isLandingFromDriveConnect = !isOAuthCallbackPath && hasPendingDriveConnectResult();
 
-  const [page, setPage] = useState(isReviewPath ? "review" : "today");
+  const [page, setPage] = useState(
+    isOAuthCallbackPath || isLandingFromDriveConnect ? "settings" : isReviewPath ? "review" : "today"
+  );
   const [originCheck, setOriginCheck] = useState<OriginCheckResult | null>(null);
   const activePatientId = useUIStore((s) => s.activePatientId);
   const activeAppointmentId = useUIStore((s) => s.activeAppointmentId);
@@ -38,6 +60,27 @@ export default function App() {
       setActivePage(page as ActivePage);
     }
   }, [page, setActivePage, isReviewPath]);
+
+  // Google Drive OAuth redirect landing: Google sends the doctor back here
+  // after consent. A full reload afterward (rather than just clearing the
+  // URL) is deliberate -- it's the simplest reliable way for every
+  // already-rendered piece of UI (Settings' connection status, active
+  // provider, etc.) to reflect the newly-connected state, without adding
+  // app-wide reactive state just for this one-time transition. This mirrors
+  // the existing pattern of a real window.location.href redirect to start
+  // the flow (see googleOAuthService.getAuthUrl / SettingsPage's
+  // handleConnectDrive) rather than introducing a client-side router.
+  useEffect(() => {
+    if (!isOAuthCallbackPath) return;
+    completeGoogleDriveConnection(window.location.search).then((result) => {
+      try {
+        window.localStorage.setItem("sakhi.driveConnectResult.v1", JSON.stringify(result));
+      } catch {
+        // ignore -- worst case the doctor just sees the normal Settings state with no note
+      }
+      window.location.replace("/");
+    });
+  }, [isOAuthCallbackPath]);
 
   // Module A: origin-identity self-check, once per app load. Detection only —
   // never blocks rendering or navigation.
