@@ -16,7 +16,7 @@ What *has* changed: the app is now better at protecting what's on this device fr
 
 - Use the app's **Download Backup** feature regularly — ideally every time you finish for the day, and definitely before any of the events below (reinstalling the browser, getting a new phone or laptop, restarting the device after it's been acting strangely).
 - A backup is a single file. **Move it off this device** — email it to yourself, save it to a USB drive, upload it to your own cloud storage (Google Drive, etc.). A backup file that stays on the same device is not protection against that device failing.
-- There is currently no automatic backup to Google Drive or any cloud service. This is planned but not yet built. Until it exists, backups are entirely your responsibility.
+- **Google Drive backup exists in the app, but only works once it has been configured by whoever set up your deployment** (a one-time Google Cloud setup step — see `docs/GOOGLE_DRIVE_SETUP.md` for the technical steps). Until that setup is done, Settings > Cloud Backup will honestly say "not yet configured for this deployment", and the Connect button will explain the same thing rather than pretending to work. If it has been configured, Settings will instead let you press **Connect Drive** and sign in with a Google account — after that, backups save to both this device and Drive automatically. Ask whoever manages your deployment whether this step has been done for you.
 
 ## What happens if you reinstall or replace something
 
@@ -37,7 +37,7 @@ There is no exception to this pattern today. The single safeguard against all of
 
 ## Known operational risks, plainly stated
 
-- **No off-device backup exists automatically.** You are the backup system until a cloud-sync feature is built.
+- **No off-device backup happens automatically unless Google Drive has been connected** (see above). Until then, you are the backup system.
 - **If storage becomes corrupted, there is no repair tool.** The app can tell you something is wrong, but it cannot fix it. A recent backup is the only recovery path.
 - **A very unusual, very high-volume scenario** (thousands of unsynced background records accumulating) could cause a background maintenance task to take longer than usual. This runs quietly in the background every few minutes and should never interrupt you while typing or saving — if it ever visibly slows down a save, that itself is worth reporting.
 

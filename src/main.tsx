@@ -7,6 +7,7 @@ import { registerSW } from 'virtual:pwa-register';
 import { initAppLifecycleRuntime } from "./services/appLifecycleRuntimeService";
 import { logOperationalEvent } from "./services/operationalEventLogService";
 import { installGlobalErrorCapture } from "./services/runtimeErrorCaptureService";
+import { logDriveConfigurationDiagnostic } from "./services/backup/oauth/driveConfigDiagnostics";
 
 const root = ReactDOM.createRoot(document.getElementById("root")!);
 
@@ -63,6 +64,10 @@ const root = ReactDOM.createRoot(document.getElementById("root")!);
   } catch (err) {
     console.warn("[main] initAppLifecycleRuntime failed", err);
   }
+
+  // Surfaces Google Drive's configuration state in the operational event
+  // log from boot, so it's visible without opening Settings first.
+  logDriveConfigurationDiagnostic().catch(() => {});
 
   // Register service worker and surface update/offline lifecycle events
   try {
