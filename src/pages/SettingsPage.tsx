@@ -210,16 +210,19 @@ export default function SettingsPage() {
       return;
     }
     setBusy("connect-drive");
-    try {
-      const url = await googleOAuthService.getAuthUrl();
-      if (!url) {
-        setCloudNote("Could not start Google sign-in.");
-        return;
-      }
-      window.location.href = url;
-    } finally {
+    const url = await googleOAuthService.getAuthUrl();
+    if (!url) {
+      setCloudNote("Could not start Google sign-in.");
       setBusy(null);
+      return;
     }
+    // Deliberately leave `busy` set and skip a `finally` reset here: assigning
+    // location.href only schedules navigation, it doesn't stop this script
+    // running -- resetting busy immediately would re-enable the button during
+    // that window, letting a fast second click call getAuthUrl() again and
+    // overwrite the PKCE verifier this in-flight redirect's code_challenge
+    // depends on (localStorage holds exactly one verifier at a time).
+    window.location.href = url;
   };
 
   const handleDisconnectDrive = async () => {

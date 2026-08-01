@@ -88,6 +88,36 @@ function isExpired(tokens: OAuthTokens): boolean {
   return !Number.isFinite(t) || Date.now() >= t;
 }
 
+/** Client IDs aren't secret (they're already visible in the auth redirect's
+ * own URL), but diagnostic logs mask them anyway rather than assume that. */
+function maskClientId(clientId: string): string {
+  return clientId.length <= 10 ? "***" : `${clientId.slice(0, 6)}...${clientId.slice(-4)}`;
+}
+
+/** Logs exactly what's being sent to Google's token endpoint, without ever
+ * logging the authorization code, verifier, or any token/secret value --
+ * only their lengths, so a bad/empty value is visible without exposing it. */
+function logTokenExchangeRequest(input: { redirectUri: string; clientId: string; grantType: string; codeLength: number; verifierLength: number }): void {
+  console.info("[googleOAuthService] Token exchange request", {
+    redirect_uri: input.redirectUri,
+    client_id: maskClientId(input.clientId),
+    grant_type: input.grantType,
+    code_length: input.codeLength,
+    code_verifier_length: input.verifierLength,
+  });
+}
+
+/** Logs Google's actual rejection reason -- status/statusText/error/
+ * error_description are never secrets, unlike the request fields above. */
+function logTokenExchangeFailure(input: { status: number; statusText: string; error?: string; errorDescription?: string }): void {
+  console.error("[googleOAuthService] Token exchange failed", {
+    status: input.status,
+    statusText: input.statusText,
+    error: input.error,
+    error_description: input.errorDescription,
+  });
+}
+
 export const googleOAuthService: OAuthService = {
   id: "google",
 
@@ -106,11 +136,27 @@ export const googleOAuthService: OAuthService = {
     const clientId = getClientId();
     if (!clientId) return null;
 
-    const verifier = generateCodeVerifier();
+    // Reuse an already-pending verifier instead of overwriting it. Two
+    // overlapping calls here (a fast double-click on Connect Drive, or any
+    // other duplicate invocation before the first redirect completes) must
+    // not each mint their own verifier into the same localStorage key --
+    // whichever one wrote last would silently invalidate the code_challenge
+    // tied to the authorization code Google ends up issuing, and the token
+    // exchange would fail with an opaque invalid_grant. Only start a fresh
+    // PKCE pair when nothing is already in flight.
+    let verifier: string | null;
     try {
-      window.localStorage.setItem(VERIFIER_STORAGE_KEY, verifier);
+      verifier = window.localStorage.getItem(VERIFIER_STORAGE_KEY);
     } catch {
-      return null; // can't complete PKCE without persisting the verifier
+      return null;
+    }
+    if (!verifier) {
+      verifier = generateCodeVerifier();
+      try {
+        window.localStorage.setItem(VERIFIER_STORAGE_KEY, verifier);
+      } catch {
+        return null; // can't complete PKCE without persisting the verifier
+      }
     }
     const challenge = await generateCodeChallenge(verifier);
 
@@ -143,12 +189,31 @@ export const googleOAuthService: OAuthService = {
     })();
     if (!verifier) throw new Error("Missing PKCE verifier -- the sign-in flow was not started from this device/session");
 
+    // Consume the verifier now, before the network call -- a verifier is
+    // valid for exactly one exchange attempt. If this callback somehow runs
+    // a second time for the same redirect (a duplicate effect invocation, a
+    // manual refresh of the callback URL mid-flight, browser back/forward
+    // cache restoring the page), the second run finds no verifier and fails
+    // fast with the clear error above, instead of resending an
+    // already-consumed authorization code to Google -- which Google would
+    // otherwise reject with an opaque invalid_grant 400 that looks like a
+    // configuration problem but is actually just a replay.
+    try {
+      window.localStorage.removeItem(VERIFIER_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+
+    const redirectUri = getRedirectUri();
+    const grantType = "authorization_code";
+    logTokenExchangeRequest({ redirectUri, clientId, grantType, codeLength: code.length, verifierLength: verifier.length });
+
     const body = new URLSearchParams({
       client_id: clientId,
       code,
       code_verifier: verifier,
-      redirect_uri: getRedirectUri(),
-      grant_type: "authorization_code",
+      redirect_uri: redirectUri,
+      grant_type: grantType,
     });
 
     const response = await fetch(TOKEN_ENDPOINT, {
@@ -157,7 +222,20 @@ export const googleOAuthService: OAuthService = {
       body: body.toString(),
     });
     if (!response.ok) {
-      throw new Error(`Google token exchange failed (${response.status})`);
+      const errorBody = await response.text();
+      let googleError: string | undefined;
+      let googleErrorDescription: string | undefined;
+      try {
+        const parsed = JSON.parse(errorBody);
+        googleError = parsed.error;
+        googleErrorDescription = parsed.error_description;
+      } catch {
+        // Google almost always returns JSON on a 400 -- fall back to the
+        // raw text below if this particular response didn't.
+      }
+      logTokenExchangeFailure({ status: response.status, statusText: response.statusText, error: googleError, errorDescription: googleErrorDescription });
+      const detail = googleErrorDescription || googleError || errorBody || response.statusText;
+      throw new Error(`Google token exchange failed (${response.status}): ${detail}`);
     }
     const json = await response.json();
 
@@ -168,11 +246,6 @@ export const googleOAuthService: OAuthService = {
       scope: json.scope,
     };
     writeTokens(tokens);
-    try {
-      window.localStorage.removeItem(VERIFIER_STORAGE_KEY);
-    } catch {
-      // ignore
-    }
     return tokens;
   },
 
