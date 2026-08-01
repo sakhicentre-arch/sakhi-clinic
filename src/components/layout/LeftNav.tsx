@@ -10,6 +10,7 @@ import {
   Settings,
   LayoutDashboard, // Added Dashboard icon
   CalendarClock,
+  MessageCircle,
 } from "lucide-react";
 import { ActivePage } from "../../store/uiStore";
 
@@ -27,6 +28,7 @@ const navItems = [
   { id: "appointments", label: "Appointments", icon: Clock, badge: false },
   { id: "consultation", label: "Consultation", icon: Stethoscope, badge: false },
   { id: "followups", label: "Follow-ups", icon: CalendarClock, badge: false },
+  { id: "reminders", label: "Reminders", icon: MessageCircle, badge: false },
   { id: "revenue", label: "Revenue", icon: TrendingUp, badge: false },
 ];
 

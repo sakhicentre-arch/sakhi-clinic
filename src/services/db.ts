@@ -278,6 +278,44 @@ export interface AppMeta {
   baselineIsPostUpgrade?: boolean; // true if firstRunOrigin was backfilled on v50 upgrade, not a true first run
 }
 
+// Phase 2 — Reminder Engine. Generic over `type`/`channel`, not
+// follow-up-specific: today's only scheduler (reminderSchedulerService.ts)
+// generates "follow_up" reminders, but "appointment"/"custom" are real,
+// modeled variants the same queue/delivery/analytics code already handles.
+export type ReminderType = "follow_up" | "appointment" | "custom";
+export type ReminderChannel = "whatsapp";
+export type ReminderStatus = "pending" | "approved" | "sent" | "failed" | "cancelled" | "rejected";
+
+export interface ReminderQueueEntry {
+  id: string;
+  patientId: string;
+  patientName: string;
+  phone?: string;
+  type: ReminderType;
+  channel: ReminderChannel;
+  message: string;
+  dueAt: string; // ISO timestamp -- when this reminder should be reviewed/sent
+  status: ReminderStatus;
+  sourceRef?: string; // traceability back to the alert/bucket that generated this, if any
+  retryCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ReminderHistoryAction = "sent" | "failed" | "cancelled";
+
+export interface ReminderHistoryEntry {
+  id: string;
+  reminderId: string;
+  patientId: string;
+  patientName: string;
+  channel: ReminderChannel;
+  action: ReminderHistoryAction;
+  message: string;
+  attemptedAt: string;
+  note?: string; // e.g. failure reason -- best-effort; no real delivery receipts exist without a WhatsApp Business API
+}
+
 class SakhiDB extends Dexie {
   patients!: Dexie.Table<Patient, string>;
   consultations!: Dexie.Table<Consultation, string>;
@@ -288,6 +326,8 @@ class SakhiDB extends Dexie {
   syncOutbox!: Dexie.Table<SyncOutboxEntry, string>;
   operationalEvents!: Dexie.Table<OperationalEvent, string>;
   appMeta!: Dexie.Table<AppMeta, string>;
+  reminderQueue!: Dexie.Table<ReminderQueueEntry, string>;
+  reminderHistory!: Dexie.Table<ReminderHistoryEntry, string>;
 
   constructor() {
     super("SakhiClinicDB");
@@ -411,6 +451,24 @@ class SakhiDB extends Dexie {
       syncOutbox: "id, entityType, entityId, operationType, timestamp, syncStatus, retryCount",
       operationalEvents: "id, timestamp, level, type",
       appMeta: "id"
+    });
+
+    // V51 (Phase 2 — Reminder Engine): reminderQueue + reminderHistory.
+    // Purely additive, same pattern as V50 -- no existing table's shape
+    // changes, no .upgrade() data transform, since there is nothing in any
+    // existing table to migrate INTO these from.
+    this.version(51).stores({
+      patients: "id, name, phone, nextFollowUpDate, lastVisit, deletedAt, createdAt, updatedAt",
+      consultations: "id, patientId, appointmentId, date, outcome, clinicId, learnedAt, deletedAt, createdAt, updatedAt",
+      learning: "++id, [remedy+symptomKey], remedy, symptomKey",
+      caseMemory: "++id, patientId, remedy, outcome, deletedAt, createdAt, updatedAt",
+      appointments: "id, date, patientId, status, clinic, [date+time+clinic], [clinic+date], deletedAt, createdAt, updatedAt",
+      drafts: "id, patientId, savedAt",
+      syncOutbox: "id, entityType, entityId, operationType, timestamp, syncStatus, retryCount",
+      operationalEvents: "id, timestamp, level, type",
+      appMeta: "id",
+      reminderQueue: "id, patientId, type, status, dueAt, channel",
+      reminderHistory: "id, reminderId, patientId, attemptedAt, action"
     });
   }
 }

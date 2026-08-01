@@ -65,12 +65,17 @@ describe("Module A — v49 to v50 migration (A6)", () => {
     await seedV49Database();
 
     // Import the app's real db module only now, after the v49 seed exists on
-    // disk -- this is what forces Dexie's genuine version-49-to-50 upgrade
-    // path to run, not a hand-written stand-in for it.
+    // disk -- this is what forces Dexie's genuine upgrade path to run, not a
+    // hand-written stand-in for it. Since Phase 2 added v51, opening the
+    // real (current) db.ts against a v49-seeded database replays v49->v50
+    // AND v50->v51 in sequence -- this test still exercises the v49->v50
+    // step specifically (that's what seedV49Database() sets up), it just
+    // lands on whatever the app's current version is afterward, same as a
+    // real doctor's browser would on first load post-upgrade.
     const { db } = await import("../../services/db");
     await db.open();
 
-    expect(db.verno).toBe(50);
+    expect(db.verno).toBe(51);
 
     const patients = await db.patients.toArray();
     expect(patients).toHaveLength(2);

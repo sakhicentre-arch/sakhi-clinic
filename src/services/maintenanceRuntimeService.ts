@@ -4,6 +4,8 @@ import { getBackupAgeDays, isBackupStale } from "./storageHealthService";
 import { runDexieHealthCheck, verifyExportBundle } from "./storageIntegrityService";
 import { exportClinicBundle } from "./clinicExportService";
 import { getRecentOperationalEvents, logOperationalEvent, pruneOperationalEvents } from "./operationalEventLogService";
+import { scheduleFollowUpReminders } from "./reminderSchedulerService";
+import { retryFailedReminders } from "./reminderMaintenanceService";
 
 export type MaintenanceRunReason = "manual" | "app-start" | "interval" | "pre-export" | "post-import" | "diagnostic";
 
@@ -17,6 +19,8 @@ export type MaintenanceRunResult = {
     cappedOutbox: number;
     eventsPruned: number;
     integrityChecked: boolean;
+    remindersScheduled: number;
+    remindersRetried: number;
   };
   errors: Array<{ area: string; message: string }>;
 };
@@ -67,6 +71,8 @@ export async function runMaintenanceOnce(input?: {
   let cappedOutboxCount = 0;
   let eventsPruned = 0;
   let integrityChecked = false;
+  let remindersScheduled = 0;
+  let remindersRetried = 0;
 
   await logOperationalEvent({
     level: "info",
@@ -97,6 +103,21 @@ export async function runMaintenanceOnce(input?: {
   } catch (error) {
     errors.push({
       area: "outbox",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  // Reminder Engine (Phase 2): scheduling and retries piggyback on this
+  // same periodic tick rather than introducing a second timer. Isolated in
+  // its own try/catch so a reminder-engine failure can never block outbox
+  // maintenance (or vice versa) -- each area degrades independently.
+  try {
+    const created = await scheduleFollowUpReminders();
+    remindersScheduled = created.length;
+    remindersRetried = await retryFailedReminders();
+  } catch (error) {
+    errors.push({
+      area: "reminders",
       message: error instanceof Error ? error.message : String(error),
     });
   }
@@ -149,6 +170,8 @@ export async function runMaintenanceOnce(input?: {
       cappedOutbox: cappedOutboxCount,
       eventsPruned,
       integrityChecked,
+      remindersScheduled,
+      remindersRetried,
     },
     errors,
   };
