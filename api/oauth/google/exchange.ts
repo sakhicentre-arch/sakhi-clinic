@@ -9,7 +9,7 @@
  * handles a refresh_token request -- see refresh.ts for that.
  */
 
-import { errorResponse, forwardToGoogle, readJsonBody, readStringField, requireClientSecret } from "./_shared";
+import { errorResponse, forwardToGoogle, readJsonBody, readStringField, requireClientSecret } from "./_shared.js";
 
 export default {
   async fetch(request: Request): Promise<Response> {

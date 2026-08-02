@@ -11,7 +11,7 @@
  * spending a real OAuth attempt (and a real doctor's patience) to find out.
  */
 
-import { errorResponse, jsonResponse } from "./_shared";
+import { errorResponse, jsonResponse } from "./_shared.js";
 
 export default {
   async fetch(request: Request): Promise<Response> {
