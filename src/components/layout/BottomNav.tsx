@@ -6,6 +6,24 @@ interface Props {
   isMobile?: boolean;
 }
 
+// 44x44 is the standard minimum mobile touch target (WCAG 2.5.5 / iOS HIG) --
+// these buttons previously had no explicit sizing at all, rendering well
+// under that (a real one-handed-tap usability defect, not cosmetic).
+const navButtonStyle: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  flex: 1,
+  minWidth: 44,
+  minHeight: 44,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontSize: 12,
+  fontWeight: 700,
+  color: '#475569',
+  cursor: 'pointer',
+};
+
 export default function BottomNav({ onNavigate, isMobile = false }: Props) {
   const setGlobalSearchOpen = useUIStore((s) => s.setGlobalSearchOpen);
 
@@ -32,14 +50,14 @@ export default function BottomNav({ onNavigate, isMobile = false }: Props) {
       }}
       aria-hidden={false}
     >
-      <button data-testid="bottom-nav-today-button" onClick={() => onNavigate('today')} aria-label="Today" style={{ background: 'none', border: 'none' }}>Today</button>
-      <button data-testid="bottom-nav-patients-button" onClick={() => onNavigate('patients')} aria-label="Patients" style={{ background: 'none', border: 'none' }}>Patients</button>
-      <button data-testid="bottom-nav-consult-button" onClick={() => onNavigate('consultation')} aria-label="Consult" style={{ background: 'none', border: 'none' }}>Consult</button>
-      <button data-testid="bottom-nav-appointments-button" onClick={() => onNavigate('appointments')} aria-label="Appointments" style={{ background: 'none', border: 'none' }}>Appt</button>
+      <button data-testid="bottom-nav-today-button" onClick={() => onNavigate('today')} aria-label="Today" className="sakhi-tap sakhi-focus-ring" style={navButtonStyle}>Today</button>
+      <button data-testid="bottom-nav-patients-button" onClick={() => onNavigate('patients')} aria-label="Patients" className="sakhi-tap sakhi-focus-ring" style={navButtonStyle}>Patients</button>
+      <button data-testid="bottom-nav-consult-button" onClick={() => onNavigate('consultation')} aria-label="Consult" className="sakhi-tap sakhi-focus-ring" style={navButtonStyle}>Consult</button>
+      <button data-testid="bottom-nav-appointments-button" onClick={() => onNavigate('appointments')} aria-label="Appointments" className="sakhi-tap sakhi-focus-ring" style={navButtonStyle}>Appt</button>
       {/* Mobile has no persistent search bar (GlobalSearch in TopBar.tsx is
           desktop-only) -- this is the doctor's only fast way to find a
           patient/queue entry/recent consultation by name on a phone. */}
-      <button data-testid="bottom-nav-more-button" onClick={() => setGlobalSearchOpen(true)} aria-label="Search" style={{ background: 'none', border: 'none' }}>Search</button>
+      <button data-testid="bottom-nav-more-button" onClick={() => setGlobalSearchOpen(true)} aria-label="Search" className="sakhi-tap sakhi-focus-ring" style={navButtonStyle}>Search</button>
     </nav>
   );
 }

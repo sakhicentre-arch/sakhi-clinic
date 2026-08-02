@@ -20,15 +20,22 @@ export function generatePatientData(prefix: string) {
   };
 }
 
+// BottomNav (mobile, <=768px) only renders on narrow viewports; LeftNav
+// (desktop) is the equivalent on wide ones. This helper is used by specs
+// that run on both the desktop "chromium" project and the mobile-viewport
+// projects, so it has to find the right nav for whichever is present
+// rather than assuming BottomNav always exists.
 export async function navigateTo(page: Page, section: 'Patients' | 'Appointments' | 'Today') {
-  const selectorMap: Record<string, string> = {
+  const bottomNavSelector: Record<string, string> = {
     Patients: '[data-testid="bottom-nav-patients-button"]',
     Appointments: '[data-testid="bottom-nav-appointments-button"]',
     Today: '[data-testid="bottom-nav-today-button"]',
   };
 
-  const selector = selectorMap[section];
-  const button = page.locator(selector).first();
+  const bottomNavButton = page.locator(bottomNavSelector[section]).first();
+  const leftNavButton = page.getByRole('button', { name: section, exact: true }).first();
+
+  const button = (await bottomNavButton.count()) > 0 ? bottomNavButton : leftNavButton;
   await expect(button).toBeVisible({ timeout: 10000 });
   await button.waitFor({ state: 'visible', timeout: 10000 });
   await button.click();
