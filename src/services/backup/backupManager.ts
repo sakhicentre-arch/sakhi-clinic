@@ -60,6 +60,7 @@ import type { BackupJob, BackupJobFailureReason, BackupJobKind } from "../db";
 import { recordBackupSuccessDetails, recordRestoreSuccess } from "../storageHealthService";
 import { logOperationalEvent } from "../operationalEventLogService";
 import { getBackupSettings } from "./backupSettingsService";
+import { generateId } from "../../utils/generateId";
 
 /**
  * Test/advanced-only override -- production UI code never calls this
@@ -404,13 +405,148 @@ export async function retryJob(jobId: string): Promise<{ ok: boolean; error?: st
   }
 }
 
+export interface BackupPreview {
+  filename: string;
+  sizeBytes?: number;
+  exportedAt: string;
+  deviceId: string;
+  patients: number;
+  consultations: number;
+  /** "none" means the envelope carried no checksum to verify (older
+   * format) -- never treated as a failure, just less certain. An actual
+   * mismatch throws during parsing instead of reaching this state. */
+  checksumStatus: "valid" | "none";
+  compressed: boolean;
+  encrypted: boolean;
+}
+
+type ParsedBackup = {
+  bundleLike: any;
+  preview: Omit<BackupPreview, "filename" | "sizeBytes">;
+};
+
 /**
- * Shared restore core -- everything after "I have the raw envelope/plain
- * JSON text" is identical whether it came from a local file picker or a
- * downloaded Google Drive file. The two entry points below (runImport,
- * runImportFromProvider) only differ in HOW they obtain `text`; neither
- * duplicates parsing, checksum verification, the confirmation prompt, or
- * the actual restore call.
+ * Parses, decompresses/decrypts, and checksum-verifies raw backup text
+ * into a restorable bundle plus preview info -- shared by both restore
+ * entry points below and by the preview API further down, so parsing/
+ * validation logic exists exactly once regardless of how a doctor chose
+ * to restore.
+ */
+async function parseAndValidateBackup(text: string): Promise<ParsedBackup> {
+  const parsed: any = JSON.parse(text);
+
+  let bundleLike: any;
+  let checksumStatus: BackupPreview["checksumStatus"] = "none";
+  let compressed = false;
+  let encrypted = false;
+
+  if (isEnvelope(parsed)) {
+    compressed = parsed.compressed;
+    encrypted = parsed.encrypted;
+    if (parsed.checksum) {
+      const checksumOk = await verifyChecksum(parsed.payload, parsed.checksum);
+      if (!checksumOk) throw new Error("Backup file failed integrity check (checksum mismatch) -- it may be corrupted.");
+      checksumStatus = "valid";
+    }
+    const decompressed = await decompress(parsed.payload, parsed.compressed);
+    const decrypted = await decrypt(decompressed, parsed.encrypted);
+    bundleLike = parseBackupJson(decrypted).bundleLike;
+  } else {
+    // Legacy / plain-JSON backup (new-but-uncompressed metadata-wrapped,
+    // or the pre-envelope V1/V2 formats) -- unchanged path.
+    bundleLike = parseBackupJson(text).bundleLike;
+  }
+
+  const plan = planRestore(bundleLike, "overwrite");
+  return {
+    bundleLike,
+    preview: {
+      exportedAt: String(bundleLike?.exportedAt || ""),
+      deviceId: String(bundleLike?.deviceId || ""),
+      patients: plan.incoming.patients ?? 0,
+      consultations: plan.incoming.consultations ?? 0,
+      checksumStatus,
+      compressed,
+      encrypted,
+    },
+  };
+}
+
+/**
+ * A fast, local-only, best-effort snapshot taken immediately before every
+ * restore's destructive overwrite -- independent of the doctor's chosen
+ * destination or Automatic Backup setting (a restore is destructive
+ * enough that this one isn't opt-in), and independent of network
+ * availability (the whole point is a safety net that doesn't depend on
+ * Drive being reachable). Uses the full tracked pipeline (so it shows up
+ * in Backup History like any other backup) rather than a bare
+ * provider.save() call, to reuse the same encrypt/compress/checksum
+ * logic instead of duplicating it. A failure here is logged but never
+ * blocks or fails the actual restore.
+ */
+async function takeRestoreSafetySnapshot(): Promise<void> {
+  try {
+    const snapshotJob = await createJob("auto", localBackupProvider.id);
+    await runPipelineForJob(
+      snapshotJob.id,
+      { kind: "auto", silent: true, reasonForLog: "Safety snapshot before restore", eventType: "backup.auto.success" },
+      localBackupProvider
+    );
+  } catch (error) {
+    await logOperationalEvent({
+      level: "warn",
+      type: "backup.auto.failure",
+      message: "Pre-restore safety snapshot failed (restore will still proceed)",
+      data: { error: error instanceof Error ? error.message : String(error) },
+    }).catch(() => {});
+  }
+}
+
+/**
+ * The actual restore, shared by both the legacy confirm()-based flow
+ * (runImportFromText, below) and the preview/confirm flow
+ * (confirmPendingRestore, further below) -- neither duplicates the
+ * safety snapshot, the deserializeAndRestore call, or success/failure
+ * bookkeeping.
+ */
+async function executeRestore(jobId: string, parsedBackup: ParsedBackup, meta: { filename: string; size?: number }): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await takeRestoreSafetySnapshot();
+
+    await recordEvent(jobId, "restoring", "Restoring clinic data", {
+      data: { patients: parsedBackup.preview.patients, consultations: parsedBackup.preview.consultations },
+    });
+    await deserializeAndRestore(parsedBackup.bundleLike, "overwrite");
+
+    await logOperationalEvent({
+      level: "info",
+      type: "backup.import.success",
+      message: "Backup import completed",
+      data: { filename: meta.filename, jobId },
+    });
+    recordRestoreSuccess(new Date().toISOString());
+    await completeJob(jobId, { filename: meta.filename });
+    return { ok: true };
+  } catch (error) {
+    console.error("[backupManager] restore failed:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    await failJob(jobId, message, { failureReason: categorizeError(error) });
+    await logOperationalEvent({
+      level: "error",
+      type: "backup.import.failure",
+      message: "Backup import failed",
+      data: { filename: meta.filename, error: message, jobId },
+    }).catch(() => {});
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Legacy/backward-compatible entry point -- parses, shows a native
+ * window.confirm() (not the richer in-app preview; see
+ * previewLocalFile/previewRemoteBackup + confirmPendingRestore below for
+ * that), and restores. Kept for existing callers/tests; the current UI
+ * uses the preview flow instead.
  */
 async function runImportFromText(providerId: string, text: string, meta: { filename: string; size?: number }): Promise<void> {
   const job = await createJob("restore", providerId);
@@ -424,41 +560,18 @@ async function runImportFromText(providerId: string, text: string, meta: { filen
     });
     await recordEvent(job.id, "parsing", "Reading backup file", { data: { filename: meta.filename, size: meta.size } });
 
-    const parsed: any = JSON.parse(text);
-
-    let bundleLike: any;
-    if (isEnvelope(parsed)) {
-      if (parsed.checksum) {
-        const checksumOk = await verifyChecksum(parsed.payload, parsed.checksum);
-        if (!checksumOk) throw new Error("Backup file failed integrity check (checksum mismatch) -- it may be corrupted.");
-      }
-      await recordEvent(job.id, "decompressing", parsed.compressed ? "Decompressing backup" : "Backup was not compressed");
-      const decompressed = await decompress(parsed.payload, parsed.compressed);
-
-      await recordEvent(job.id, "decrypting", parsed.encrypted ? "Decrypting backup" : "Backup was not encrypted");
-      const decrypted = await decrypt(decompressed, parsed.encrypted);
-
-      bundleLike = parseBackupJson(decrypted).bundleLike;
-    } else {
-      // Legacy / plain-JSON backup (new-but-uncompressed metadata-wrapped,
-      // or the pre-envelope V1/V2 formats) -- unchanged path.
-      bundleLike = parseBackupJson(text).bundleLike;
-    }
-
-    const plan = planRestore(bundleLike, "overwrite");
-    const exportedAt = String(bundleLike?.exportedAt || "");
-    const deviceId = String(bundleLike?.deviceId || "");
-    const patientsCount = plan.incoming.patients ?? 0;
-    const consultationsCount = plan.incoming.consultations ?? 0;
+    const parsedBackup = await parseAndValidateBackup(text);
+    await recordEvent(job.id, "decompressing", parsedBackup.preview.compressed ? "Decompressing backup" : "Backup was not compressed");
+    await recordEvent(job.id, "decrypting", parsedBackup.preview.encrypted ? "Decrypting backup" : "Backup was not encrypted");
 
     const confirmRestore = window.confirm(
       [
         "Restore clinic backup?",
         "",
-        `Exported: ${exportedAt || "Unknown date"}`,
-        `Device: ${deviceId || "Unknown device"}`,
-        `Patients: ${patientsCount}`,
-        `Consultations: ${consultationsCount}`,
+        `Exported: ${parsedBackup.preview.exportedAt || "Unknown date"}`,
+        `Device: ${parsedBackup.preview.deviceId || "Unknown device"}`,
+        `Patients: ${parsedBackup.preview.patients}`,
+        `Consultations: ${parsedBackup.preview.consultations}`,
         "",
         "This will overwrite ALL existing clinic data on this device.",
         "Continue?",
@@ -469,18 +582,8 @@ async function runImportFromText(providerId: string, text: string, meta: { filen
       return;
     }
 
-    await recordEvent(job.id, "restoring", "Restoring clinic data", { data: { patients: patientsCount, consultations: consultationsCount } });
-    await deserializeAndRestore(bundleLike, "overwrite");
-
-    await logOperationalEvent({
-      level: "info",
-      type: "backup.import.success",
-      message: "Backup import completed",
-      data: { filename: meta.filename, jobId: job.id },
-    });
-    recordRestoreSuccess(new Date().toISOString());
-    await completeJob(job.id, { filename: meta.filename });
-    alert("Clinic backup restored.");
+    const result = await executeRestore(job.id, parsedBackup, meta);
+    alert(result.ok ? "Clinic backup restored." : "Restore failed. The backup file looks invalid or incomplete.");
   } catch (error) {
     console.error("[backupManager] restore failed:", error);
     const message = error instanceof Error ? error.message : String(error);
@@ -521,6 +624,78 @@ export async function runImportFromProvider(filename: string): Promise<{ ok: boo
 }
 
 /**
+ * Preview/confirm restore flow -- what the current UI actually uses,
+ * replacing a blocking native window.confirm() with a real in-app
+ * preview panel the doctor can review (exported date, counts, checksum
+ * status) before committing. Only one preview is held at a time (a
+ * single-user, single-tab, seconds-long UI interaction never needs more)
+ * -- starting a new preview silently discards a stale one instead of
+ * accumulating state. The token defends confirmPendingRestore against
+ * acting on a preview that's no longer the one currently shown.
+ */
+let pendingRestore: { token: string; providerId: string; meta: { filename: string; size?: number }; parsed: ParsedBackup } | null = null;
+
+async function buildPreview(
+  providerId: string,
+  text: string,
+  meta: { filename: string; size?: number }
+): Promise<{ ok: true; token: string; preview: BackupPreview } | { ok: false; error: string }> {
+  try {
+    const parsed = await parseAndValidateBackup(text);
+    const token = generateId();
+    pendingRestore = { token, providerId, meta, parsed };
+    return { ok: true, token, preview: { ...parsed.preview, filename: meta.filename, sizeBytes: meta.size } };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Destination = Local: reads the picked file and validates it, without restoring yet. */
+export async function previewLocalFile(file: File) {
+  const text = await file.text();
+  return buildPreview(localBackupProvider.id, text, { filename: file.name, size: file.size });
+}
+
+/** Destination = a remote provider: downloads the chosen backup and validates it, without restoring yet. */
+export async function previewRemoteBackup(filename: string) {
+  const provider = getActiveProvider();
+  if (!provider.load) {
+    return { ok: false as const, error: `${provider.label} does not support restoring directly -- no download capability.` };
+  }
+  const text = await provider.load(filename);
+  if (text == null) {
+    return { ok: false as const, error: `Could not download "${filename}" from ${provider.label}.` };
+  }
+  return buildPreview(provider.id, text, { filename });
+}
+
+/** Discards the current preview without restoring anything. */
+export function cancelPendingRestore(): void {
+  pendingRestore = null;
+}
+
+/** Commits a previously-built preview. Fails cleanly (no crash, no
+ * partial state) if the preview has expired or was already acted on --
+ * pendingRestore is cleared as soon as this starts, so a duplicate/stale
+ * confirm click can't restore twice. */
+export async function confirmPendingRestore(token: string): Promise<{ ok: boolean; error?: string }> {
+  if (!pendingRestore || pendingRestore.token !== token) {
+    return { ok: false, error: "This preview has expired. Please choose the backup again." };
+  }
+  const { providerId, meta, parsed } = pendingRestore;
+  pendingRestore = null;
+
+  const job = await createJob("restore", providerId);
+  await logOperationalEvent({
+    level: "info",
+    type: "backup.import.start",
+    message: "Backup import started",
+    data: { filename: meta.filename, size: meta.size, jobId: job.id },
+  });
+  return executeRestore(job.id, parsed, meta);
+}
+
+/**
  * Destination = a remote provider: what the doctor picks a backup from.
  * Empty array (never throws) if the active provider can't list, isn't
  * connected, or the list call fails -- the UI shows "no backups found"
@@ -534,6 +709,18 @@ export async function listRestorableBackups(): Promise<StorageProviderListEntry[
   } catch {
     return [];
   }
+}
+
+/** Destination = a remote provider: removes a listed backup (the Drive
+ * backup browser's delete action). Gated by capabilities.supportsDelete
+ * in the UI; still checks provider.delete's own existence here so this
+ * is safe to call regardless. */
+export async function deleteRemoteBackup(filename: string): Promise<{ ok: boolean; error?: string }> {
+  const provider = getActiveProvider();
+  if (!provider.delete) {
+    return { ok: false, error: `${provider.label} does not support deleting backups.` };
+  }
+  return provider.delete(filename);
 }
 
 export async function getLocalSnapshotSummary(): Promise<{ count: number; filenames: string[] }> {

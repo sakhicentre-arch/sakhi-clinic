@@ -12,7 +12,7 @@
  * OAuth client ID exists in this deployment yet.
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Database,
   Users,
@@ -26,12 +26,26 @@ import {
   RefreshCw,
   LogOut,
   HardDrive,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldX,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { MobileCard, MobileSection, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
 import { useUIStore, ActiveClinic } from "../store/uiStore";
-import { exportBackup, importBackup, listRemoteBackups, restoreFromRemote, getLocalBackupSnapshotSummary } from "../services/backupService";
-import { getLastBackupAt, getLastBackupSizeBytes, getLastRestoreAt } from "../services/storageHealthService";
+import {
+  exportBackup,
+  listRemoteBackups,
+  getLocalBackupSnapshotSummary,
+  previewLocalRestore,
+  previewRemoteRestore,
+  confirmRestorePreview,
+  cancelRestorePreview,
+  deleteRemoteBackupFile,
+  type BackupPreview,
+} from "../services/backupService";
+import { getLastBackupAt, getLastBackupSizeBytes, getLastRestoreAt, getBackupAgeDays, isBackupStale } from "../services/storageHealthService";
 import { importPatientsFromCsv, PatientImportMode } from "../services/patientImportService";
 import { exportPatientsCsv } from "../services/csvExportService";
 import { runDexieHealthCheck, DexieHealthReport } from "../services/storageIntegrityService";
@@ -174,6 +188,49 @@ export default function SettingsPage() {
   const [drivePickerLoading, setDrivePickerLoading] = useState(false);
   const [driveBackups, setDriveBackups] = useState<StorageProviderListEntry[]>([]);
 
+  // Validation preview shown before any restore actually runs -- see
+  // backupManager.ts's previewLocalFile/previewRemoteBackup +
+  // confirmPendingRestore. Replaces a blocking native window.confirm().
+  const [pendingPreview, setPendingPreview] = useState<{ token: string; preview: BackupPreview } | null>(null);
+  const [previewError, setPreviewError] = useState<string>("");
+
+  // Live progress feedback for in-flight backup/restore operations,
+  // sourced from the same BackupJob record Backup History already reads
+  // -- polled rather than pushed, so no operation function signature had
+  // to change to support it.
+  const [progressText, setProgressText] = useState<string>("");
+  const progressPollRef = useRef<number | null>(null);
+
+  function stopProgressPolling() {
+    if (progressPollRef.current != null) {
+      window.clearInterval(progressPollRef.current);
+      progressPollRef.current = null;
+    }
+    setProgressText("");
+  }
+
+  function startProgressPolling() {
+    stopProgressPolling();
+    progressPollRef.current = window.setInterval(() => {
+      void listRecentJobs(1).then(([job]) => {
+        if (!job || job.status !== "running") return;
+        const last = job.events[job.events.length - 1];
+        if (!last) return;
+        const percent = last.progressPercent != null ? ` ${last.progressPercent}%` : "";
+        setProgressText(`${last.message}${percent}`);
+      });
+    }, 400);
+  }
+
+  async function withProgress<T>(op: () => Promise<T>): Promise<T> {
+    startProgressPolling();
+    try {
+      return await op();
+    } finally {
+      stopProgressPolling();
+    }
+  }
+
   const load = async () => {
     setLoading(true);
     try {
@@ -234,6 +291,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     void load();
+    return () => stopProgressPolling();
   }, []);
 
   const handleConnectDrive = async () => {
@@ -317,26 +375,35 @@ export default function SettingsPage() {
   const handleExportBackup = async () => {
     setBusy("export-backup");
     try {
-      await exportBackup();
+      await withProgress(() => exportBackup());
       await load();
     } finally {
       setBusy(null);
     }
   };
 
-  const handleRestoreBackup = async (file: File) => {
-    setBusy("restore-backup");
+  /** Destination = Local: validates the picked file and shows the
+   * preview panel below -- does NOT restore yet. See
+   * backupManager.ts's previewLocalFile for why parsing/validation lives
+   * in the backup engine, not here. */
+  const handlePreviewLocalFile = async (file: File) => {
+    setBusy("preview-restore");
+    setPreviewError("");
     try {
-      await importBackup(file);
-      await load();
+      const result = await previewLocalRestore(file);
+      if (result.ok && result.token && result.preview) {
+        setPendingPreview({ token: result.token, preview: result.preview });
+      } else {
+        setPreviewError(result.error || "Could not read this backup file.");
+      }
     } finally {
       setBusy(null);
     }
   };
 
   /** Destination = a remote provider: dispatches to listing instead of a
-   * local file picker -- see backupManager.ts's runImportFromProvider /
-   * listRestorableBackups for why this lives in the backup engine, not here. */
+   * local file picker -- see backupManager.ts's listRestorableBackups
+   * for why this lives in the backup engine, not here. */
   const handleOpenDrivePicker = async () => {
     setShowDrivePicker(true);
     setDrivePickerLoading(true);
@@ -348,19 +415,54 @@ export default function SettingsPage() {
     }
   };
 
-  const handleRestoreFromDrive = async (filename: string) => {
+  /** Destination = a remote provider: downloads + validates the chosen
+   * backup and shows the preview panel below -- does NOT restore yet. */
+  const handlePreviewRemoteBackup = async (filename: string) => {
+    setBusy("preview-restore");
+    setPreviewError("");
+    try {
+      const result = await withProgress(() => previewRemoteRestore(filename));
+      if (result.ok && result.token && result.preview) {
+        setPendingPreview({ token: result.token, preview: result.preview });
+        setShowDrivePicker(false);
+      } else {
+        setPreviewError(result.error || "Could not download this backup.");
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleConfirmRestore = async () => {
+    if (!pendingPreview) return;
     setBusy("restore-backup");
     try {
-      const result = await restoreFromRemote(filename);
+      const result = await withProgress(() => confirmRestorePreview(pendingPreview.token));
+      setPendingPreview(null);
       if (!result.ok) {
-        setCloudNote(result.error || "Could not restore from Google Drive.");
+        setCloudNote(result.error || "Restore failed. The backup file looks invalid or incomplete.");
         return;
       }
-      setShowDrivePicker(false);
+      setCloudNote("Clinic backup restored.");
       await load();
     } finally {
       setBusy(null);
     }
+  };
+
+  const handleCancelRestore = () => {
+    cancelRestorePreview();
+    setPendingPreview(null);
+    setPreviewError("");
+  };
+
+  const handleDeleteDriveBackup = async (filename: string) => {
+    const result = await deleteRemoteBackupFile(filename);
+    if (!result.ok) {
+      setCloudNote(result.error || `Could not delete ${filename}.`);
+      return;
+    }
+    setDriveBackups((prev) => prev.filter((b) => b.filename !== filename));
   };
 
   const handleExportPatients = async () => {
@@ -387,6 +489,24 @@ export default function SettingsPage() {
 
   const voiceSupported = voiceEngineSupported();
 
+  // Backup Health Dashboard -- a single, plain-language status composed
+  // entirely from signals already computed above; no new backend. Ordered
+  // most-to-least urgent: a failed job is worse than a merely-stale
+  // backup, which is worse than a misconfigured-but-not-yet-attempted
+  // destination.
+  const backupAgeDays = getBackupAgeDays();
+  const backupHealth: { level: "healthy" | "attention" | "critical"; message: string } =
+    failedJobCount > 0
+      ? { level: "critical", message: `${failedJobCount} backup${failedJobCount > 1 ? "s" : ""} failed and need${failedJobCount > 1 ? "" : "s"} attention.` }
+      : isBackupStale()
+      ? { level: "attention", message: backupAgeDays != null ? `Last backup was ${backupAgeDays} day${backupAgeDays === 1 ? "" : "s"} ago.` : "No backup has been taken yet." }
+      : activeProviderId !== LOCAL_DESTINATION_ID && !driveConnected
+      ? { level: "attention", message: `${getActiveProvider().label} is selected but not connected -- backups are saving to This Device instead.` }
+      : { level: "healthy", message: "Backups are up to date." };
+  const backupHealthIcon = backupHealth.level === "healthy" ? ShieldCheck : backupHealth.level === "attention" ? ShieldAlert : ShieldX;
+  const backupHealthColor = backupHealth.level === "healthy" ? "#15803d" : backupHealth.level === "attention" ? "#b45309" : "#b91c1c";
+  const BackupHealthIcon = backupHealthIcon;
+
   return (
     <div className="sakhi-page" data-testid="settings-page">
       <div className="sakhi-stack">
@@ -402,6 +522,17 @@ export default function SettingsPage() {
             {/* ================= Backup & Restore ================= */}
             <MobileCard>
               <SectionHeader icon={Database} title="Backup & Restore" subtitle="Where your clinic data is protected" />
+
+              {/* -- Backup Health Dashboard: one plain-language status, no new backend -- */}
+              <div
+                className="sakhi-row"
+                style={{ gap: 8, alignItems: "center", padding: "var(--space-2)", borderRadius: 10, background: `${backupHealthColor}14`, marginBottom: "var(--space-3)" }}
+              >
+                <BackupHealthIcon size={16} color={backupHealthColor} />
+                <span className="sakhi-body" style={{ fontSize: 12, fontWeight: 800, color: backupHealthColor }}>
+                  {backupHealth.message}
+                </span>
+              </div>
 
               {/* -- Google Drive: authentication only, never destination -- */}
               <div className="sakhi-row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -540,7 +671,7 @@ export default function SettingsPage() {
                    decides which WIDGET to show (a native file input has no
                    remote equivalent), never how export/restore itself
                    behaves. -- */}
-              <div className="sakhi-row" style={{ gap: 10, flexWrap: "wrap", marginTop: "var(--space-3)" }}>
+              <div className="sakhi-row" style={{ gap: 10, flexWrap: "wrap", marginTop: "var(--space-3)", alignItems: "center" }}>
                 {activeProviderId === LOCAL_DESTINATION_ID ? (
                   <>
                     <button
@@ -558,16 +689,16 @@ export default function SettingsPage() {
                       style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}
                     >
                       <Upload size={16} />
-                      {busy === "restore-backup" ? "Restoring…" : "Restore Backup"}
+                      {busy === "preview-restore" ? "Reading…" : "Restore Backup"}
                       <input
                         type="file"
                         accept=".json,application/json"
                         style={{ display: "none" }}
-                        disabled={busy === "restore-backup"}
+                        disabled={busy === "preview-restore"}
                         onChange={(e) => {
                           const f = e.target.files?.[0];
                           if (!f) return;
-                          void handleRestoreBackup(f).finally(() => {
+                          void handlePreviewLocalFile(f).finally(() => {
                             e.currentTarget.value = "";
                           });
                         }}
@@ -589,12 +720,12 @@ export default function SettingsPage() {
                     <button
                       type="button"
                       onClick={() => void handleOpenDrivePicker()}
-                      disabled={busy === "restore-backup"}
+                      disabled={busy === "preview-restore"}
                       className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
                       style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}
                     >
                       <Upload size={16} />
-                      {busy === "restore-backup" ? "Restoring…" : `Restore from ${getActiveProvider().label}`}
+                      {`Restore from ${getActiveProvider().label}`}
                     </button>
                   </>
                 )}
@@ -610,16 +741,87 @@ export default function SettingsPage() {
                     {busy === "retry-uploads" ? "Retrying…" : "Retry Failed Uploads"}
                   </button>
                 )}
+                {progressText && (
+                  <span className="sakhi-caption" style={{ fontWeight: 800, color: "#0d7377" }}>
+                    {progressText}
+                  </span>
+                )}
               </div>
 
-              {/* -- Remote restore picker: list -> choose -> download -> restore -- */}
+              {previewError && (
+                <div className="sakhi-caption" style={{ marginTop: "var(--space-2)", color: "#b91c1c", fontWeight: 800 }}>
+                  {previewError}
+                </div>
+              )}
+
+              {/* -- Backup validation preview: shown after a file/backup is
+                   chosen, before anything is restored. Replaces a blocking
+                   native window.confirm() with real in-app detail the
+                   doctor can actually review. -- */}
+              {pendingPreview && (
+                <div
+                  className="sakhi-stack-tight"
+                  style={{ marginTop: "var(--space-3)", padding: "var(--space-3)", border: "1px solid #fbbf24", borderRadius: 12, background: "#fffbeb" }}
+                >
+                  <div className="sakhi-body" style={{ fontWeight: 950, fontSize: 13, color: "#92400e" }}>
+                    Review before restoring
+                  </div>
+                  <SettingRow label="File" value={pendingPreview.preview.filename} />
+                  <SettingRow label="Exported" value={formatTs(pendingPreview.preview.exportedAt) || "Unknown date"} />
+                  <SettingRow label="Device" value={pendingPreview.preview.deviceId || "Unknown device"} />
+                  <SettingRow label="Patients" value={pendingPreview.preview.patients} />
+                  <SettingRow label="Consultations" value={pendingPreview.preview.consultations} />
+                  <SettingRow
+                    label="Integrity check"
+                    value={pendingPreview.preview.checksumStatus === "valid" ? "Verified" : "Not available for this file"}
+                    tone={pendingPreview.preview.checksumStatus === "valid" ? "success" : "muted"}
+                  />
+                  <div className="sakhi-caption" style={{ marginTop: 4, color: "#92400e", fontWeight: 800 }}>
+                    This will overwrite ALL existing clinic data on this device.
+                  </div>
+                  <div className="sakhi-row" style={{ gap: 10, marginTop: "var(--space-2)" }}>
+                    <button
+                      type="button"
+                      onClick={() => void handleConfirmRestore()}
+                      disabled={busy === "restore-backup"}
+                      className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+                      style={{ minHeight: 40, width: "auto", background: "#b91c1c", color: "#fff", borderColor: "#b91c1c" }}
+                    >
+                      {busy === "restore-backup" ? "Restoring…" : "Confirm Restore"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelRestore}
+                      disabled={busy === "restore-backup"}
+                      className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+                      style={{ minHeight: 40, width: "auto" }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* -- Remote restore picker: list -> choose -> validate -> preview -- */}
               {showDrivePicker && (
                 <div className="sakhi-stack-tight" style={{ marginTop: "var(--space-3)", padding: "var(--space-2)", border: "1px solid #e2e8f0", borderRadius: 12 }}>
                   <div className="sakhi-row" style={{ justifyContent: "space-between" }}>
                     <span className="sakhi-body" style={{ fontWeight: 900, fontSize: 13 }}>Choose a backup to restore</span>
-                    <button type="button" className="sakhi-caption" style={{ background: "none", border: "none", cursor: "pointer" }} onClick={() => setShowDrivePicker(false)}>
-                      Close
-                    </button>
+                    <div className="sakhi-row" style={{ gap: 8 }}>
+                      <button
+                        type="button"
+                        title="Refresh"
+                        className="sakhi-caption"
+                        style={{ background: "none", border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center" }}
+                        disabled={drivePickerLoading}
+                        onClick={() => void handleOpenDrivePicker()}
+                      >
+                        <RefreshCw size={14} />
+                      </button>
+                      <button type="button" className="sakhi-caption" style={{ background: "none", border: "none", cursor: "pointer" }} onClick={() => setShowDrivePicker(false)}>
+                        Close
+                      </button>
+                    </div>
                   </div>
                   {drivePickerLoading ? (
                     <div className="sakhi-caption">Loading backups from {getActiveProvider().label}…</div>
@@ -634,15 +836,28 @@ export default function SettingsPage() {
                             {entry.createdAt ? formatTs(entry.createdAt) : "Date unknown"} · {formatBytes(entry.sizeBytes)}
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          disabled={busy === "restore-backup"}
-                          className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
-                          style={{ minHeight: 36, width: "auto" }}
-                          onClick={() => void handleRestoreFromDrive(entry.filename)}
-                        >
-                          Restore
-                        </button>
+                        <div className="sakhi-row" style={{ gap: 6 }}>
+                          <button
+                            type="button"
+                            disabled={busy === "preview-restore"}
+                            className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+                            style={{ minHeight: 36, width: "auto" }}
+                            onClick={() => void handlePreviewRemoteBackup(entry.filename)}
+                          >
+                            {busy === "preview-restore" ? "Checking…" : "Restore"}
+                          </button>
+                          {googleDriveProvider.capabilities.supportsDelete && (
+                            <button
+                              type="button"
+                              title={`Delete ${entry.filename} from ${getActiveProvider().label}`}
+                              className="sakhi-icon-btn"
+                              style={{ width: 36, height: 36 }}
+                              onClick={() => void handleDeleteDriveBackup(entry.filename)}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))
                   )}

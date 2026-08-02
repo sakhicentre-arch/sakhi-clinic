@@ -180,9 +180,21 @@ export async function getJob(jobId: string): Promise<BackupJob | undefined> {
   return db.backupJobs.get(jobId);
 }
 
+/**
+ * Ordered by when each job most recently changed (completedAt for a
+ * finished job, else updatedAt, else createdAt) -- NOT plain creation
+ * order. This matters for nested jobs: a safety snapshot created and
+ * completed mid-restore (see backupManager.ts's runImportFromText) has a
+ * LATER createdAt than the restore job that triggered it, but the restore
+ * job's own completedAt is later still (it finishes after the snapshot
+ * does) -- creation-order sorting would incorrectly report the snapshot,
+ * not the restore, as "the doctor's most recent operation."
+ */
 export async function listRecentJobs(limit = 20): Promise<BackupJob[]> {
-  const rows = await db.backupJobs.orderBy("createdAt").toArray();
-  return rows.slice(-Math.max(0, limit)).reverse();
+  const rows = await db.backupJobs.toArray();
+  const sortKey = (job: BackupJob) => job.completedAt ?? job.updatedAt ?? job.createdAt;
+  rows.sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
+  return rows.slice(0, Math.max(0, limit));
 }
 
 /** Failed jobs under their retry cap whose scheduled retry time has arrived. */
