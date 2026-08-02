@@ -104,6 +104,10 @@ describe("ConsultationPage — Rubric Suggestion doctor-approval gate", () => {
   });
 
   it("surfaces a Case Pattern Signal with confidence/evidence, and only adds it to the Rx when approved", async () => {
+    // Real render + a 3s debounced-fetch wait already leaves little margin
+    // under vitest's 5000ms default when the full suite is running many
+    // files concurrently -- this one's own workload is legitimately close
+    // to that ceiling even in isolation (~4.8s observed).
     const { default: ConsultationPage } = await import("../../pages/ConsultationPage");
     const { VoiceSessionProvider } = await import("../../hooks/VoiceSessionContext");
 
@@ -143,5 +147,5 @@ describe("ConsultationPage — Rubric Suggestion doctor-approval gate", () => {
     const addedLabel = await screen.findByRole("button", { name: /added to rx/i });
     expect(addedLabel).toBeDisabled();
     expect(screen.getAllByDisplayValue("Arsenicum Album")).toHaveLength(1);
-  });
+  }, 15000);
 });

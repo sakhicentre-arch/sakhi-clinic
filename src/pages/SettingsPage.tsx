@@ -200,6 +200,11 @@ export default function SettingsPage() {
   // to change to support it.
   const [progressText, setProgressText] = useState<string>("");
   const progressPollRef = useRef<number | null>(null);
+  // Guards load()'s tail-end setState calls against firing after unmount --
+  // load() is a plain async function (reused by 4 manual refresh call
+  // sites, not just the mount effect), so its own promise chain can still
+  // be in flight when the component using it goes away.
+  const mountedRef = useRef(true);
 
   function stopProgressPolling() {
     if (progressPollRef.current != null) {
@@ -258,6 +263,7 @@ export default function SettingsPage() {
         googleOAuthService.isAuthenticated(),
         listRecentJobs(10),
       ]);
+      if (!mountedRef.current) return;
       setBackupSummary(summary);
       setHealth(dexieHealth);
       setRuntimeReport(runtime);
@@ -268,8 +274,8 @@ export default function SettingsPage() {
       if (connected) {
         googleOAuthService
           .getAccountInfo()
-          .then((info) => setDriveAccountEmail(info?.email ?? null))
-          .catch(() => setDriveAccountEmail(null));
+          .then((info) => { if (mountedRef.current) setDriveAccountEmail(info?.email ?? null); })
+          .catch(() => { if (mountedRef.current) setDriveAccountEmail(null); });
       } else {
         setDriveAccountEmail(null);
       }
@@ -277,21 +283,25 @@ export default function SettingsPage() {
       if (typeof navigator !== "undefined" && (navigator as any).storage?.estimate) {
         try {
           const estimate = await (navigator as any).storage.estimate();
-          setStorageEstimate(estimate);
+          if (mountedRef.current) setStorageEstimate(estimate);
         } catch {
-          setStorageEstimate(null);
+          if (mountedRef.current) setStorageEstimate(null);
         }
       }
     } catch (err) {
       console.error("[SettingsPage] Failed to load diagnostics:", err);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
   useEffect(() => {
+    mountedRef.current = true;
     void load();
-    return () => stopProgressPolling();
+    return () => {
+      mountedRef.current = false;
+      stopProgressPolling();
+    };
   }, []);
 
   const handleConnectDrive = async () => {
