@@ -31,10 +31,24 @@
 
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
-export async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
+/**
+ * googleOAuthService.ts sends both the exchange and refresh request bodies
+ * as application/x-www-form-urlencoded (see exchangeAuthorizationCode() /
+ * refreshAccessToken()), matching what Google's own token endpoint expects
+ * -- so that's what's parsed here too. (A prior version of this file used
+ * request.json(), which silently failed on this form-encoded body: the
+ * catch below swallowed the parse error and returned {}, so every field
+ * downstream read as empty and validation rejected the request before it
+ * ever reached Google. Every caller here now sends and reads the same
+ * format on purpose.)
+ */
+export async function readFormBody(request: Request): Promise<Record<string, unknown>> {
   try {
-    const json = await request.json();
-    return json && typeof json === "object" ? (json as Record<string, unknown>) : {};
+    const text = await request.text();
+    const params = new URLSearchParams(text);
+    const body: Record<string, unknown> = {};
+    for (const [key, value] of params) body[key] = value;
+    return body;
   } catch {
     return {};
   }

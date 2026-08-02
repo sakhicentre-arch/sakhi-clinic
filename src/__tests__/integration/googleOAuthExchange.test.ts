@@ -13,10 +13,18 @@ import handler from "../../../api/oauth/google/exchange";
 
 const URL = "http://localhost/api/oauth/google/exchange";
 
-function request(method: string, body?: unknown): Request {
+// application/x-www-form-urlencoded, matching exactly what
+// googleOAuthService.ts's exchangeAuthorizationCode() actually sends (and
+// what Google's own token endpoint expects) -- not JSON. A prior version
+// of this helper sent JSON, which the handler's request.json() call could
+// parse fine in isolation, masking a real production bug where the actual
+// frontend's form-encoded body was silently read as {} by request.json().
+function request(method: string, body?: Record<string, string>): Request {
   return new Request(URL, {
     method,
-    ...(body !== undefined ? { body: JSON.stringify(body), headers: { "content-type": "application/json" } } : {}),
+    ...(body !== undefined
+      ? { body: new URLSearchParams(body).toString(), headers: { "content-type": "application/x-www-form-urlencoded" } }
+      : {}),
   });
 }
 

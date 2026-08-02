@@ -9,7 +9,7 @@
  * handles a refresh_token request -- see refresh.ts for that.
  */
 
-import { errorResponse, forwardToGoogle, readJsonBody, readStringField, requireClientSecret } from "./_shared.js";
+import { errorResponse, forwardToGoogle, readFormBody, readStringField, requireClientSecret } from "./_shared.js";
 
 export default {
   async fetch(request: Request): Promise<Response> {
@@ -17,11 +17,23 @@ export default {
       return errorResponse(405, "method_not_allowed", "Only POST is supported.");
     }
 
-    const body = await readJsonBody(request);
+    const body = await readFormBody(request);
     const clientId = readStringField(body, "client_id");
     const code = readStringField(body, "code");
     const codeVerifier = readStringField(body, "code_verifier");
     const redirectUri = readStringField(body, "redirect_uri");
+
+    // Temporary diagnostic logging -- presence/absence only, never the
+    // values themselves (see the logging contract at the top of
+    // _shared.ts). Safe to leave in or remove once the proxy's field
+    // handling is confirmed stable in production.
+    console.info("[api/oauth/google/exchange] request fields", {
+      hasClientId: Boolean(clientId),
+      hasCode: Boolean(code),
+      hasVerifier: Boolean(codeVerifier),
+      hasRedirectUri: Boolean(redirectUri),
+      grantType: "authorization_code",
+    });
 
     if (!clientId || !code || !codeVerifier || !redirectUri) {
       return errorResponse(400, "invalid_request", "client_id, code, code_verifier, and redirect_uri are all required.");
