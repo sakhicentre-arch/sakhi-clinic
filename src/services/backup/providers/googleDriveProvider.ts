@@ -123,12 +123,16 @@ export function createGoogleDriveProvider(oauthService: OAuthService): StoragePr
 
       try {
         const q = encodeURIComponent("trashed=false");
-        const response = await fetch(`${FILES_ENDPOINT}?q=${q}&fields=files(id,name,size)&spaces=drive`, {
+        const response = await fetch(`${FILES_ENDPOINT}?q=${q}&fields=files(id,name,size,createdTime)&spaces=drive&orderBy=createdTime desc`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!response.ok) return [];
         const json = await response.json();
-        return (json.files || []).map((f: any) => ({ filename: f.name, sizeBytes: f.size ? Number(f.size) : undefined }));
+        return (json.files || []).map((f: any) => ({
+          filename: f.name,
+          sizeBytes: f.size ? Number(f.size) : undefined,
+          createdAt: f.createdTime,
+        }));
       } catch {
         return [];
       }

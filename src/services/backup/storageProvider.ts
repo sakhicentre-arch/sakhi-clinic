@@ -41,6 +41,9 @@ export interface StorageProviderSaveResult {
 export interface StorageProviderListEntry {
   filename: string;
   sizeBytes?: number;
+  /** ISO timestamp, if the provider can report it without a separate
+   * per-file request (e.g. Drive's files.list already includes it). */
+  createdAt?: string;
 }
 
 export interface StorageProviderMetadata {

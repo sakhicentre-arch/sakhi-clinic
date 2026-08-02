@@ -33,15 +33,18 @@
  * callback StorageProvider already defines, and this file is solely
  * responsible for turning that into BackupJob events.
  *
- * Provider selection is a runtime value (getActiveProvider/setActiveProvider
- * below), not a hardcoded import used directly in the pipeline -- so
- * connecting a real Google Drive later (Settings UI calling
- * setActiveProvider once OAuth succeeds) is a single function call from
- * outside this file, not a source edit here. Every function in this file
- * calls getActiveProvider() and nothing else; none of them can drift into
- * assuming which concrete provider is active. This file also contains
- * zero Drive-specific logic anywhere -- it never imports googleDriveProvider
- * or googleOAuthService directly.
+ * Provider selection is resolved from the doctor's own persisted
+ * preference (backupSettingsService.getBackupSettings().destination),
+ * looked up in providerRegistry.ts -- never a hardcoded import, never an
+ * in-memory-only flag. Connecting Google Drive (OAuth) and choosing it as
+ * a destination are completely independent: authenticating only ever
+ * means "Google Drive is available," never "Google Drive is now where
+ * backups go" -- see providerRegistry.ts and backupSettingsService.ts.
+ * Every function in this file calls getActiveProvider() and nothing else;
+ * none of them can drift into assuming which concrete provider is active.
+ * This file still contains zero provider-specific logic anywhere -- it
+ * never imports googleDriveProvider or googleOAuthService directly, only
+ * the registry.
  */
 
 import { planAutoBackup, planManualBackup } from "./backupPlanner";
@@ -50,26 +53,72 @@ import { encrypt, decrypt } from "./encryptionLayer";
 import { compress, decompress } from "./compressionLayer";
 import { validateBundleShape, computeChecksum, verifyChecksum } from "./integrityValidator";
 import { localBackupProvider } from "./providers/localBackupProvider";
-import type { StorageProvider } from "./storageProvider";
+import { getProviderById } from "./providers/providerRegistry";
+import type { StorageProvider, StorageProviderListEntry } from "./storageProvider";
 import { createJob, recordEvent, completeJob, failJob, cancelJob, getJob, listJobsDueForRetry, scheduleRetry, scheduleRetryWithBackoff } from "./backupJobService";
 import type { BackupJob, BackupJobFailureReason, BackupJobKind } from "../db";
 import { recordBackupSuccessDetails, recordRestoreSuccess } from "../storageHealthService";
 import { logOperationalEvent } from "../operationalEventLogService";
+import { getBackupSettings } from "./backupSettingsService";
 
-let activeProvider: StorageProvider = localBackupProvider;
+/**
+ * Test/advanced-only override -- production UI code never calls this
+ * (nothing in src/pages or src/App.tsx references it). Its sole purpose
+ * is letting tests inject an arbitrary fake StorageProvider to exercise
+ * this file's retry/verification/error-handling logic without needing a
+ * real or mocked Google Drive. When unset (the only state real doctors
+ * ever see), getActiveProvider() resolves purely from persisted settings.
+ */
+let testOverrideProvider: StorageProvider | null = null;
 
-/** The provider every pipeline function below actually uses. */
+/** The provider every pipeline function below actually uses: the doctor's
+ * persisted destination preference, resolved through the provider
+ * registry. Falls back to local if the stored destination id doesn't
+ * match any registered provider (e.g. corrupted preference, or a
+ * provider that existed in an older build and was since removed) --
+ * never because a provider merely isn't connected right now (see
+ * resolveAutoBackupProvider below for where THAT distinction matters). */
 export function getActiveProvider(): StorageProvider {
-  return activeProvider;
+  if (testOverrideProvider) return testOverrideProvider;
+  const { destination } = getBackupSettings();
+  return getProviderById(destination) ?? localBackupProvider;
 }
 
-/** Called once a real provider (e.g. a connected Google Drive) is ready to take over. */
+/** Test/advanced-only -- see testOverrideProvider above. */
 export function setActiveProvider(provider: StorageProvider): void {
-  activeProvider = provider;
+  testOverrideProvider = provider;
 }
 
+/** Test/advanced-only -- clears the override above; does NOT touch the
+ * doctor's persisted destination preference. */
 export function resetActiveProviderToLocal(): void {
-  activeProvider = localBackupProvider;
+  testOverrideProvider = null;
+}
+
+/**
+ * Automatic/unattended runs get one extra safety check manual runs
+ * deliberately don't: if the persisted destination is currently
+ * unavailable (e.g. Google Drive was chosen but has since been
+ * disconnected), silently retrying against it forever would mean the
+ * doctor's automatic backups quietly stop working with no visible
+ * failure until they happen to check Settings. A manual "Backup Now"
+ * click, by contrast, is attended -- getActiveProvider()'s honest
+ * failure (the provider's own NOT_CONNECTED_MESSAGE) is exactly the
+ * right, visible outcome there, so this fallback is NOT applied to
+ * manual operations.
+ */
+async function resolveAutoBackupProvider(): Promise<{ provider: StorageProvider; fellBackToLocal: boolean }> {
+  const provider = getActiveProvider();
+  if (provider.id === localBackupProvider.id || provider.available) {
+    return { provider, fellBackToLocal: false };
+  }
+  await logOperationalEvent({
+    level: "warn",
+    type: "backup.auto.destination_unavailable",
+    message: `${provider.label} is not connected -- automatic backup fell back to this device`,
+    data: { destination: provider.id },
+  }).catch(() => {});
+  return { provider: localBackupProvider, fellBackToLocal: true };
 }
 
 const ENVELOPE_VERSION = 1;
@@ -106,8 +155,12 @@ function categorizeError(error: unknown): BackupJobFailureReason {
  * same job id rather than creating a new one, so its full history stays
  * on one record).
  */
-async function runPipelineForJob(jobId: string, input: { kind: BackupJobKind; silent: boolean; reasonForLog: string; eventType: string }): Promise<void> {
-  const provider = getActiveProvider();
+async function runPipelineForJob(
+  jobId: string,
+  input: { kind: BackupJobKind; silent: boolean; reasonForLog: string; eventType: string },
+  providerOverride?: StorageProvider
+): Promise<void> {
+  const provider = providerOverride ?? getActiveProvider();
 
   try {
     await recordEvent(jobId, "planning", "Planning backup");
@@ -276,17 +329,38 @@ export async function runExport(): Promise<void> {
   }
 }
 
+/** frequency -> staleness window, only consulted when Automatic Backup is
+ * on (see backupSettingsService.ts). "before-update"/"before-restore" are
+ * event-triggered, not age-based -- runAutoIfDue's own staleness check
+ * doesn't apply to them, so they fall through to the same default window
+ * as if no frequency were set. Both are documented extension points only,
+ * not implemented yet: "before-restore" would call runAutoIfDue with
+ * minHoursBetweenBackups: 0 from inside runImportFromText, right before
+ * deserializeAndRestore's destructive overwrite; "before-update" needs an
+ * app-update-detected lifecycle event this app doesn't have yet. */
+function minHoursForFrequency(frequency: ReturnType<typeof getBackupSettings>["frequency"]): number | undefined {
+  if (frequency === "daily") return 24;
+  if (frequency === "weekly") return 24 * 7;
+  return undefined;
+}
+
 export async function runAutoIfDue(input?: { reason?: string; minHoursBetweenBackups?: number }): Promise<void> {
   try {
-    const plan = planAutoBackup({ minHoursBetweenBackups: input?.minHoursBetweenBackups });
+    const settings = getBackupSettings();
+    const minHours = input?.minHoursBetweenBackups ?? (settings.autoBackupEnabled ? minHoursForFrequency(settings.frequency) : undefined);
+    const plan = planAutoBackup({ minHoursBetweenBackups: minHours });
     if (!plan.shouldRun) return;
 
-    await runExportPipeline({
-      kind: "auto",
-      silent: true,
-      reasonForLog: "Automatic local backup snapshot created",
-      eventType: "backup.auto.success",
-    });
+    // Only automatic runs get the connected-or-fall-back-to-local
+    // treatment -- see resolveAutoBackupProvider's own comment for why
+    // manual operations deliberately don't.
+    const { provider } = await resolveAutoBackupProvider();
+    const job = await createJob("auto", provider.id);
+    await runPipelineForJob(
+      job.id,
+      { kind: "auto", silent: true, reasonForLog: "Automatic backup snapshot created", eventType: "backup.auto.success" },
+      provider
+    );
   } catch (error) {
     await logOperationalEvent({
       level: "warn",
@@ -328,19 +402,26 @@ export async function retryJob(jobId: string): Promise<{ ok: boolean; error?: st
   }
 }
 
-export async function runImport(file: File): Promise<void> {
-  const job = await createJob("restore", getActiveProvider().id);
+/**
+ * Shared restore core -- everything after "I have the raw envelope/plain
+ * JSON text" is identical whether it came from a local file picker or a
+ * downloaded Google Drive file. The two entry points below (runImport,
+ * runImportFromProvider) only differ in HOW they obtain `text`; neither
+ * duplicates parsing, checksum verification, the confirmation prompt, or
+ * the actual restore call.
+ */
+async function runImportFromText(providerId: string, text: string, meta: { filename: string; size?: number }): Promise<void> {
+  const job = await createJob("restore", providerId);
 
   try {
     await logOperationalEvent({
       level: "info",
       type: "backup.import.start",
       message: "Backup import started",
-      data: { filename: file.name, size: file.size, jobId: job.id },
+      data: { filename: meta.filename, size: meta.size, jobId: job.id },
     });
-    await recordEvent(job.id, "parsing", "Reading backup file", { data: { filename: file.name, size: file.size } });
+    await recordEvent(job.id, "parsing", "Reading backup file", { data: { filename: meta.filename, size: meta.size } });
 
-    const text = await file.text();
     const parsed: any = JSON.parse(text);
 
     let bundleLike: any;
@@ -393,22 +474,63 @@ export async function runImport(file: File): Promise<void> {
       level: "info",
       type: "backup.import.success",
       message: "Backup import completed",
-      data: { filename: file.name, jobId: job.id },
+      data: { filename: meta.filename, jobId: job.id },
     });
     recordRestoreSuccess(new Date().toISOString());
-    await completeJob(job.id, { filename: file.name });
+    await completeJob(job.id, { filename: meta.filename });
     alert("Clinic backup restored.");
   } catch (error) {
-    console.error("[backupManager] runImport failed:", error);
+    console.error("[backupManager] restore failed:", error);
     const message = error instanceof Error ? error.message : String(error);
     await failJob(job.id, message, { failureReason: categorizeError(error) });
     await logOperationalEvent({
       level: "error",
       type: "backup.import.failure",
       message: "Backup import failed",
-      data: { filename: file.name, error: message, jobId: job.id },
+      data: { filename: meta.filename, error: message, jobId: job.id },
     }).catch(() => {});
     alert("Restore failed. The backup file looks invalid or incomplete.");
+  }
+}
+
+/** Destination = Local: the doctor picked a file via the browser's file input. */
+export async function runImport(file: File): Promise<void> {
+  const text = await file.text();
+  await runImportFromText(localBackupProvider.id, text, { filename: file.name, size: file.size });
+}
+
+/**
+ * Destination = a remote provider (Google Drive, and later OneDrive/
+ * Dropbox/S3/iCloud): no local file picker at all -- the doctor instead
+ * chooses from listRestorableBackups() below, and this downloads +
+ * restores the chosen one through the exact same core as a local restore.
+ */
+export async function runImportFromProvider(filename: string): Promise<{ ok: boolean; error?: string }> {
+  const provider = getActiveProvider();
+  if (!provider.load) {
+    return { ok: false, error: `${provider.label} does not support restoring directly -- no download capability.` };
+  }
+  const text = await provider.load(filename);
+  if (text == null) {
+    return { ok: false, error: `Could not download "${filename}" from ${provider.label}.` };
+  }
+  await runImportFromText(provider.id, text, { filename });
+  return { ok: true };
+}
+
+/**
+ * Destination = a remote provider: what the doctor picks a backup from.
+ * Empty array (never throws) if the active provider can't list, isn't
+ * connected, or the list call fails -- the UI shows "no backups found"
+ * either way rather than distinguishing every failure mode.
+ */
+export async function listRestorableBackups(): Promise<StorageProviderListEntry[]> {
+  const provider = getActiveProvider();
+  if (!provider.list) return [];
+  try {
+    return await provider.list();
+  } catch {
+    return [];
   }
 }
 

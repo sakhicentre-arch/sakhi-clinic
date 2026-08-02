@@ -25,22 +25,32 @@ import {
   Upload,
   RefreshCw,
   LogOut,
+  HardDrive,
   type LucideIcon,
 } from "lucide-react";
 import { MobileCard, MobileSection, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
 import { useUIStore, ActiveClinic } from "../store/uiStore";
-import { exportBackup, importBackup, getLocalBackupSnapshotSummary } from "../services/backupService";
+import { exportBackup, importBackup, listRemoteBackups, restoreFromRemote, getLocalBackupSnapshotSummary } from "../services/backupService";
 import { getLastBackupAt, getLastBackupSizeBytes, getLastRestoreAt } from "../services/storageHealthService";
 import { importPatientsFromCsv, PatientImportMode } from "../services/patientImportService";
 import { exportPatientsCsv } from "../services/csvExportService";
 import { runDexieHealthCheck, DexieHealthReport } from "../services/storageIntegrityService";
 import { getMaintenanceRuntimeReport, MaintenanceRuntimeReport } from "../services/maintenanceRuntimeService";
-import { getActiveProvider, setActiveProvider, resetActiveProviderToLocal } from "../services/backup/backupManager";
+import { getActiveProvider } from "../services/backup/backupManager";
+import {
+  getBackupSettings,
+  setBackupDestination,
+  setAutoBackupEnabled,
+  setBackupFrequency,
+  LOCAL_DESTINATION_ID,
+  type BackupFrequency,
+} from "../services/backup/backupSettingsService";
+import { listRegisteredProviders } from "../services/backup/providers/providerRegistry";
+import type { StorageProviderListEntry } from "../services/backup/storageProvider";
 import { listRecentJobs } from "../services/backup/backupJobService";
 import { retryEligibleBackupJobs } from "../services/backup/backupRetryService";
 import { googleDriveProvider } from "../services/backup/providers/googleDriveProvider";
 import { googleOAuthService } from "../services/backup/oauth/googleOAuthService";
-import { restoreActiveProviderFromConnection } from "../services/backup/oauth/completeGoogleDriveConnection";
 import type { BackupJob } from "../services/db";
 
 declare const __APP_VERSION__: string;
@@ -146,25 +156,28 @@ export default function SettingsPage() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const [driveConnected, setDriveConnected] = useState(false);
+  const [driveAccountEmail, setDriveAccountEmail] = useState<string | null>(null);
   const [cloudJobs, setCloudJobs] = useState<BackupJob[]>([]);
   const [failedJobCount, setFailedJobCount] = useState(0);
   const [cloudNote, setCloudNote] = useState<string>("");
 
   const driveConfigured = googleDriveProvider.available; // reflects isConfigured(), not sign-in state -- see the provider's own comment
-  const [activeProviderId, setActiveProviderId] = useState(getActiveProvider().id);
+
+  // Destination and mode are the doctor's own persisted preferences
+  // (backupSettingsService.ts) -- completely independent of driveConnected
+  // above. Connecting Google Drive only ever changes driveConnected; only
+  // an explicit choice here changes backupSettings.destination.
+  const [backupSettings, setBackupSettingsState] = useState(getBackupSettings());
+  const activeProviderId = getActiveProvider().id; // derived straight from backupSettings.destination -- always in sync, never separate state
+
+  const [showDrivePicker, setShowDrivePicker] = useState(false);
+  const [drivePickerLoading, setDrivePickerLoading] = useState(false);
+  const [driveBackups, setDriveBackups] = useState<StorageProviderListEntry[]>([]);
 
   const load = async () => {
     setLoading(true);
     try {
-      // Re-derives the active provider from persisted OAuth state before
-      // reading it below -- setActiveProvider() only lives in memory (see
-      // backupManager.ts), so without this, a plain re-render can never
-      // pick up a connection that was completed on a now-gone page load
-      // (App.tsx's OAuth callback handler reloads immediately after
-      // setting it). Cheap and idempotent: a no-op whenever Drive isn't
-      // actually connected.
-      await restoreActiveProviderFromConnection();
-      setActiveProviderId(getActiveProvider().id);
+      setBackupSettingsState(getBackupSettings());
 
       try {
         const rawConnectResult = window.localStorage.getItem("sakhi.driveConnectResult.v1");
@@ -173,7 +186,7 @@ export default function SettingsPage() {
           const connectResult = JSON.parse(rawConnectResult) as { ok: boolean; error?: string };
           setCloudNote(
             connectResult.ok
-              ? "Google Drive connected. New backups will now save to Drive."
+              ? "Google Drive connected. Choose it as your backup destination below to start saving backups there."
               : `Could not connect Google Drive: ${connectResult.error || "Unknown error"}`
           );
         }
@@ -194,6 +207,15 @@ export default function SettingsPage() {
       setDriveConnected(connected);
       setCloudJobs(jobs.filter((j) => j.providerId !== "local"));
       setFailedJobCount(jobs.filter((j) => j.status === "failed").length);
+
+      if (connected) {
+        googleOAuthService
+          .getAccountInfo()
+          .then((info) => setDriveAccountEmail(info?.email ?? null))
+          .catch(() => setDriveAccountEmail(null));
+      } else {
+        setDriveAccountEmail(null);
+      }
 
       if (typeof navigator !== "undefined" && (navigator as any).storage?.estimate) {
         try {
@@ -240,12 +262,41 @@ export default function SettingsPage() {
     setBusy("disconnect-drive");
     try {
       await googleOAuthService.signOut();
-      resetActiveProviderToLocal();
-      setCloudNote("Disconnected. Backups will continue saving to this device.");
+      // Disconnecting only ever touches AUTH -- except this one explicit,
+      // visible exception: if Google Drive was the chosen destination, it
+      // is no longer usable at all, so leaving it selected would mean
+      // every future backup silently fails until the doctor notices. This
+      // is the opposite direction of the rule "connecting never changes
+      // the destination" -- falling back to the always-available local
+      // destination on disconnect is a safety measure, not an auto-promotion.
+      if (backupSettings.destination === googleDriveProvider.id) {
+        setBackupDestination(LOCAL_DESTINATION_ID);
+        setCloudNote("Disconnected. Backup destination reset to This Device.");
+      } else {
+        setCloudNote("Disconnected. Backups will continue saving to your chosen destination.");
+      }
+      setShowDrivePicker(false);
       await load();
     } finally {
       setBusy(null);
     }
+  };
+
+  const handleDestinationChange = (providerId: string) => {
+    setBackupDestination(providerId);
+    setBackupSettingsState(getBackupSettings());
+    setShowDrivePicker(false);
+    setCloudNote("");
+  };
+
+  const handleAutoBackupToggle = (enabled: boolean) => {
+    setAutoBackupEnabled(enabled);
+    setBackupSettingsState(getBackupSettings());
+  };
+
+  const handleFrequencyChange = (frequency: BackupFrequency) => {
+    setBackupFrequency(frequency);
+    setBackupSettingsState(getBackupSettings());
   };
 
   const handleRetryFailedUploads = async () => {
@@ -277,6 +328,35 @@ export default function SettingsPage() {
     setBusy("restore-backup");
     try {
       await importBackup(file);
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Destination = a remote provider: dispatches to listing instead of a
+   * local file picker -- see backupManager.ts's runImportFromProvider /
+   * listRestorableBackups for why this lives in the backup engine, not here. */
+  const handleOpenDrivePicker = async () => {
+    setShowDrivePicker(true);
+    setDrivePickerLoading(true);
+    try {
+      const entries = await listRemoteBackups();
+      setDriveBackups(entries);
+    } finally {
+      setDrivePickerLoading(false);
+    }
+  };
+
+  const handleRestoreFromDrive = async (filename: string) => {
+    setBusy("restore-backup");
+    try {
+      const result = await restoreFromRemote(filename);
+      if (!result.ok) {
+        setCloudNote(result.error || "Could not restore from Google Drive.");
+        return;
+      }
+      setShowDrivePicker(false);
       await load();
     } finally {
       setBusy(null);
@@ -319,82 +399,135 @@ export default function SettingsPage() {
 
         <ResponsiveContainer>
           <MobileSection>
-            {/* ================= Data Protection ================= */}
+            {/* ================= Backup & Restore ================= */}
             <MobileCard>
-              <SectionHeader icon={Database} title="Data Protection" subtitle="Export and restore your clinic data" />
-              <div className="sakhi-stack-tight">
+              <SectionHeader icon={Database} title="Backup & Restore" subtitle="Where your clinic data is protected" />
+
+              {/* -- Google Drive: authentication only, never destination -- */}
+              <div className="sakhi-row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div className="sakhi-row" style={{ gap: "var(--space-2)" }}>
+                  {driveConnected ? <Cloud size={18} /> : <CloudOff size={18} />}
+                  <div>
+                    <div className="sakhi-body" style={{ fontWeight: 900, fontSize: 13 }}>Google Drive</div>
+                    <div className="sakhi-caption">
+                      {driveConnected ? `Connected${driveAccountEmail ? ` · ${driveAccountEmail}` : ""}` : driveConfigured ? "Not connected" : "Not configured for this deployment"}
+                    </div>
+                  </div>
+                </div>
+                {driveConnected ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleDisconnectDrive()}
+                    disabled={busy === "disconnect-drive"}
+                    className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+                    style={{ minHeight: 40, width: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}
+                  >
+                    <LogOut size={14} />
+                    {busy === "disconnect-drive" ? "Disconnecting…" : "Disconnect"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleConnectDrive()}
+                    disabled={busy === "connect-drive" || !driveConfigured}
+                    className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+                    style={{ minHeight: 40, width: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}
+                  >
+                    <Cloud size={14} />
+                    {busy === "connect-drive" ? "Connecting…" : "Connect Drive"}
+                  </button>
+                )}
+              </div>
+
+              {/* -- Destination: the doctor's own explicit, persisted choice -- */}
+              <div style={{ marginTop: "var(--space-3)" }}>
+                <div className="sakhi-caption" style={{ marginBottom: 6 }}>Backup Destination</div>
+                <div className="sakhi-row" style={{ gap: 8, flexWrap: "wrap" }}>
+                  {listRegisteredProviders().map((p) => {
+                    const disabled = p.id !== LOCAL_DESTINATION_ID && !p.available;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
+                        data-selected={String(backupSettings.destination === p.id)}
+                        data-tone="brand"
+                        aria-pressed={backupSettings.destination === p.id}
+                        disabled={disabled}
+                        title={disabled ? `${p.label} is not connected yet` : undefined}
+                        onClick={() => handleDestinationChange(p.id)}
+                      >
+                        {p.id === LOCAL_DESTINATION_ID ? <HardDrive size={14} /> : <Cloud size={14} />}
+                        {p.id === LOCAL_DESTINATION_ID ? "This Device" : p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* -- Backup Mode: independent from both auth and destination -- */}
+              <div style={{ marginTop: "var(--space-3)" }}>
+                <div className="sakhi-caption" style={{ marginBottom: 6 }}>Backup Mode</div>
+                <label className="sakhi-row" style={{ gap: 8, cursor: "pointer", width: "fit-content" }}>
+                  <input
+                    type="checkbox"
+                    checked={backupSettings.autoBackupEnabled}
+                    onChange={(e) => handleAutoBackupToggle(e.target.checked)}
+                  />
+                  <span className="sakhi-body" style={{ fontSize: 13, fontWeight: 800 }}>Automatic Backup</span>
+                </label>
+                {backupSettings.autoBackupEnabled && (
+                  <div className="sakhi-row" style={{ gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                    {(["daily", "weekly"] as BackupFrequency[]).map((f) => (
+                      <button
+                        key={f}
+                        type="button"
+                        className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
+                        data-selected={String(backupSettings.frequency === f)}
+                        data-tone="brand"
+                        onClick={() => handleFrequencyChange(f)}
+                      >
+                        {f === "daily" ? "Daily" : "Weekly"}
+                      </button>
+                    ))}
+                    <span className="sakhi-caption" style={{ alignSelf: "center" }}>
+                      + automatically before every restore
+                    </span>
+                  </div>
+                )}
+                {backupSettings.autoBackupEnabled && backupSettings.destination !== LOCAL_DESTINATION_ID && !getActiveProvider().available && (
+                  <div className="sakhi-caption" style={{ marginTop: 6, color: "#b45309", fontWeight: 800 }}>
+                    {getActiveProvider().label} isn't connected right now -- automatic backups will save to This Device until it's reconnected.
+                  </div>
+                )}
+              </div>
+
+              {/* -- Status -- */}
+              <div className="sakhi-stack-tight" style={{ marginTop: "var(--space-3)" }}>
                 <SettingRow
                   label="Last backup"
                   value={formatTs(getLastBackupAt())}
                   tone={getLastBackupAt() ? "success" : "muted"}
                 />
+                <SettingRow label="Location" value={activeProviderId === LOCAL_DESTINATION_ID ? "This Device" : getActiveProvider().label} />
+                <SettingRow label="Size" value={formatBytes(getLastBackupSizeBytes())} />
                 <SettingRow label="Last restore" value={formatTs(getLastRestoreAt())} />
-                <SettingRow label="Last backup size" value={formatBytes(getLastBackupSizeBytes())} />
                 <SettingRow
                   label="Local snapshots"
                   value={backupSummary ? `${backupSummary.count} stored` : loading ? "Loading…" : "—"}
                 />
-              </div>
-
-              <div className="sakhi-row" style={{ gap: 10, flexWrap: "wrap", marginTop: "var(--space-3)" }}>
-                <button
-                  type="button"
-                  onClick={() => void handleExportBackup()}
-                  disabled={busy === "export-backup"}
-                  className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
-                  style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}
-                >
-                  <Download size={16} />
-                  {busy === "export-backup" ? "Exporting…" : "Export Backup"}
-                </button>
-                <label
-                  className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
-                  style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}
-                >
-                  <Upload size={16} />
-                  {busy === "restore-backup" ? "Restoring…" : "Restore Backup"}
-                  <input
-                    type="file"
-                    accept=".json,application/json"
-                    style={{ display: "none" }}
-                    disabled={busy === "restore-backup"}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (!f) return;
-                      void handleRestoreBackup(f).finally(() => {
-                        e.currentTarget.value = "";
-                      });
-                    }}
-                  />
-                </label>
-              </div>
-            </MobileCard>
-
-            {/* ================= Cloud Backup ================= */}
-            <MobileCard>
-              <SectionHeader
-                icon={driveConnected ? Cloud : CloudOff}
-                title="Cloud Backup"
-                subtitle={driveConfigured ? "Google Drive" : "Google Drive — not yet configured for this deployment"}
-              />
-
-              <div className="sakhi-stack-tight">
-                <SettingRow
-                  label="Google Drive status"
-                  value={driveConnected ? "Connected" : driveConfigured ? "Not connected" : "Not configured"}
-                  tone={driveConnected ? "success" : "muted"}
-                />
-                <SettingRow label="Active backup destination" value={activeProviderId === "local" ? "This device" : "Google Drive"} />
                 {failedJobCount > 0 && (
                   <SettingRow label="Failed backups" value={`${failedJobCount} awaiting retry`} tone="brand" />
                 )}
               </div>
 
-              <div className="sakhi-caption" style={{ marginTop: "var(--space-2)" }}>
-                Capabilities: upload, download, delete, list
-                {googleDriveProvider.capabilities.supportsStreaming ? ", progress reporting" : ""}. No versioning, incremental sync, or
-                conflict resolution yet -- every backup is a full upload.
-              </div>
+              {activeProviderId !== LOCAL_DESTINATION_ID && (
+                <div className="sakhi-caption" style={{ marginTop: "var(--space-2)" }}>
+                  Capabilities: upload, download, delete, list
+                  {googleDriveProvider.capabilities.supportsStreaming ? ", progress reporting" : ""}. No versioning, incremental sync, or
+                  conflict resolution yet -- every backup is a full upload.
+                </div>
+              )}
 
               {cloudNote && (
                 <div className="sakhi-caption" style={{ marginTop: "var(--space-2)", color: "#475569", fontWeight: 800 }}>
@@ -402,29 +535,68 @@ export default function SettingsPage() {
                 </div>
               )}
 
+              {/* -- Operations: dispatched by BackupManager based on the
+                   active provider, not branched here -- this file only
+                   decides which WIDGET to show (a native file input has no
+                   remote equivalent), never how export/restore itself
+                   behaves. -- */}
               <div className="sakhi-row" style={{ gap: 10, flexWrap: "wrap", marginTop: "var(--space-3)" }}>
-                {!driveConnected ? (
-                  <button
-                    type="button"
-                    onClick={() => void handleConnectDrive()}
-                    disabled={busy === "connect-drive"}
-                    className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
-                    style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}
-                  >
-                    <Cloud size={16} />
-                    {busy === "connect-drive" ? "Connecting…" : "Connect Drive"}
-                  </button>
+                {activeProviderId === LOCAL_DESTINATION_ID ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void handleExportBackup()}
+                      disabled={busy === "export-backup"}
+                      className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+                      style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}
+                    >
+                      <Download size={16} />
+                      {busy === "export-backup" ? "Exporting…" : "Export Backup"}
+                    </button>
+                    <label
+                      className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+                      style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+                    >
+                      <Upload size={16} />
+                      {busy === "restore-backup" ? "Restoring…" : "Restore Backup"}
+                      <input
+                        type="file"
+                        accept=".json,application/json"
+                        style={{ display: "none" }}
+                        disabled={busy === "restore-backup"}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (!f) return;
+                          void handleRestoreBackup(f).finally(() => {
+                            e.currentTarget.value = "";
+                          });
+                        }}
+                      />
+                    </label>
+                  </>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => void handleDisconnectDrive()}
-                    disabled={busy === "disconnect-drive"}
-                    className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
-                    style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}
-                  >
-                    <LogOut size={16} />
-                    {busy === "disconnect-drive" ? "Disconnecting…" : "Disconnect Drive"}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void handleExportBackup()}
+                      disabled={busy === "export-backup"}
+                      className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+                      style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}
+                    >
+                      <Cloud size={16} />
+                      {busy === "export-backup" ? "Backing up…" : "Backup Now"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleOpenDrivePicker()}
+                      disabled={busy === "restore-backup"}
+                      className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+                      style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}
+                    >
+                      <Upload size={16} />
+                      {busy === "restore-backup" ? "Restoring…" : `Restore from ${getActiveProvider().label}`}
+                    </button>
+                  </>
                 )}
                 {failedJobCount > 0 && (
                   <button
@@ -439,6 +611,43 @@ export default function SettingsPage() {
                   </button>
                 )}
               </div>
+
+              {/* -- Remote restore picker: list -> choose -> download -> restore -- */}
+              {showDrivePicker && (
+                <div className="sakhi-stack-tight" style={{ marginTop: "var(--space-3)", padding: "var(--space-2)", border: "1px solid #e2e8f0", borderRadius: 12 }}>
+                  <div className="sakhi-row" style={{ justifyContent: "space-between" }}>
+                    <span className="sakhi-body" style={{ fontWeight: 900, fontSize: 13 }}>Choose a backup to restore</span>
+                    <button type="button" className="sakhi-caption" style={{ background: "none", border: "none", cursor: "pointer" }} onClick={() => setShowDrivePicker(false)}>
+                      Close
+                    </button>
+                  </div>
+                  {drivePickerLoading ? (
+                    <div className="sakhi-caption">Loading backups from {getActiveProvider().label}…</div>
+                  ) : driveBackups.length === 0 ? (
+                    <div className="sakhi-caption">No backups found on {getActiveProvider().label}.</div>
+                  ) : (
+                    driveBackups.map((entry) => (
+                      <div key={entry.filename} className="sakhi-row" style={{ justifyContent: "space-between", padding: "var(--space-2) 0", borderTop: "1px solid #f1f5f9" }}>
+                        <div>
+                          <div className="sakhi-body" style={{ fontSize: 13, fontWeight: 800 }}>{entry.filename}</div>
+                          <div className="sakhi-caption">
+                            {entry.createdAt ? formatTs(entry.createdAt) : "Date unknown"} · {formatBytes(entry.sizeBytes)}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={busy === "restore-backup"}
+                          className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+                          style={{ minHeight: 36, width: "auto" }}
+                          onClick={() => void handleRestoreFromDrive(entry.filename)}
+                        >
+                          Restore
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
 
               {cloudJobs.length > 0 && (
                 <>

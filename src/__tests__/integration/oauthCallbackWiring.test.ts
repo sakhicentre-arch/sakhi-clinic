@@ -3,14 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { indexedDB as fakeIndexedDB } from "fake-indexeddb";
 
 /**
- * Phase 3 self-review catch: googleOAuthService.ts implements a real PKCE
- * redirect flow, but nothing originally turned a completed redirect into
- * an active Google Drive provider. completeGoogleDriveConnection.ts (and
- * App.tsx's detection of GOOGLE_OAUTH_CALLBACK_PATH) closes that gap. This
- * file proves the wiring itself -- that a successful callback really does
- * call setActiveProvider(googleDriveProvider), and a failed one leaves the
- * active provider on local -- using a mocked googleOAuthService so no real
- * network or credentials are involved.
+ * completeGoogleDriveConnection.ts is authentication-only: a successful
+ * OAuth callback must NEVER change the active backup destination (see
+ * backupSettingsService.ts's own doc comment -- connecting Google Drive
+ * only ever means "Google Drive is available," never "Google Drive is
+ * now where backups go"). This file proves that boundary holds in both
+ * directions: neither a successful nor a failed callback touches
+ * getActiveProvider()/the persisted destination preference, and the
+ * destination only ever changes via an explicit setBackupDestination()
+ * call, independent of auth state -- using a mocked googleOAuthService so
+ * no real network or credentials are involved.
  */
 
 vi.mock("../../services/backup/oauth/googleOAuthService", () => ({
@@ -40,11 +42,31 @@ async function resetDatabase() {
   });
 }
 
-describe("completeGoogleDriveConnection (OAuth redirect -> active provider wiring)", () => {
+/** The global test setup (src/__tests__/setup.ts) stubs localStorage as
+ * bare vi.fn() spies with no real implementation -- fine for tests that
+ * only assert "was it called," but this file needs an actual working
+ * round-trip (setBackupDestination persists, getActiveProvider reads it
+ * back), so it installs its own working in-memory Storage here instead. */
+function installWorkingLocalStorage(): void {
+  const store = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    setItem: (key: string, value: string) => {
+      store.set(key, value);
+    },
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+    clear: () => store.clear(),
+  });
+}
+
+describe("completeGoogleDriveConnection (OAuth is authentication-only, never destination)", () => {
   let db: typeof import("../../services/db").db;
 
   beforeEach(async () => {
     vi.resetModules();
+    installWorkingLocalStorage();
     await resetDatabase();
     const dbModule = await import("../../services/db");
     db = dbModule.db;
@@ -52,8 +74,7 @@ describe("completeGoogleDriveConnection (OAuth redirect -> active provider wirin
   });
 
   afterEach(async () => {
-    const { resetActiveProviderToLocal } = await import("../../services/backup/backupManager");
-    resetActiveProviderToLocal();
+    vi.unstubAllGlobals();
     db.close();
     await resetDatabase();
   });
@@ -63,7 +84,7 @@ describe("completeGoogleDriveConnection (OAuth redirect -> active provider wirin
     expect(GOOGLE_OAUTH_CALLBACK_PATH).toBe("/oauth/google/callback");
   });
 
-  it("on a successful callback, sets Google Drive as the active backup provider", async () => {
+  it("on a successful callback, the active backup destination stays on local (unchanged)", async () => {
     const { completeGoogleDriveConnection } = await import("../../services/backup/oauth/completeGoogleDriveConnection");
     const { getActiveProvider } = await import("../../services/backup/backupManager");
 
@@ -72,10 +93,10 @@ describe("completeGoogleDriveConnection (OAuth redirect -> active provider wirin
     const result = await completeGoogleDriveConnection("?code=abc123");
 
     expect(result.ok).toBe(true);
-    expect(getActiveProvider().id).toBe("google-drive");
+    expect(getActiveProvider().id).toBe("local");
   });
 
-  it("on a failed callback, returns the error and leaves the active provider on local", async () => {
+  it("on a failed callback, returns the error and the active provider is still untouched", async () => {
     const { completeGoogleDriveConnection } = await import("../../services/backup/oauth/completeGoogleDriveConnection");
     const { getActiveProvider } = await import("../../services/backup/backupManager");
 
@@ -84,5 +105,17 @@ describe("completeGoogleDriveConnection (OAuth redirect -> active provider wirin
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/token exchange failed/i);
     expect(getActiveProvider().id).toBe("local");
+  });
+
+  it("only an explicit setBackupDestination() call changes the active provider, regardless of auth state", async () => {
+    const { completeGoogleDriveConnection } = await import("../../services/backup/oauth/completeGoogleDriveConnection");
+    const { getActiveProvider } = await import("../../services/backup/backupManager");
+    const { setBackupDestination } = await import("../../services/backup/backupSettingsService");
+
+    await completeGoogleDriveConnection("?code=abc123"); // authenticates successfully
+    expect(getActiveProvider().id).toBe("local"); // still local -- auth alone never changes it
+
+    setBackupDestination("google-drive"); // the doctor's own explicit choice
+    expect(getActiveProvider().id).toBe("google-drive");
   });
 });

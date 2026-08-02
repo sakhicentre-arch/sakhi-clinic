@@ -77,7 +77,7 @@ describe("Settings navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: /^settings$/i }));
     await screen.findByTestId("settings-page");
 
-    expect(screen.getByText("Data Protection")).toBeInTheDocument();
+    expect(screen.getByText("Backup & Restore")).toBeInTheDocument();
     expect(screen.getByText("Patient Data")).toBeInTheDocument();
     expect(screen.getByText("Clinic")).toBeInTheDocument();
     expect(screen.getByText("Application")).toBeInTheDocument();
@@ -96,15 +96,15 @@ describe("Settings navigation", () => {
     expect(screen.getAllByText("Coming Soon").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("shows the Cloud Backup section honestly as not configured when no OAuth client ID exists", async () => {
+  it("shows the Backup & Restore section honestly as not configured when no OAuth client ID exists", async () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /^settings$/i }));
     await screen.findByTestId("settings-page");
 
-    expect(screen.getByText("Cloud Backup")).toBeInTheDocument();
-    expect(screen.getByText("Not configured")).toBeInTheDocument();
-    expect(screen.getByText("This device")).toBeInTheDocument();
+    expect(screen.getByText("Backup & Restore")).toBeInTheDocument();
+    expect(screen.getByText("Not configured for this deployment")).toBeInTheDocument();
+    expect(screen.getAllByText("This Device").length).toBeGreaterThan(0);
   });
 
   it("lets the doctor switch the active clinic from Settings", async () => {
