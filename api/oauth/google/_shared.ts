@@ -119,6 +119,18 @@ export function requireClientSecret(endpointName: string): string | null {
  *  - network failure: reported as a safe 502, also logged server-side.
  */
 export async function forwardToGoogle(params: URLSearchParams, endpointName: string, grantType: string): Promise<Response> {
+  // Temporary diagnostic logging -- client_id and redirect_uri are not
+  // secret (client_id is already visible in the browser's own auth-redirect
+  // URL; redirect_uri is a fixed, public origin path), so they're logged in
+  // full here to compare against what the frontend is actually configured
+  // with. Never client_secret, code, code_verifier, or refresh_token (see
+  // the logging contract at the top of this file).
+  console.info(`[api/oauth/google/${endpointName}] Calling Google token endpoint`, {
+    grant_type: params.get("grant_type"),
+    client_id: params.get("client_id"),
+    redirect_uri: params.get("redirect_uri"),
+  });
+
   let googleResponse: Response;
   try {
     googleResponse = await fetch(GOOGLE_TOKEN_ENDPOINT, {
