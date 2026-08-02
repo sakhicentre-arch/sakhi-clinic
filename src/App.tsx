@@ -32,6 +32,20 @@ function hasPendingDriveConnectResult(): boolean {
   }
 }
 
+// sessionStorage (not localStorage): survives a same-tab reload -- so an
+// accidental refresh mid-queue returns the doctor to where they were --
+// but clears on tab close, so a genuinely fresh session still lands on
+// the Dashboard per its own landing-page requirement.
+const ACTIVE_PAGE_STORAGE_KEY = "sakhi.activePage.v1";
+
+function getStoredPage(): string | null {
+  try {
+    return window.sessionStorage.getItem(ACTIVE_PAGE_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   useSafeViewport();
   const isReviewPath = window.location.pathname === "/review";
@@ -44,7 +58,11 @@ export default function App() {
   const isLandingFromDriveConnect = !isOAuthCallbackPath && hasPendingDriveConnectResult();
 
   const [page, setPage] = useState(
-    isOAuthCallbackPath || isLandingFromDriveConnect ? "settings" : isReviewPath ? "review" : "dashboard"
+    isOAuthCallbackPath || isLandingFromDriveConnect
+      ? "settings"
+      : isReviewPath
+        ? "review"
+        : getStoredPage() || "dashboard"
   );
   const [originCheck, setOriginCheck] = useState<OriginCheckResult | null>(null);
   const activePatientId = useUIStore((s) => s.activePatientId);
@@ -60,6 +78,15 @@ export default function App() {
       setActivePage(page as ActivePage);
     }
   }, [page, setActivePage, isReviewPath]);
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(ACTIVE_PAGE_STORAGE_KEY, page);
+    } catch {
+      // Private browsing / storage disabled -- refresh just falls back to
+      // the Dashboard default, not a failure worth surfacing to the doctor.
+    }
+  }, [page]);
 
   // Google Drive OAuth redirect landing: Google sends the doctor back here
   // after consent. A full reload afterward (rather than just clearing the
