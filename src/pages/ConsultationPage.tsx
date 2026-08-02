@@ -1647,6 +1647,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               let badgeColor = "#64748b"; let badgeText = "Weak Signal";
               if (confidence > 0.75) { badgeColor = "#10b981"; badgeText = "Strong Match"; }
               else if (confidence > 0.6) { badgeColor = "#3b82f6"; badgeText = "Good Correlation"; }
+              const alreadyAdded = formData.medicines.some((m) => m.name === lp.remedy);
               return (
                 <div key={`lp-${idx}`} style={patternRowStyle}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1654,7 +1655,29 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     <span style={{ fontSize: 11, fontWeight: 900, color: "#fff", background: badgeColor, padding: "2px 6px", borderRadius: 6, textTransform: "uppercase" }}>{badgeText}</span>
                   </div>
                   <div style={{ fontSize: 11, color: "#3b82f6", fontWeight: 600, marginTop: 4 }}>Confidence Index: {Math.round(confidence * 100)}%</div>
-                  <div style={{ fontSize: 11, color: "#64748b" }}>Matched {lp.matches} clinical tokens</div>
+                  <div style={{ fontSize: 11, color: "#64748b" }}>Evidence: matched {lp.matches} of this remedy's {lp.uses} prior successful clinical uses</div>
+                  {/* Doctor Approval (Module 7) -- this is what actually applies a
+                      suggestion to the prescription. The AI never writes to
+                      formData.medicines on its own; nothing happens here until
+                      the doctor clicks. */}
+                  <button
+                    type="button"
+                    disabled={alreadyAdded}
+                    onClick={() => patch({ medicines: [...formData.medicines, { id: generateId(), name: lp.remedy, potency: "30C", dosage: "1-1-1", duration: "5 Days", notes: "" }] })}
+                    style={{
+                      marginTop: 6,
+                      fontSize: 11,
+                      fontWeight: 900,
+                      padding: "4px 10px",
+                      borderRadius: 6,
+                      border: "1px solid " + (alreadyAdded ? "#cbd5e1" : "#3b82f6"),
+                      background: alreadyAdded ? "#f1f5f9" : "#eff6ff",
+                      color: alreadyAdded ? "#94a3b8" : "#1d4ed8",
+                      cursor: alreadyAdded ? "default" : "pointer",
+                    }}
+                  >
+                    {alreadyAdded ? "✓ Added to Rx" : "Approve → Add to Rx"}
+                  </button>
                 </div>
               );
             })}
@@ -2760,12 +2783,13 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
               {remedySuggestions.length > 0 && (
                 <div className="sakhi-surface-muted" style={{ padding: "var(--space-3)" }}>
-                  <div className="sakhi-label" style={{ color: "#94a3b8" }}>Suggestions</div>
+                  <div className="sakhi-label" style={{ color: "#94a3b8" }}>Suggestions — tap to approve and add to Rx</div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {remedySuggestions.slice(0, 4).map((r, i) => (
                       <button
                         key={i}
                         type="button"
+                        title={`${r.reason} (${r.score > 5 ? "High Match" : "Possible"})`}
                         onClick={() => patch({ medicines: [...formData.medicines, { id: generateId(), name: r.name, potency: "30C", dosage: "1-1-1", duration: "5 Days", notes: "" }] })}
                         className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
                         data-tone="brand"
