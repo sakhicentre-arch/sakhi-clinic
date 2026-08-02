@@ -42,13 +42,13 @@ function isoOnLocalDay(year: number, month: number, day: number, hour = 10): str
 
 async function seedConsultation(overrides: {
   id: string; patientId: string; date: string; fee?: number;
-  paymentStatus?: string; paymentMode?: string; amountReceived?: number; paymentDate?: string;
+  paymentStatus?: string; paymentMode?: string; amountReceived?: number; paymentDate?: string; clinicId?: string;
 }) {
   await db.consultations.add({
     id: overrides.id,
     patientId: overrides.patientId,
     date: overrides.date,
-    clinicId: "Dabholi",
+    clinicId: overrides.clinicId || "Dabholi",
     chiefComplaint: "Test complaint",
     caseText: "",
     outcome: "IMPROVED",
@@ -206,6 +206,50 @@ describe("paymentService", () => {
       await seedConsultation({ id: "c1", patientId: "p1", date: isoOnLocalDay(2026, 0, 5), fee: 500, paymentStatus: "paid", amountReceived: 500 });
       const outstanding = await svc.getOutstandingPatients();
       expect(outstanding).toHaveLength(0);
+    });
+
+    it("scopes to one clinic when a clinicId is given -- the Payment Dashboard's branch filter", async () => {
+      await seedPatient("p1", "Asha");
+      await seedPatient("p2", "Rahul");
+      await seedConsultation({ id: "c1", patientId: "p1", date: isoOnLocalDay(2026, 0, 5), fee: 500, paymentStatus: "pending", clinicId: "Dabholi" });
+      await seedConsultation({ id: "c2", patientId: "p2", date: isoOnLocalDay(2026, 0, 5), fee: 300, paymentStatus: "pending", clinicId: "City Light" });
+
+      const dabholiOnly = await svc.getOutstandingPatients("Dabholi");
+      expect(dabholiOnly.map((o) => o.patientId)).toEqual(["p1"]);
+
+      const allClinics = await svc.getOutstandingPatients();
+      expect(allClinics.map((o) => o.patientId).sort()).toEqual(["p1", "p2"]);
+    });
+  });
+
+  describe("getPaymentDashboardDrilldowns", () => {
+    it("splits per-patient billed/collected/pending entries for the Payment Dashboard's cards", async () => {
+      await seedPatient("p1", "Asha");
+      await seedPatient("p2", "Rahul");
+      // Billed today, nothing paid yet -- shows up in billedToday and pendingCollectionToday.
+      await seedConsultation({ id: "c1", patientId: "p1", date: isoOnLocalDay(2026, 2, 15), fee: 500, paymentStatus: "pending" });
+      // Billed today, paid in full today -- billedToday + collectedToday + collectedThisMonth, NOT pendingCollectionToday.
+      await seedConsultation({ id: "c2", patientId: "p2", date: isoOnLocalDay(2026, 2, 15), fee: 300, paymentStatus: "paid", amountReceived: 300, paymentDate: "2026-03-15" });
+      // Old visit, payment received today -- collectedToday/collectedThisMonth only, NOT billedToday (visit wasn't today).
+      await seedConsultation({ id: "c3", patientId: "p1", date: isoOnLocalDay(2026, 1, 1), fee: 400, paymentStatus: "paid", amountReceived: 400, paymentDate: "2026-03-15" });
+
+      const d = await svc.getPaymentDashboardDrilldowns(REF);
+
+      expect(d.billedToday.map((r) => r.patientId).sort()).toEqual(["p1", "p2"]);
+      expect(d.pendingCollectionToday.map((r) => r.patientId)).toEqual(["p1"]);
+      expect(d.collectedToday.map((r) => r.patientId).sort()).toEqual(["p1", "p2"]);
+      expect(d.collectedThisMonth.map((r) => r.patientId).sort()).toEqual(["p1", "p2"]);
+      expect(d.billedToday.find((r) => r.patientId === "p1")?.detail).toMatch(/500/);
+    });
+
+    it("scopes to one clinic when a clinicId is given", async () => {
+      await seedPatient("p1", "Asha");
+      await seedPatient("p2", "Rahul");
+      await seedConsultation({ id: "c1", patientId: "p1", date: isoOnLocalDay(2026, 2, 15), fee: 500, clinicId: "Dabholi" });
+      await seedConsultation({ id: "c2", patientId: "p2", date: isoOnLocalDay(2026, 2, 15), fee: 300, clinicId: "City Light" });
+
+      const d = await svc.getPaymentDashboardDrilldowns(REF, "Dabholi");
+      expect(d.billedToday.map((r) => r.patientId)).toEqual(["p1"]);
     });
   });
 

@@ -27,6 +27,8 @@ import { db, Consultation, PaymentStatus, PaymentMode } from "./db";
 import { getAllConsultations, saveConsultation } from "./consultationService";
 import { isSameLocalDay, isSameLocalMonth } from "../utils/dateOnly";
 
+const formatMoney = (amount: number): string => `₹${Math.round(amount).toLocaleString("en-IN")}`;
+
 export interface PaymentInput {
   status: PaymentStatus;
   amountReceived?: number;
@@ -202,11 +204,12 @@ export interface OutstandingPatientEntry {
 /** Per-patient breakdown of the same backlog PaymentSummary counts,
  * sorted highest-outstanding first -- what the Payment Dashboard's
  * "Pending Payments"/"Outstanding Amount" cards drill into. */
-export async function getOutstandingPatients(): Promise<OutstandingPatientEntry[]> {
-  const [consultations, patients] = await Promise.all([
+export async function getOutstandingPatients(clinicId?: string): Promise<OutstandingPatientEntry[]> {
+  const [allConsultations, patients] = await Promise.all([
     getAllConsultations(),
     db.patients.filter((p) => !p.deletedAt).toArray(),
   ]);
+  const consultations = clinicId ? allConsultations.filter((c) => c.clinicId === clinicId) : allConsultations;
   const patientById = new Map(patients.map((p) => [p.id, p]));
 
   const byPatient = new Map<string, { amount: number; count: number }>();
@@ -225,6 +228,68 @@ export async function getOutstandingPatients(): Promise<OutstandingPatientEntry[
       return { patientId, name: p?.name || "Unknown", phone: p?.phone || "", amount, consultationCount: count };
     })
     .sort((a, b) => b.amount - a.amount);
+}
+
+export interface PaymentPatientRef {
+  patientId: string;
+  name: string;
+  phone?: string;
+  detail: string;
+}
+
+/** Per-patient breakdowns behind the Payment Dashboard's "Payments Today"/
+ * "Collected Today"/"Collected This Month"/"Pending Collection" cards
+ * (Module 6) -- the narrower today/this-month slices getOutstandingPatients()
+ * (all-time backlog) doesn't cover. Reuses the exact same
+ * outstanding/collected rules as getPaymentSummary() so the card totals and
+ * this drill-down never disagree with each other. */
+export async function getPaymentDashboardDrilldowns(
+  referenceDate: Date = new Date(),
+  clinicId?: string
+): Promise<{
+  billedToday: PaymentPatientRef[];
+  collectedToday: PaymentPatientRef[];
+  collectedThisMonth: PaymentPatientRef[];
+  pendingCollectionToday: PaymentPatientRef[];
+}> {
+  const [allConsultations, patients] = await Promise.all([
+    getAllConsultations(),
+    db.patients.filter((p) => !p.deletedAt).toArray(),
+  ]);
+  const consultations = clinicId ? allConsultations.filter((c) => c.clinicId === clinicId) : allConsultations;
+  const patientById = new Map(patients.map((p) => [p.id, p]));
+
+  const billedToday: PaymentPatientRef[] = [];
+  const collectedToday: PaymentPatientRef[] = [];
+  const collectedThisMonth: PaymentPatientRef[] = [];
+  const pendingCollectionToday: PaymentPatientRef[] = [];
+
+  for (const c of consultations) {
+    const p = patientById.get(c.patientId);
+    if (!p) continue;
+    const fee = c.fee || 0;
+
+    if (fee > 0 && c.date && isSameLocalDay(c.date, referenceDate)) {
+      billedToday.push({ patientId: p.id, name: p.name, phone: p.phone, detail: `${formatMoney(fee)} billed today` });
+      const outstanding = getConsultationOutstanding(c);
+      if (outstanding > 0) {
+        pendingCollectionToday.push({ patientId: p.id, name: p.name, phone: p.phone, detail: `${formatMoney(outstanding)} pending from today's visit` });
+      }
+    }
+
+    const collected = getConsultationCollected(c);
+    if (collected > 0) {
+      const paymentRefDate = c.paymentDate || c.date;
+      if (paymentRefDate && isSameLocalDay(paymentRefDate, referenceDate)) {
+        collectedToday.push({ patientId: p.id, name: p.name, phone: p.phone, detail: `${formatMoney(collected)} collected today` });
+      }
+      if (paymentRefDate && isSameLocalMonth(paymentRefDate, referenceDate)) {
+        collectedThisMonth.push({ patientId: p.id, name: p.name, phone: p.phone, detail: `${formatMoney(collected)} collected this month` });
+      }
+    }
+  }
+
+  return { billedToday, collectedToday, collectedThisMonth, pendingCollectionToday };
 }
 
 /** All consultations (all patients) whose current payment status is any

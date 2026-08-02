@@ -173,7 +173,7 @@ export default function App() {
           </div>
         )
       )}
-      {page === "revenue" && <RevenuePage />}
+      {page === "revenue" && <RevenuePage onNavigate={setPage} />}
       {page === "settings" && <SettingsPage />}
       {page === "followups" && <FollowUpPage onNavigate={setPage} />}
       {page === "reminders" && <RemindersPage />}
