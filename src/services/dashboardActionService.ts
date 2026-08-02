@@ -16,6 +16,8 @@ import { getAllConsultations } from "./consultationService";
 import { appointmentService } from "./appointmentService";
 import { patientRepository } from "../repositories/patientRepository";
 import { getFollowUpBuckets, getFollowUpHistory } from "./followUpIntelligenceService";
+import { listRemindersByStatus } from "./reminderQueueService";
+import { getOutstandingPatients } from "./paymentService";
 import { ConsultationOutcome, normalizeOutcome, Patient } from "./db";
 import { parseDateOnly, startOfDay, daysBetween, isSameLocalDay } from "../utils/dateOnly";
 
@@ -34,6 +36,8 @@ export interface DashboardActionData {
   missedPatients: DashboardPatientRef[];
   newPatientsToday: DashboardPatientRef[];
   repeatPatientsToday: DashboardPatientRef[];
+  pendingReminders: DashboardPatientRef[];
+  pendingPayments: DashboardPatientRef[];
   consultationsCompletedToday: number;
   consultationsPendingToday: number;
 }
@@ -43,12 +47,15 @@ function toRef(p: Pick<Patient, "id" | "name" | "phone">, detail: string): Dashb
 }
 
 export async function getDashboardActionData(referenceDate: Date = new Date()): Promise<DashboardActionData> {
-  const [patients, consultations, appointments, buckets, history] = await Promise.all([
+  const [patients, consultations, appointments, buckets, history, pendingReminderEntries, approvedReminderEntries, outstandingPatients] = await Promise.all([
     patientRepository.list(),
     getAllConsultations(),
     appointmentService.getAll(),
     getFollowUpBuckets(referenceDate),
     getFollowUpHistory(referenceDate),
+    listRemindersByStatus("pending"),
+    listRemindersByStatus("approved"),
+    getOutstandingPatients(),
   ]);
   const patientById = new Map(patients.map((p) => [p.id, p]));
   const today = startOfDay(referenceDate);
@@ -110,12 +117,35 @@ export async function getDashboardActionData(referenceDate: Date = new Date()): 
   const todaysAppointments = appointments.filter((a) => a.date && isSameLocalDay(a.date, referenceDate));
   const consultationsPendingToday = todaysAppointments.filter((a) => a.status === "booked" || a.status === "arrived" || a.status === "in-progress").length;
 
+  // Pending WhatsApp Reminders: queued (pending) or doctor-approved but not
+  // yet sent -- both still need action. Deduplicated to one row per patient
+  // (a patient can have more than one queued reminder) since the card is
+  // "which patients", matching missedPatients' own convention.
+  const pendingByPatient = new Map<string, { count: number; name: string; phone?: string; latestType: string }>();
+  for (const r of [...pendingReminderEntries, ...approvedReminderEntries]) {
+    const existing = pendingByPatient.get(r.patientId) || { count: 0, name: r.patientName, phone: r.phone, latestType: r.type };
+    existing.count += 1;
+    pendingByPatient.set(r.patientId, existing);
+  }
+  const pendingReminders: DashboardPatientRef[] = Array.from(pendingByPatient.entries()).map(([patientId, v]) =>
+    toRef({ id: patientId, name: v.name, phone: v.phone }, `${v.count} reminder${v.count === 1 ? "" : "s"} awaiting send (${v.latestType.replace(/_/g, " ")})`)
+  );
+
+  // Pending Payments: same all-time outstanding backlog the Payment
+  // Dashboard's own cards drill into -- paymentService.ts is the single
+  // source of truth for what "outstanding" means, not recomputed here.
+  const pendingPayments: DashboardPatientRef[] = outstandingPatients.map((o) =>
+    toRef({ id: o.patientId, name: o.name, phone: o.phone }, `₹${o.amount.toLocaleString("en-IN")} outstanding across ${o.consultationCount} visit${o.consultationCount === 1 ? "" : "s"}`)
+  );
+
   return {
     todayFollowUps,
     overdueFollowUps,
     thisWeekFollowUps,
     upcomingFollowUps,
     missedPatients: Array.from(missedByPatient.values()),
+    pendingReminders,
+    pendingPayments,
     newPatientsToday,
     repeatPatientsToday,
     consultationsCompletedToday: todaysConsultations.length,

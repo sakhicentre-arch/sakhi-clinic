@@ -153,4 +153,41 @@ describe("dashboardActionService", () => {
     const data = await svc.getDashboardActionData(realToday);
     expect(data.consultationsPendingToday).toBe(2);
   });
+
+  it("pendingReminders dedupes per patient across pending + approved queue entries", async () => {
+    await seedPatient({ id: "p1", name: "A" });
+    await seedPatient({ id: "p2", name: "B" });
+    await db.reminderQueue.add({
+      id: "r1", patientId: "p1", patientName: "A", type: "follow_up", channel: "whatsapp",
+      message: "m1", dueAt: REF.toISOString(), status: "pending", retryCount: 0,
+      createdAt: REF.toISOString(), updatedAt: REF.toISOString(),
+    } as any);
+    await db.reminderQueue.add({
+      id: "r2", patientId: "p1", patientName: "A", type: "custom", channel: "whatsapp",
+      message: "m2", dueAt: REF.toISOString(), status: "approved", retryCount: 0,
+      createdAt: REF.toISOString(), updatedAt: REF.toISOString(),
+    } as any);
+    await db.reminderQueue.add({
+      id: "r3", patientId: "p2", patientName: "B", type: "follow_up", channel: "whatsapp",
+      message: "m3", dueAt: REF.toISOString(), status: "sent", retryCount: 0, // already sent -- excluded
+      createdAt: REF.toISOString(), updatedAt: REF.toISOString(),
+    } as any);
+
+    const data = await svc.getDashboardActionData(REF);
+    expect(data.pendingReminders.map((r) => r.patientId)).toEqual(["p1"]);
+    expect(data.pendingReminders[0].detail).toMatch(/2 reminders/);
+  });
+
+  it("pendingPayments mirrors paymentService's outstanding backlog", async () => {
+    await seedPatient({ id: "p1", name: "A" });
+    await db.consultations.add({
+      id: "c1", patientId: "p1", date: isoOnLocalDay(2026, 2, 10),
+      clinicId: "Dabholi", chiefComplaint: "Test", caseText: "", outcome: "IMPROVED", medicines: [],
+      fee: 500, paymentStatus: "pending",
+    } as any);
+
+    const data = await svc.getDashboardActionData(REF);
+    expect(data.pendingPayments.map((p) => p.patientId)).toEqual(["p1"]);
+    expect(data.pendingPayments[0].detail).toMatch(/500/);
+  });
 });

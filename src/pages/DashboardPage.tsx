@@ -39,7 +39,9 @@ type ActionCardKey =
   | "upcomingFollowUps"
   | "missedPatients"
   | "newPatientsToday"
-  | "repeatPatientsToday";
+  | "repeatPatientsToday"
+  | "pendingReminders"
+  | "pendingPayments";
 
 interface ActionCardConfig {
   key: ActionCardKey;
@@ -47,6 +49,10 @@ interface ActionCardConfig {
   icon: string;
   color: string;
   emptyMessage: string;
+  /** "pendingReminders" already IS a filtered workflow (the Reminders
+   * queue itself) -- clicking it jumps straight there instead of
+   * detouring through another patient list first. */
+  navigateTo?: string;
 }
 
 const ACTION_CARDS: ActionCardConfig[] = [
@@ -57,6 +63,8 @@ const ACTION_CARDS: ActionCardConfig[] = [
   { key: "missedPatients", label: "Missed Patients", icon: "\u{1F6AB}", color: "#b91c1c", emptyMessage: "No missed follow-ups." },
   { key: "newPatientsToday", label: "New Patients", icon: "\u{1F195}", color: "#16a34a", emptyMessage: "No new registrations today." },
   { key: "repeatPatientsToday", label: "Repeat Patients", icon: "\u{1F501}", color: "#d97706", emptyMessage: "No repeat visits today." },
+  { key: "pendingReminders", label: "Pending Reminders", icon: "\u{1F4AC}", color: "#0891b2", emptyMessage: "No reminders awaiting approval.", navigateTo: "reminders" },
+  { key: "pendingPayments", label: "Pending Payments", icon: "\u{1F4B0}", color: "#b45309", emptyMessage: "No pending payments." },
 ];
 
 function buildGenericReminderMessage(patientName: string): string {
@@ -388,7 +396,11 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
                   type="button"
                   data-testid={`dashboard-action-card-${card.key}`}
                   className="sakhi-tap sakhi-focus-ring sakhi-ripple"
-                  onClick={() => { haptic("tap"); setActiveCardKey(card.key); }}
+                  onClick={() => {
+                    haptic("tap");
+                    if (card.navigateTo) onNavigate(card.navigateTo);
+                    else setActiveCardKey(card.key);
+                  }}
                   style={{
                     textAlign: "left",
                     padding: "var(--space-3)",
@@ -602,7 +614,7 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
                 key={card.key}
                 type="button"
                 data-testid={`dashboard-action-card-${card.key}`}
-                onClick={() => setActiveCardKey(card.key)}
+                onClick={() => (card.navigateTo ? onNavigate(card.navigateTo) : setActiveCardKey(card.key))}
                 style={{
                   textAlign: "left",
                   padding: 16,
