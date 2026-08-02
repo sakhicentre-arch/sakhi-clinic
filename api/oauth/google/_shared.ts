@@ -98,14 +98,30 @@ export function safeMessageFor(googleErrorCode: string | undefined): string {
  * value, ever) when it's missing; returns the secret to the caller
  * otherwise. Centralized so exchange.ts and refresh.ts can't drift on this
  * check. Callers turn a null return into a 500 via errorResponse.
+ *
+ * Trims the raw env var before use: a trailing newline or stray space from
+ * copy-pasting a secret into Vercel's dashboard is a common, entirely
+ * server-side cause of Google's "The provided client secret is invalid" --
+ * indistinguishable from a genuinely wrong secret without this check, since
+ * both produce the exact same Google error.
+ *
+ * Temporary diagnostic logging: length and whitespace-corruption /
+ * prefix-shape only, never the value itself.
  */
 export function requireClientSecret(endpointName: string): string | null {
-  const secret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
-  if (!secret) {
+  const raw = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  if (!raw) {
     console.error(`[api/oauth/google/${endpointName}] GOOGLE_OAUTH_CLIENT_SECRET is not configured on the server`);
     return null;
   }
-  return secret;
+  const trimmed = raw.trim();
+  console.info(`[api/oauth/google/${endpointName}] GOOGLE_OAUTH_CLIENT_SECRET shape check`, {
+    rawLength: raw.length,
+    trimmedLength: trimmed.length,
+    hadSurroundingWhitespace: raw !== trimmed,
+    looksLikeModernGoogleSecret: trimmed.startsWith("GOCSPX-"),
+  });
+  return trimmed;
 }
 
 /**
