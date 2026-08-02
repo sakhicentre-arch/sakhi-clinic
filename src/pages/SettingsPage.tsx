@@ -45,7 +45,7 @@ import {
   LOCAL_DESTINATION_ID,
   type BackupFrequency,
 } from "../services/backup/backupSettingsService";
-import { listRegisteredProviders } from "../services/backup/providers/providerRegistry";
+import { listRegisteredProviders, getProviderById } from "../services/backup/providers/providerRegistry";
 import type { StorageProviderListEntry } from "../services/backup/storageProvider";
 import { listRecentJobs } from "../services/backup/backupJobService";
 import { retryEligibleBackupJobs } from "../services/backup/backupRetryService";
@@ -157,7 +157,7 @@ export default function SettingsPage() {
 
   const [driveConnected, setDriveConnected] = useState(false);
   const [driveAccountEmail, setDriveAccountEmail] = useState<string | null>(null);
-  const [cloudJobs, setCloudJobs] = useState<BackupJob[]>([]);
+  const [recentJobs, setRecentJobs] = useState<BackupJob[]>([]);
   const [failedJobCount, setFailedJobCount] = useState(0);
   const [cloudNote, setCloudNote] = useState<string>("");
 
@@ -205,7 +205,7 @@ export default function SettingsPage() {
       setHealth(dexieHealth);
       setRuntimeReport(runtime);
       setDriveConnected(connected);
-      setCloudJobs(jobs.filter((j) => j.providerId !== "local"));
+      setRecentJobs(jobs);
       setFailedJobCount(jobs.filter((j) => j.status === "failed").length);
 
       if (connected) {
@@ -463,6 +463,9 @@ export default function SettingsPage() {
                     );
                   })}
                 </div>
+                <div className="sakhi-caption" style={{ marginTop: 6 }}>
+                  More destinations coming soon: OneDrive, Dropbox, Amazon S3, iCloud.
+                </div>
               </div>
 
               {/* -- Backup Mode: independent from both auth and destination -- */}
@@ -646,26 +649,35 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              {cloudJobs.length > 0 && (
+              {recentJobs.length > 0 && (
                 <>
                   <div className="sakhi-caption" style={{ marginTop: "var(--space-3)", marginBottom: "var(--space-2)" }}>
-                    Cloud backup history
+                    Backup History
                   </div>
                   <div className="sakhi-progress-rail">
-                    {cloudJobs.map((job) => (
-                      <div key={job.id} className="sakhi-progress-card">
-                        <div className="sakhi-progress-title">
-                          <div className="sakhi-progress-title-left">
-                            <span className="sakhi-progress-dot" data-state={job.status === "succeeded" ? "done" : job.status === "failed" ? "todo" : "active"} />
-                            <span className="sakhi-body" style={{ fontSize: 12, fontWeight: 950, color: "#0f172a" }}>{job.kind}</span>
+                    {recentJobs.map((job) => {
+                      const providerLabel = getProviderById(job.providerId)?.label ?? (job.providerId === LOCAL_DESTINATION_ID ? "This Device" : job.providerId);
+                      return (
+                        <div key={job.id} className="sakhi-progress-card">
+                          <div className="sakhi-progress-title">
+                            <div className="sakhi-progress-title-left">
+                              <span className="sakhi-progress-dot" data-state={job.status === "succeeded" ? "done" : job.status === "failed" ? "todo" : "active"} />
+                              <span className="sakhi-body" style={{ fontSize: 12, fontWeight: 950, color: "#0f172a" }}>
+                                {job.kind === "restore" ? "Restore" : "Backup"} · {providerLabel}
+                              </span>
+                            </div>
+                            <span className="sakhi-pill" data-tone={job.status === "succeeded" ? "success" : job.status === "failed" ? "brand" : "muted"}>
+                              {job.status}
+                            </span>
                           </div>
-                          <span className="sakhi-pill" data-tone={job.status === "succeeded" ? "success" : job.status === "failed" ? "brand" : "muted"}>
-                            {job.status}
-                          </span>
+                          <div className="sakhi-progress-snippet">
+                            {formatTs(job.completedAt || job.createdAt)}
+                            {job.sizeBytes != null ? ` · ${formatBytes(job.sizeBytes)}` : ""}
+                          </div>
+                          <div className="sakhi-progress-snippet">{formatJobStage(job)}</div>
                         </div>
-                        <div className="sakhi-progress-snippet">{formatJobStage(job)}</div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </>
               )}
