@@ -33,13 +33,19 @@ export default function BottomNav({ onNavigate, isMobile = false }: Props) {
 
   return (
     <nav
+      data-testid="bottom-nav"
       style={{
         position: 'fixed',
         bottom: 0,
         left: 0,
         right: 0,
-        height: 'calc(56px + env(safe-area-inset-bottom))',
-        paddingBottom: 'env(safe-area-inset-bottom)',
+        // max(...) guarantees real breathing room below the buttons on
+        // devices that report no safe-area inset at all (most non-notched
+        // Android phones, and every headless test browser) -- env() alone
+        // silently resolves to 0px there, leaving the row flush against
+        // the screen edge.
+        height: 'calc(56px + max(8px, env(safe-area-inset-bottom)))',
+        paddingBottom: 'max(8px, env(safe-area-inset-bottom))',
         display: 'flex',
         justifyContent: 'space-around',
         alignItems: 'center',
