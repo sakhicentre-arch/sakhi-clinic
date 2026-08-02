@@ -41,7 +41,12 @@ export function AppViewportFrame({
         display: 'flex',
         flexDirection: 'column',
         background: '#f8fafc',
-        paddingBottom: isMobile ? 'calc(56px + env(safe-area-inset-bottom))' : 0,
+        // Must match BottomNav.tsx's own height formula exactly -- a
+        // mismatch here (this used plain env() while BottomNav guarantees a
+        // max(8px, ...) minimum) left the last few px of page content
+        // hidden under the nav bar on any device reporting a 0 safe-area
+        // inset, which is most non-notched phones.
+        paddingBottom: isMobile ? 'calc(56px + max(8px, env(safe-area-inset-bottom)))' : 0,
         ...style,
       }}
       {...props}

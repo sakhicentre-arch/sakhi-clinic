@@ -382,80 +382,11 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           </select>
         </div>
 
-        {/* SECTION 0 — Doctor Action Dashboard: every card is a doorway into a filtered workflow, not a statistic */}
-        <MobileCard data-testid="dashboard-action-cards" style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
-          <div className="sakhi-micro">Today's Actions</div>
-          <div style={{ marginTop: "var(--space-2)", display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "var(--space-2)" }}>
-            {ACTION_CARDS.map((card) => {
-              const count = actionData ? actionData[card.key].length : 0;
-              return (
-                <button
-                  key={card.key}
-                  type="button"
-                  data-testid={`dashboard-action-card-${card.key}`}
-                  className="sakhi-tap sakhi-focus-ring sakhi-ripple"
-                  onClick={() => {
-                    haptic("tap");
-                    if (card.navigateTo) onNavigate(card.navigateTo);
-                    else setActiveCardKey(card.key);
-                  }}
-                  style={{
-                    textAlign: "left",
-                    padding: "var(--space-3)",
-                    borderRadius: "var(--radius-3)",
-                    border: `1px solid ${card.color}33`,
-                    background: `${card.color}0f`,
-                    cursor: "pointer",
-                  }}
-                >
-                  <div style={{ fontSize: 18 }}>{card.icon}</div>
-                  <div style={{ fontSize: 22, fontWeight: 950, color: card.color, marginTop: 4 }}>{count}</div>
-                  <div className="sakhi-caption" style={{ marginTop: 2 }}>{card.label}</div>
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ marginTop: "var(--space-2)", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-2)" }}>
-            <div className="sakhi-surface" style={{ padding: "var(--space-2)", borderRadius: "var(--radius-2)", boxShadow: "none" }}>
-              <div className="sakhi-caption">Consultations done</div>
-              <div className="sakhi-body" style={{ fontWeight: 900 }}>{actionData?.consultationsCompletedToday ?? 0}</div>
-            </div>
-            <div className="sakhi-surface" style={{ padding: "var(--space-2)", borderRadius: "var(--radius-2)", boxShadow: "none" }}>
-              <div className="sakhi-caption">Consultations pending</div>
-              <div className="sakhi-body" style={{ fontWeight: 900 }}>{actionData?.consultationsPendingToday ?? 0}</div>
-            </div>
-          </div>
-        </MobileCard>
-
-        {/* SECTION 1 — Compact Today Snapshot */}
-        <MobileCard data-testid="dashboard-today-snapshot" elevated={false} style={{ marginTop: "var(--space-3)", padding: "var(--space-3)", borderRadius: "var(--radius-3)" }}>
-          <div className="sakhi-micro">Today</div>
-          <div style={{ marginTop: "var(--space-2)", display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "var(--space-2)" }}>
-            <div style={{ minWidth: 0 }}>
-              <div className="sakhi-caption">Patients</div>
-              <div className="sakhi-title" style={{ marginTop: "var(--space-1)" }}>{stats?.patientsToday || 0}</div>
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div className="sakhi-caption">Waiting</div>
-              <div className="sakhi-title" style={{ marginTop: "var(--space-1)", color: "var(--brand)" }}>{waiting}</div>
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div className="sakhi-caption">Collected</div>
-              <div className="sakhi-title" style={{ marginTop: "var(--space-1)", color: "#16a34a" }}>₹{todayPaid}</div>
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div className="sakhi-caption">Avg consult</div>
-              <div className="sakhi-caption" style={{ marginTop: "var(--space-1)", color: "#94a3b8" }}>not tracked</div>
-            </div>
-          </div>
-          <div className="sakhi-row" style={{ marginTop: "var(--space-2)", flexWrap: "wrap" }}>
-            <span className="sakhi-pill">Pending ₹{todayPending}</span>
-            <span className="sakhi-pill">Month ₹{monthPaid}</span>
-            <span className="sakhi-pill">Success {successRate}%</span>
-          </div>
-        </MobileCard>
-
-        {/* SECTION 2 — Primary Operational Actions */}
+        {/* SECTION 1 — Primary Operational Actions: kept first (above the
+            filtered-workflow cards below) because "start the next
+            consultation" is the single most time-critical, highest-
+            frequency action a doctor takes, and needs to stay reachable
+            in the first viewport without scrolling. */}
         <MobileCard data-testid="dashboard-primary-actions" style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
           <div className="sakhi-micro">Actions</div>
           <div style={{ marginTop: "var(--space-2)", display: "grid", gap: "var(--space-2)" }}>
@@ -508,7 +439,88 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           </div>
         </MobileCard>
 
-        {/* SECTION 3 — Queue Intelligence */}
+        {/* SECTION 2 — Doctor Action Dashboard: every card is a doorway into a filtered workflow, not a statistic */}
+        <MobileCard data-testid="dashboard-action-cards" style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
+          <div className="sakhi-micro">Today's Actions</div>
+          {/* 9 cards in a 2-column grid ran 5 rows deep -- on a real small
+              phone (Pixel 5-class, ~393x727) that pushed several rows down
+              into the space the fixed bottom nav always occupies, not just
+              a scroll-past-the-fold issue (the cards partially rendered
+              behind the nav even on first paint, no scrolling involved).
+              3 columns (3 rows) plus the tightened padding/type scale below
+              clears it with real margin, and reads as a more scannable
+              grid for 9 items besides. */}
+          <div style={{ marginTop: "var(--space-2)", display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 4 }}>
+            {ACTION_CARDS.map((card) => {
+              const count = actionData ? actionData[card.key].length : 0;
+              return (
+                <button
+                  key={card.key}
+                  type="button"
+                  data-testid={`dashboard-action-card-${card.key}`}
+                  className="sakhi-tap sakhi-focus-ring sakhi-ripple"
+                  onClick={() => {
+                    haptic("tap");
+                    if (card.navigateTo) onNavigate(card.navigateTo);
+                    else setActiveCardKey(card.key);
+                  }}
+                  style={{
+                    textAlign: "left",
+                    padding: "5px 8px",
+                    borderRadius: "var(--radius-3)",
+                    border: `1px solid ${card.color}33`,
+                    background: `${card.color}0f`,
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ fontSize: 12, lineHeight: 1 }}>{card.icon}</div>
+                  <div style={{ fontSize: 15, fontWeight: 950, color: card.color, marginTop: 2, lineHeight: 1.1 }}>{count}</div>
+                  <div className="sakhi-caption" style={{ marginTop: 1, lineHeight: 1.1, fontSize: 9.5 }}>{card.label}</div>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: "var(--space-2)", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-2)" }}>
+            <div className="sakhi-surface" style={{ padding: "var(--space-2)", borderRadius: "var(--radius-2)", boxShadow: "none" }}>
+              <div className="sakhi-caption">Consultations done</div>
+              <div className="sakhi-body" style={{ fontWeight: 900 }}>{actionData?.consultationsCompletedToday ?? 0}</div>
+            </div>
+            <div className="sakhi-surface" style={{ padding: "var(--space-2)", borderRadius: "var(--radius-2)", boxShadow: "none" }}>
+              <div className="sakhi-caption">Consultations pending</div>
+              <div className="sakhi-body" style={{ fontWeight: 900 }}>{actionData?.consultationsPendingToday ?? 0}</div>
+            </div>
+          </div>
+        </MobileCard>
+
+        {/* SECTION 3 — Compact Today Snapshot */}
+        <MobileCard data-testid="dashboard-today-snapshot" elevated={false} style={{ marginTop: "var(--space-3)", padding: "var(--space-3)", borderRadius: "var(--radius-3)" }}>
+          <div className="sakhi-micro">Today</div>
+          <div style={{ marginTop: "var(--space-2)", display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "var(--space-2)" }}>
+            <div style={{ minWidth: 0 }}>
+              <div className="sakhi-caption">Patients</div>
+              <div className="sakhi-title" style={{ marginTop: "var(--space-1)" }}>{stats?.patientsToday || 0}</div>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div className="sakhi-caption">Waiting</div>
+              <div className="sakhi-title" style={{ marginTop: "var(--space-1)", color: "var(--brand)" }}>{waiting}</div>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div className="sakhi-caption">Collected</div>
+              <div className="sakhi-title" style={{ marginTop: "var(--space-1)", color: "#16a34a" }}>₹{todayPaid}</div>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div className="sakhi-caption">Avg consult</div>
+              <div className="sakhi-caption" style={{ marginTop: "var(--space-1)", color: "#94a3b8" }}>not tracked</div>
+            </div>
+          </div>
+          <div className="sakhi-row" style={{ marginTop: "var(--space-2)", flexWrap: "wrap" }}>
+            <span className="sakhi-pill">Pending ₹{todayPending}</span>
+            <span className="sakhi-pill">Month ₹{monthPaid}</span>
+            <span className="sakhi-pill">Success {successRate}%</span>
+          </div>
+        </MobileCard>
+
+        {/* SECTION 4 — Queue Intelligence */}
         <MobileCard data-testid="dashboard-queue-intel" style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
           <div className="sakhi-micro">Queue intelligence</div>
           <div style={{ marginTop: "var(--space-2)", display: "grid", gap: "var(--space-2)" }}>
@@ -532,7 +544,7 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           </div>
         </MobileCard>
 
-        {/* SECTION 4/5 — Compact finance + mini trend */}
+        {/* SECTION 5 — Compact finance + mini trend */}
         <MobileCard data-testid="dashboard-mini-trend" elevated={false} style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
           <div className="sakhi-micro">Trend</div>
           <div style={{ marginTop: "var(--space-2)", display: "flex", gap: "var(--space-2)", alignItems: "flex-end" }}>
