@@ -24,7 +24,7 @@ import { haptic } from "../utils/haptics";
 import { useQueueStore } from "../store/queueStore";
 import { PullToRefreshScrollRegion } from "../components/layout/LayoutPrimitives";
 import { patientRepository } from "../repositories/patientRepository";
-import { getPaymentSummary, PaymentSummary } from "../services/paymentService";
+import { getPaymentSummary } from "../services/paymentService";
 import { getDashboardActionData, DashboardActionData, DashboardPatientRef } from "../services/dashboardActionService";
 import FilteredPatientList, { FilteredListEntry } from "../components/FilteredPatientList";
 import { enqueueReminder, hasActiveReminder } from "../services/reminderQueueService";
@@ -107,13 +107,12 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
   const queue = useQueueStore((s) => s.queue);
 
   // Module 1 -- Doctor Action Dashboard: every card below is a doorway
-  // into a workflow, not a statistic. actionData/paymentSummary reuse
-  // dashboardActionService.ts/paymentService.ts entirely -- no new data-
-  // access logic lives in this component. activeCard drives a full
-  // drill-down (FilteredPatientList takes over the page) rather than an
-  // inline expansion, keeping this already-large component simpler.
+  // into a workflow, not a statistic. actionData reuses
+  // dashboardActionService.ts entirely -- no new data-access logic
+  // lives in this component. activeCard drives a full drill-down
+  // (FilteredPatientList takes over the page) rather than an inline
+  // expansion, keeping this already-large component simpler.
   const [actionData, setActionData] = useState<DashboardActionData | null>(null);
-  const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null);
   const [activeCardKey, setActiveCardKey] = useState<ActionCardKey | null>(null);
 
   useEffect(() => {
@@ -135,7 +134,6 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           getPaymentSummary(new Date(), activeClinic === "All" ? undefined : activeClinic),
         ]);
         setActionData(actionResult);
-        setPaymentSummary(paymentResult);
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
