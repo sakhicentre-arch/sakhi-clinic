@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivePage } from '../../store/uiStore';
+import { ActivePage, useUIStore } from '../../store/uiStore';
 
 interface Props {
   onNavigate: (page: ActivePage) => void;
@@ -7,6 +7,8 @@ interface Props {
 }
 
 export default function BottomNav({ onNavigate, isMobile = false }: Props) {
+  const setGlobalSearchOpen = useUIStore((s) => s.setGlobalSearchOpen);
+
   if (!isMobile) {
     return null;
   }
@@ -30,11 +32,14 @@ export default function BottomNav({ onNavigate, isMobile = false }: Props) {
       }}
       aria-hidden={false}
     >
-      <button onClick={() => onNavigate('today')} aria-label="Today" style={{ background: 'none', border: 'none' }}>Today</button>
-      <button onClick={() => onNavigate('patients')} aria-label="Patients" style={{ background: 'none', border: 'none' }}>Patients</button>
-      <button onClick={() => onNavigate('consultation')} aria-label="Consult" style={{ background: 'none', border: 'none' }}>Consult</button>
-      <button onClick={() => onNavigate('appointments')} aria-label="Appointments" style={{ background: 'none', border: 'none' }}>Appt</button>
-      <button onClick={() => onNavigate('dashboard')} aria-label="More" style={{ background: 'none', border: 'none' }}>More</button>
+      <button data-testid="bottom-nav-today-button" onClick={() => onNavigate('today')} aria-label="Today" style={{ background: 'none', border: 'none' }}>Today</button>
+      <button data-testid="bottom-nav-patients-button" onClick={() => onNavigate('patients')} aria-label="Patients" style={{ background: 'none', border: 'none' }}>Patients</button>
+      <button data-testid="bottom-nav-consult-button" onClick={() => onNavigate('consultation')} aria-label="Consult" style={{ background: 'none', border: 'none' }}>Consult</button>
+      <button data-testid="bottom-nav-appointments-button" onClick={() => onNavigate('appointments')} aria-label="Appointments" style={{ background: 'none', border: 'none' }}>Appt</button>
+      {/* Mobile has no persistent search bar (GlobalSearch in TopBar.tsx is
+          desktop-only) -- this is the doctor's only fast way to find a
+          patient/queue entry/recent consultation by name on a phone. */}
+      <button data-testid="bottom-nav-more-button" onClick={() => setGlobalSearchOpen(true)} aria-label="Search" style={{ background: 'none', border: 'none' }}>Search</button>
     </nav>
   );
 }

@@ -63,7 +63,7 @@ test.describe('Mobile prescription and WhatsApp workflow', () => {
     await waBtn.click().catch(async () => { await waBtn.click({ force: true }); });
     const opened = await page.evaluate(() => (window as any)._opened);
     expect(opened).toBeTruthy();
-    expect(String(opened)).toMatch(/whatsapp:\\/\\/send|wa\\.me/);
+    expect(String(opened)).toMatch(/whatsapp:\/\/send|wa\.me/);
 
     // Save should show saved toast (mobile)
     const saveBtn = page.locator('[data-testid="consultation-action-bar"] button').filter({ hasText: /Save/i }).first();
