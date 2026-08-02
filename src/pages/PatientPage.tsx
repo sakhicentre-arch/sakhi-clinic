@@ -31,6 +31,7 @@ import { PullToRefreshScrollRegion, SplitPane, ScrollRegion } from "../component
 import { normalizePatientPhone } from "../utils/whatsapp";
 import { openWhatsApp } from "../services/whatsappService";
 import { addPatient as saveNewPatient, updatePatient as saveUpdatedPatient, deletePatient as removePatient } from "../services/patientService";
+import { getConsultationOutstanding, getConsultationCollected } from "../services/paymentService";
 import { generateId } from "../utils/generateId";
 import type { Consultation, Report } from "../types/models";
 
@@ -93,6 +94,21 @@ const getOutcomeBorder = (outcome?: string): string => {
   if (outcome === "Improved") return "#bbf7d0";
   if (outcome === "Worse" || outcome === "NewSymptoms") return "#fecaca";
   return "#e0e7ff";
+};
+
+// Payment Tracker (V54) has 4 statuses -- pending/paid/partial/waived --
+// vs. the old paid/pending-only badge this replaced.
+const getPaymentStatusStyle = (status?: string): { bg: string; color: string; border: string } => {
+  switch (status) {
+    case "paid":
+      return { bg: "#dcfce7", color: "#166534", border: "#86efac" };
+    case "partial":
+      return { bg: "#dbeafe", color: "#1e40af", border: "#93c5fd" };
+    case "waived":
+      return { bg: "#f1f5f9", color: "#475569", border: "#cbd5e1" };
+    default:
+      return { bg: "#fef3c7", color: "#92400e", border: "#fde68a" };
+  }
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────
@@ -392,25 +408,21 @@ export default function PatientPage(
     return counts;
   }, [patientConsultations]);
 
+  // Reuses paymentService.ts's getConsultationOutstanding/getConsultationCollected
+  // -- the same rules the Dashboard/Payment Tracker use -- instead of a
+  // second, independently (and incorrectly) recomputed paid/pending split
+  // that didn't understand "partial"/"waived" statuses.
   const revenueAnalytics = useMemo(() => {
-    const paidConsults = patientConsultations.filter(
-      (c) => c.fee && c.fee > 0 && c.paymentStatus === "paid"
-    );
-    const pendingConsults = patientConsultations.filter(
-      (c) => c.fee && c.fee > 0 && c.paymentStatus === "pending"
-    );
+    const withFee = patientConsultations.filter((c) => c.fee && c.fee > 0);
+    const totalBilled = withFee.reduce((sum, c) => sum + (c.fee || 0), 0);
+    const totalPaid = withFee.reduce((sum, c) => sum + getConsultationCollected(c), 0);
+    const totalPending = withFee.reduce((sum, c) => sum + getConsultationOutstanding(c), 0);
 
-    const totalPaid = paidConsults.reduce((sum, c) => sum + (c.fee || 0), 0);
-    const totalPending = pendingConsults.reduce(
-      (sum, c) => sum + (c.fee || 0),
-      0
-    );
-    const totalBilled = totalPaid + totalPending;
-
+    const paidConsults = withFee.filter((c) => getConsultationCollected(c) > 0);
     const lastPaid =
       paidConsults.length > 0
         ? paidConsults.reduce((a, b) =>
-            new Date(a.date) > new Date(b.date) ? a : b
+            new Date(a.paymentDate || a.date) > new Date(b.paymentDate || b.date) ? a : b
           )
         : null;
 
@@ -419,7 +431,7 @@ export default function PatientPage(
       totalPending,
       totalBilled,
       lastPayment: lastPaid
-        ? { amount: lastPaid.fee, date: lastPaid.date }
+        ? { amount: getConsultationCollected(lastPaid), date: lastPaid.paymentDate || lastPaid.date }
         : null,
     };
   }, [patientConsultations]);
@@ -1226,9 +1238,9 @@ export default function PatientPage(
                                 <span
                                   style={{
                                     ...S.paymentChip,
-                                    backgroundColor: c.paymentStatus === "paid" ? "#dcfce7" : "#fef3c7",
-                                    color: c.paymentStatus === "paid" ? "#166534" : "#92400e",
-                                    border: `1px solid ${c.paymentStatus === "paid" ? "#86efac" : "#fde68a"}`,
+                                    backgroundColor: getPaymentStatusStyle(c.paymentStatus).bg,
+                                    color: getPaymentStatusStyle(c.paymentStatus).color,
+                                    border: `1px solid ${getPaymentStatusStyle(c.paymentStatus).border}`,
                                   }}
                                 >
                                   {c.paymentStatus.toUpperCase()}
@@ -1319,31 +1331,38 @@ export default function PatientPage(
                           <tbody>
                             {sortedConsultations
                               .filter((c) => c.fee && c.fee > 0)
-                              .map((c, i) => (
-                                <tr key={c.id || i} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                                  <td style={S.td}>
-                                    {c.date ? new Date(c.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
-                                  </td>
-                                  <td style={{ ...S.td, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(c.fee)}</td>
-                                  <td style={S.td}>
-                                    <span
-                                      style={{
-                                        padding: "4px 10px",
-                                        borderRadius: "6px",
-                                        fontSize: "11.5px",
-                                        fontWeight: 700,
-                                        backgroundColor: c.paymentStatus === "paid" ? "#dcfce7" : "#fef3c7",
-                                        color: c.paymentStatus === "paid" ? "#166534" : "#92400e",
-                                      }}
-                                    >
-                                      {(c.paymentStatus || "pending").toUpperCase()}
-                                    </span>
-                                  </td>
-                                  <td style={{ ...S.td, color: "#64748b" }}>
-                                    {c.paymentMode ? c.paymentMode.toUpperCase() : "—"}
-                                  </td>
-                                </tr>
-                              ))}
+                              .map((c, i) => {
+                                const statusStyle = getPaymentStatusStyle(c.paymentStatus);
+                                return (
+                                  <tr key={c.id || i} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                                    <td style={S.td}>
+                                      {c.date ? new Date(c.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                                    </td>
+                                    <td style={{ ...S.td, fontWeight: 700, color: "#0f172a" }}>
+                                      {c.paymentStatus === "partial"
+                                        ? `${formatCurrency(c.amountReceived)} / ${formatCurrency(c.fee)}`
+                                        : formatCurrency(c.fee)}
+                                    </td>
+                                    <td style={S.td}>
+                                      <span
+                                        style={{
+                                          padding: "4px 10px",
+                                          borderRadius: "6px",
+                                          fontSize: "11.5px",
+                                          fontWeight: 700,
+                                          backgroundColor: statusStyle.bg,
+                                          color: statusStyle.color,
+                                        }}
+                                      >
+                                        {(c.paymentStatus || "pending").toUpperCase()}
+                                      </span>
+                                    </td>
+                                    <td style={{ ...S.td, color: "#64748b" }}>
+                                      {c.paymentMode ? c.paymentMode.replace("_", " ").toUpperCase() : "—"}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                             {sortedConsultations.filter((c) => c.fee && c.fee > 0).length === 0 && (
                               <tr>
                                 <td colSpan={4} style={{ padding: "40px", textAlign: "center", color: "#94a3b8", fontSize: "15px" }}>

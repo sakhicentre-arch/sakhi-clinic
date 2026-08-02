@@ -106,11 +106,17 @@ export function compressPaymentScreenshot(file: File, maxDimension = 1024, quali
   });
 }
 
+/** The subset of Consultation these two pure helpers actually read --
+ * lets callers holding a narrower/locally-typed consultation shape
+ * (e.g. PatientPage.tsx's PatientPageConsultation) pass it straight in
+ * without an unsafe cast to the full Consultation type. */
+type PaymentFields = Pick<Consultation, "paymentStatus" | "fee" | "amountReceived">;
+
 /** Money still owed on this consultation. "waived"/"paid" are always 0
  * regardless of amountReceived bookkeeping -- the doctor has already
  * closed the matter either by receiving full payment or explicitly
  * deciding not to charge. */
-export function getConsultationOutstanding(c: Consultation): number {
+export function getConsultationOutstanding(c: PaymentFields): number {
   if (c.paymentStatus === "waived" || c.paymentStatus === "paid") return 0;
   const fee = c.fee || 0;
   const received = c.amountReceived || 0;
@@ -120,7 +126,7 @@ export function getConsultationOutstanding(c: Consultation): number {
 /** Money that has actually come in for this consultation, regardless of
  * status label -- falls back to the full fee for "paid" consultations
  * that predate amountReceived being recorded explicitly (V54). */
-export function getConsultationCollected(c: Consultation): number {
+export function getConsultationCollected(c: PaymentFields): number {
   if (c.amountReceived != null) return c.amountReceived;
   if (c.paymentStatus === "paid") return c.fee || 0;
   return 0;
