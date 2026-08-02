@@ -8,6 +8,7 @@ import {
 } from "./maintenanceRuntimeService";
 import { computeRuntimeStatus, setLastRuntimeStatus } from "./runtimeStatusService";
 import { runAutoBackupIfDue } from "./backupService";
+import { startBackupScheduler, stopBackupScheduler } from "./backup/backupSchedulerService";
 
 type IdleCallbackHandle = any;
 
@@ -87,6 +88,7 @@ export function initAppLifecycleRuntime() {
   // Start lightweight periodic maintenance only while visible.
   if (document.visibilityState === "visible") {
     startMaintenanceRuntime({ intervalMs: 5 * 60_000, reason: "interval" });
+    startBackupScheduler();
   }
 
   // Non-blocking maintenance: do not force integrity checks on the critical path.
@@ -114,12 +116,14 @@ export function initAppLifecycleRuntime() {
 
     if (state === "visible") {
       startMaintenanceRuntime({ intervalMs: 5 * 60_000, reason: "interval" });
+      startBackupScheduler();
       // On resume: lightweight run + snapshot refresh.
       runMaintenanceOnce({ reason: "app-start", forceIntegrityCheck: false })
         .then(() => refreshRuntimeSnapshot("resume"))
         .catch(() => {});
     } else {
       stopMaintenanceRuntime();
+      stopBackupScheduler();
     }
   };
 
