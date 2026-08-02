@@ -142,8 +142,12 @@ export interface PaymentSummary {
   outstandingAmount: number;
 }
 
-export async function getPaymentSummary(referenceDate: Date = new Date()): Promise<PaymentSummary> {
-  const consultations = await getAllConsultations();
+/** clinicId: optional branch scope (matches Consultation.clinicId) --
+ * DashboardPage.tsx's existing per-branch filter needs this; omit for a
+ * clinic-wide summary. */
+export async function getPaymentSummary(referenceDate: Date = new Date(), clinicId?: string): Promise<PaymentSummary> {
+  const all = await getAllConsultations();
+  const consultations = clinicId ? all.filter((c) => c.clinicId === clinicId) : all;
 
   let billedToday = 0;
   let collectedToday = 0;

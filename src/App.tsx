@@ -44,7 +44,7 @@ export default function App() {
   const isLandingFromDriveConnect = !isOAuthCallbackPath && hasPendingDriveConnectResult();
 
   const [page, setPage] = useState(
-    isOAuthCallbackPath || isLandingFromDriveConnect ? "settings" : isReviewPath ? "review" : "today"
+    isOAuthCallbackPath || isLandingFromDriveConnect ? "settings" : isReviewPath ? "review" : "dashboard"
   );
   const [originCheck, setOriginCheck] = useState<OriginCheckResult | null>(null);
   const activePatientId = useUIStore((s) => s.activePatientId);

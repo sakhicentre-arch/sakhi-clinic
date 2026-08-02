@@ -146,6 +146,9 @@ describe("Navigation flow into Consultation", () => {
   it("should switch tabs Today to Patient to Consultation through visible controls", async () => {
     render(<App />);
 
+    // Landing page is now the Doctor Action Dashboard (Module 1) -- navigate
+    // to Today explicitly before exercising the rest of this tab sequence.
+    fireEvent.click(screen.getByRole("button", { name: /^today$/i }));
     expect(await screen.findByText(/Today's Queue/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /patients/i }));

@@ -151,6 +151,9 @@ describe("App — origin-mismatch banner (A7)", () => {
     await screen.findByRole("alert");
     // The banner must not have replaced the app -- ordinary navigation is
     // still present underneath it (this is a warning, never a hard block).
-    expect(screen.getByRole("button", { name: /patients/i })).toBeInTheDocument();
+    // Exact name (not a /patients/i substring match) -- the Doctor Action
+    // Dashboard's "Missed Patients"/"New Patients"/"Repeat Patients" cards
+    // also match that substring and would make this query ambiguous.
+    expect(screen.getByRole("button", { name: "Patients" })).toBeInTheDocument();
   });
 });

@@ -12,7 +12,7 @@ import {
 } from 'chart.js';
 import { Pie } from 'react-chartjs-2';
 
-import { ConsultationOutcome, normalizeOutcome, Consultation } from "../services/db"; 
+import { ConsultationOutcome, normalizeOutcome, Consultation } from "../services/db";
 import { getAllConsultations } from "../services/consultationService";
 import { getFollowUpAlerts, FollowUpAlert } from "../services/followupEngine";
 import { isValidPhone } from "../utils/whatsapp";
@@ -24,6 +24,44 @@ import { haptic } from "../utils/haptics";
 import { useQueueStore } from "../store/queueStore";
 import { PullToRefreshScrollRegion } from "../components/layout/LayoutPrimitives";
 import { patientRepository } from "../repositories/patientRepository";
+import { getPaymentSummary, PaymentSummary } from "../services/paymentService";
+import { getDashboardActionData, DashboardActionData, DashboardPatientRef } from "../services/dashboardActionService";
+import FilteredPatientList, { FilteredListEntry } from "../components/FilteredPatientList";
+import { enqueueReminder, hasActiveReminder } from "../services/reminderQueueService";
+
+// Module 1 -- the 7 patient-list action cards. Each key maps straight to a
+// DashboardActionData field; "consultations" (completed/pending) are plain
+// counters, not lists, so they aren't part of this drill-down set.
+type ActionCardKey =
+  | "todayFollowUps"
+  | "overdueFollowUps"
+  | "thisWeekFollowUps"
+  | "upcomingFollowUps"
+  | "missedPatients"
+  | "newPatientsToday"
+  | "repeatPatientsToday";
+
+interface ActionCardConfig {
+  key: ActionCardKey;
+  label: string;
+  icon: string;
+  color: string;
+  emptyMessage: string;
+}
+
+const ACTION_CARDS: ActionCardConfig[] = [
+  { key: "todayFollowUps", label: "Today's Follow-ups", icon: "\u{1F4C5}", color: "#0d7377", emptyMessage: "No follow-ups due today." },
+  { key: "overdueFollowUps", label: "Overdue Follow-ups", icon: "⚠️", color: "#dc2626", emptyMessage: "Nothing overdue right now." },
+  { key: "thisWeekFollowUps", label: "This Week", icon: "\u{1F5D3}️", color: "#2563eb", emptyMessage: "No follow-ups due this week." },
+  { key: "upcomingFollowUps", label: "Upcoming", icon: "⏭️", color: "#7c3aed", emptyMessage: "Nothing in the upcoming window." },
+  { key: "missedPatients", label: "Missed Patients", icon: "\u{1F6AB}", color: "#b91c1c", emptyMessage: "No missed follow-ups." },
+  { key: "newPatientsToday", label: "New Patients", icon: "\u{1F195}", color: "#16a34a", emptyMessage: "No new registrations today." },
+  { key: "repeatPatientsToday", label: "Repeat Patients", icon: "\u{1F501}", color: "#d97706", emptyMessage: "No repeat visits today." },
+];
+
+function buildGenericReminderMessage(patientName: string): string {
+  return `*Sakhi Homeopathic Clinic*\nHi ${patientName}, this is a reminder from the clinic. Please contact us or visit at your earliest convenience.`;
+}
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement, PointElement, LineElement
@@ -37,7 +75,6 @@ interface DashboardStats {
   todayPaid: number;
   todayPending: number;
   monthPaid: number;
-  monthPending: number;
   last7Days: Array<{ day: string; count: number }>;
   outcomeStats: Record<ConsultationOutcome | 'total', number>;
   remedyStats: Record<string, { used: number; improved: number }>;
@@ -61,6 +98,16 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
   const [refreshNonce, setRefreshNonce] = useState(0);
   const queue = useQueueStore((s) => s.queue);
 
+  // Module 1 -- Doctor Action Dashboard: every card below is a doorway
+  // into a workflow, not a statistic. actionData/paymentSummary reuse
+  // dashboardActionService.ts/paymentService.ts entirely -- no new data-
+  // access logic lives in this component. activeCard drives a full
+  // drill-down (FilteredPatientList takes over the page) rather than an
+  // inline expansion, keeping this already-large component simpler.
+  const [actionData, setActionData] = useState<DashboardActionData | null>(null);
+  const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null);
+  const [activeCardKey, setActiveCardKey] = useState<ActionCardKey | null>(null);
+
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
     const update = () => setIsMobile(mq.matches);
@@ -72,25 +119,24 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
   useEffect(() => {
     const fetchAnalytics = async () => {
       try {
-        const [patients, allConsultations, rawAlerts] = await Promise.all([
+        const [patients, allConsultations, rawAlerts, actionResult, paymentResult] = await Promise.all([
           patientRepository.list(),
           getAllConsultations(),
-          getFollowUpAlerts()
+          getFollowUpAlerts(),
+          getDashboardActionData(),
+          getPaymentSummary(new Date(), activeClinic === "All" ? undefined : activeClinic),
         ]);
+        setActionData(actionResult);
+        setPaymentSummary(paymentResult);
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const todayKey = today.toISOString().slice(0, 10);
-        const monthKey = new Date().getMonth();
 
-        const consultations = activeClinic === "All" 
+        const consultations = activeClinic === "All"
           ? allConsultations 
           : allConsultations.filter(c => c.clinicId === activeClinic);
 
-        let todayPaid = 0;
-        let todayPending = 0;
-        let monthPaid = 0;
-        let monthPending = 0;
         let patientsToday = 0;
         const last7Counts = new Map<string, number>();
         const last7 = Array.from({ length: 7 }).map((_, i) => {
@@ -118,18 +164,9 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
 
         consultations.forEach((c) => {
           const dateKey = String(c.date || "").slice(0, 10);
-          const fee = Number(c.fee || 0);
-          const pay = (c.paymentStatus || "pending") as any;
 
           if (dateKey === todayKey) {
             patientsToday += 1;
-            if (pay === "paid") todayPaid += fee;
-            else todayPending += fee;
-          }
-          const m = c.date ? new Date(c.date).getMonth() : -1;
-          if (m === monthKey) {
-            if (pay === "paid") monthPaid += fee;
-            else monthPending += fee;
           }
 
           if (dateKey) {
@@ -192,10 +229,9 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           totalConsultations: consultations.length,
           followUpsDue: actionableFollowUps,
           patientsToday,
-          todayPaid,
-          todayPending,
-          monthPaid,
-          monthPending,
+          todayPaid: paymentResult.collectedToday,
+          todayPending: paymentResult.pendingCollectionToday,
+          monthPaid: paymentResult.collectedThisMonth,
           last7Days: last7.map((k) => ({ day: k, count: last7Counts.get(k) || 0 })),
           outcomeStats,
           remedyStats,
@@ -235,6 +271,49 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
     };
   }, [stats]);
 
+  const activeCardConfig = activeCardKey ? ACTION_CARDS.find((c) => c.key === activeCardKey) || null : null;
+
+  const activeCardEntries: FilteredListEntry[] = useMemo(() => {
+    if (!activeCardKey || !actionData) return [];
+    return actionData[activeCardKey].map((r: DashboardPatientRef) => ({
+      patientId: r.patientId,
+      name: r.name,
+      phone: r.phone,
+      subtitle: r.detail,
+    }));
+  }, [activeCardKey, actionData]);
+
+  const handleSelectPatientFromCard = (patientId: string) => {
+    setActivePatientId(patientId);
+    onNavigate("patients");
+  };
+
+  // Manual reminders only (Module 2) -- this queues a pending, doctor-
+  // editable reminder per selected patient and hands off to the Reminder
+  // Center, where the doctor reviews/edits/approves before anything is
+  // actually sent via WhatsApp. Nothing here sends a message on its own.
+  const handleSendRemindersFromCard = async (patientIds: string[]) => {
+    if (!activeCardKey || !actionData) return;
+    const refs = actionData[activeCardKey];
+    for (const patientId of patientIds) {
+      const ref = refs.find((r: DashboardPatientRef) => r.patientId === patientId);
+      if (!ref) continue;
+      const alreadyQueued = await hasActiveReminder(patientId, "custom");
+      if (alreadyQueued) continue;
+      await enqueueReminder({
+        patientId,
+        patientName: ref.name,
+        phone: ref.phone,
+        type: "custom",
+        message: buildGenericReminderMessage(ref.name),
+        dueAt: new Date().toISOString(),
+        sourceRef: `dashboard:${activeCardKey}`,
+      });
+    }
+    setActiveCardKey(null);
+    onNavigate("reminders");
+  };
+
   if (loading) {
     return (
       <PullToRefreshScrollRegion
@@ -261,6 +340,20 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
     );
   }
 
+  if (activeCardKey && activeCardConfig) {
+    return (
+      <FilteredPatientList
+        title={activeCardConfig.label}
+        entries={activeCardEntries}
+        emptyMessage={activeCardConfig.emptyMessage}
+        onSelectPatient={handleSelectPatientFromCard}
+        onBack={() => setActiveCardKey(null)}
+        selectable
+        onSendReminders={handleSendRemindersFromCard}
+      />
+    );
+  }
+
   if (isMobile) {
     const successRate = Math.round(((stats?.outcomeStats[ConsultationOutcome.IMPROVED] || 0) / (stats?.outcomeStats.total || 1)) * 100);
     const waiting = (queue || []).filter((e) => e.status === "waiting").length;
@@ -268,7 +361,6 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
     const todayPaid = Math.round(stats?.todayPaid || 0);
     const todayPending = Math.round(stats?.todayPending || 0);
     const monthPaid = Math.round(stats?.monthPaid || 0);
-    const monthPending = Math.round(stats?.monthPending || 0);
     const trendMax = Math.max(1, ...(stats?.last7Days || []).map((d) => d.count));
     return (
       <ResponsiveContainer data-testid="dashboard-root" className="sakhi-page">
@@ -283,6 +375,47 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
             <option value="City Light">City Light</option>
           </select>
         </div>
+
+        {/* SECTION 0 — Doctor Action Dashboard: every card is a doorway into a filtered workflow, not a statistic */}
+        <MobileCard data-testid="dashboard-action-cards" style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
+          <div className="sakhi-micro">Today's Actions</div>
+          <div style={{ marginTop: "var(--space-2)", display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "var(--space-2)" }}>
+            {ACTION_CARDS.map((card) => {
+              const count = actionData ? actionData[card.key].length : 0;
+              return (
+                <button
+                  key={card.key}
+                  type="button"
+                  data-testid={`dashboard-action-card-${card.key}`}
+                  className="sakhi-tap sakhi-focus-ring sakhi-ripple"
+                  onClick={() => { haptic("tap"); setActiveCardKey(card.key); }}
+                  style={{
+                    textAlign: "left",
+                    padding: "var(--space-3)",
+                    borderRadius: "var(--radius-3)",
+                    border: `1px solid ${card.color}33`,
+                    background: `${card.color}0f`,
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ fontSize: 18 }}>{card.icon}</div>
+                  <div style={{ fontSize: 22, fontWeight: 950, color: card.color, marginTop: 4 }}>{count}</div>
+                  <div className="sakhi-caption" style={{ marginTop: 2 }}>{card.label}</div>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: "var(--space-2)", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-2)" }}>
+            <div className="sakhi-surface" style={{ padding: "var(--space-2)", borderRadius: "var(--radius-2)", boxShadow: "none" }}>
+              <div className="sakhi-caption">Consultations done</div>
+              <div className="sakhi-body" style={{ fontWeight: 900 }}>{actionData?.consultationsCompletedToday ?? 0}</div>
+            </div>
+            <div className="sakhi-surface" style={{ padding: "var(--space-2)", borderRadius: "var(--radius-2)", boxShadow: "none" }}>
+              <div className="sakhi-caption">Consultations pending</div>
+              <div className="sakhi-body" style={{ fontWeight: 900 }}>{actionData?.consultationsPendingToday ?? 0}</div>
+            </div>
+          </div>
+        </MobileCard>
 
         {/* SECTION 1 — Compact Today Snapshot */}
         <MobileCard data-testid="dashboard-today-snapshot" elevated={false} style={{ marginTop: "var(--space-3)", padding: "var(--space-3)", borderRadius: "var(--radius-3)" }}>
@@ -307,7 +440,7 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           </div>
           <div className="sakhi-row" style={{ marginTop: "var(--space-2)", flexWrap: "wrap" }}>
             <span className="sakhi-pill">Pending ₹{todayPending}</span>
-            <span className="sakhi-pill">Month ₹{monthPaid} / ₹{monthPending}</span>
+            <span className="sakhi-pill">Month ₹{monthPaid}</span>
             <span className="sakhi-pill">Success {successRate}%</span>
           </div>
         </MobileCard>
@@ -457,6 +590,44 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           </select>
         </div>
       </header>
+
+      {/* Doctor Action Dashboard -- every card opens a filtered workflow, not a statistic */}
+      <div style={{ ...panelStyle, marginBottom: 24 }}>
+        <h3 style={panelTitleStyle}>Today's Actions</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
+          {ACTION_CARDS.map((card) => {
+            const count = actionData ? actionData[card.key].length : 0;
+            return (
+              <button
+                key={card.key}
+                type="button"
+                data-testid={`dashboard-action-card-${card.key}`}
+                onClick={() => setActiveCardKey(card.key)}
+                style={{
+                  textAlign: "left",
+                  padding: 16,
+                  borderRadius: 16,
+                  border: `1px solid ${card.color}33`,
+                  background: `${card.color}0f`,
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ fontSize: 18 }}>{card.icon}</div>
+                <div style={{ fontSize: 24, fontWeight: 950, color: card.color, marginTop: 6 }}>{count}</div>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#475569", marginTop: 2 }}>{card.label}</div>
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 12, display: "flex", gap: 24 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#475569" }}>
+            Consultations done today: <strong style={{ color: "#0f172a" }}>{actionData?.consultationsCompletedToday ?? 0}</strong>
+          </div>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#475569" }}>
+            Consultations pending today: <strong style={{ color: "#0f172a" }}>{actionData?.consultationsPendingToday ?? 0}</strong>
+          </div>
+        </div>
+      </div>
 
       {/* KPI Section */}
       <div
