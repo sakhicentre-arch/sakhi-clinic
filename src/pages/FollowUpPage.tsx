@@ -121,6 +121,10 @@ export default function FollowUpPage({ onNavigate }: Props) {
     try {
       await cancelFollowUp(patientId);
       await load();
+      // The row just vanished from whatever bucket the doctor was looking
+      // at -- switch to Cancelled so that reads as confirmation, not as
+      // the patient silently disappearing.
+      setActiveBucket("cancelled");
     } finally {
       setCancellingId(null);
     }
