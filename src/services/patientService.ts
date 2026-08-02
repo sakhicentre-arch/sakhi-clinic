@@ -57,6 +57,39 @@ export async function syncPatientFollowUp(patientId: string): Promise<void> {
   broadcastSyncEvent({ type: "patient:updated", payload: { id: patientId } });
 }
 
+/**
+ * Doctor-initiated follow-up cancellation (RC1 Follow-up Management).
+ * Marks the patient's CURRENT nextFollowUpDate as cancelled rather than
+ * clearing it outright -- clearing would just get silently recomputed
+ * back by the next syncPatientFollowUp() call (e.g. after any future
+ * consultation save), since that always re-derives nextFollowUpDate from
+ * consultation.followUpDate fields. Comparing the two dates instead means
+ * a genuinely new follow-up (a different date) naturally "un-cancels".
+ * No-op if the patient has no active follow-up to cancel.
+ */
+export async function cancelFollowUp(patientId: string): Promise<void> {
+  const patient = await db.patients.get(patientId);
+  if (!patient || !patient.nextFollowUpDate) return;
+
+  await db.patients.update(patientId, {
+    followUpCancelledDate: patient.nextFollowUpDate,
+    updatedAt: nowIso(),
+  });
+
+  try {
+    const p = await db.patients.get(patientId);
+    if (p && !p.deletedAt) {
+      usePatientStore.setState((s) => ({
+        patients: s.patients.map((x) => (x.id === patientId ? p : x)),
+      }));
+    }
+  } catch (err) {
+    console.warn('[patientService] cancelFollowUp store sync failed', err);
+  }
+
+  broadcastSyncEvent({ type: "patient:updated", payload: { id: patientId } });
+}
+
 export async function getAllPatients(): Promise<Patient[]> {
   return db.patients.filter((p) => !p.deletedAt).toArray();
 }

@@ -33,6 +33,7 @@ async function seedPatient(overrides: Record<string, any>) {
     gender: "Female",
     phone: overrides.phone || "9876543210",
     nextFollowUpDate: overrides.nextFollowUpDate,
+    followUpCancelledDate: overrides.followUpCancelledDate,
     lastVisit: overrides.lastVisit,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -112,6 +113,27 @@ describe("Follow-up Intelligence Dashboard (Phase 1)", () => {
 
       const buckets = await svc.getFollowUpBuckets(REF);
       expect(buckets.overdue[0].isChronic).toBe(true);
+    });
+
+    it("routes a patient into the cancelled bucket when followUpCancelledDate matches their current nextFollowUpDate", async () => {
+      await seedPatient({ id: "P-CANCELLED", name: "Cancelled Patient", nextFollowUpDate: "2026-03-20", followUpCancelledDate: "2026-03-20" });
+      await seedConsultation({ id: "C-CANCELLED", patientId: "P-CANCELLED", date: "2026-02-20" });
+
+      const buckets = await svc.getFollowUpBuckets(REF);
+      expect(buckets.cancelled.map((e) => e.patientId)).toEqual(["P-CANCELLED"]);
+      expect(buckets.upcoming7.map((e) => e.patientId)).not.toContain("P-CANCELLED");
+    });
+
+    it("un-cancels a patient once nextFollowUpDate moves to a new date that no longer matches the cancelled marker", async () => {
+      // A stale followUpCancelledDate from a PAST cancellation that no longer
+      // matches the (newer) nextFollowUpDate -- e.g. after a fresh consultation
+      // set a new follow-up date. Must be treated as an active follow-up, not cancelled.
+      await seedPatient({ id: "P-RESCHEDULED", name: "Rescheduled Patient", nextFollowUpDate: "2026-03-20", followUpCancelledDate: "2026-03-10" });
+      await seedConsultation({ id: "C-RESCHEDULED", patientId: "P-RESCHEDULED", date: "2026-02-20" });
+
+      const buckets = await svc.getFollowUpBuckets(REF);
+      expect(buckets.cancelled.map((e) => e.patientId)).not.toContain("P-RESCHEDULED");
+      expect(buckets.upcoming7.map((e) => e.patientId)).toEqual(["P-RESCHEDULED"]);
     });
   });
 

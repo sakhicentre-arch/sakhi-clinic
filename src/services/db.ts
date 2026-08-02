@@ -172,6 +172,13 @@ export interface Patient {
   reports?: Report[];
   lastVisit?: string;
   nextFollowUpDate?: string;
+  /** Marks nextFollowUpDate as doctor-cancelled rather than simply unset --
+   * only meaningful while it equals the current nextFollowUpDate (see
+   * followUpIntelligenceService.ts's "cancelled" bucket and
+   * patientService.ts's cancelFollowUp/syncPatientFollowUp). Recomputing
+   * nextFollowUpDate to a genuinely new date naturally "un-cancels" it,
+   * since the two values no longer match. */
+  followUpCancelledDate?: string;
   miasm?: string;
 
   // V43: Extended patient profile

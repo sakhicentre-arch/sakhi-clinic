@@ -21,7 +21,7 @@ import { getAllConsultations } from "./consultationService";
 import { getFollowUpAlerts, FollowUpAlert } from "./followupEngine";
 import { parseDateOnly, startOfDay, daysBetween, dateKey, monthKey, isoWeekStart } from "../utils/dateOnly";
 
-export type FollowUpBucketKey = "overdue" | "today" | "tomorrow" | "upcoming7" | "noDate";
+export type FollowUpBucketKey = "overdue" | "today" | "tomorrow" | "upcoming7" | "noDate" | "cancelled";
 
 export interface FollowUpBucketEntry {
   patientId: string;
@@ -121,6 +121,7 @@ export async function getFollowUpBuckets(referenceDate: Date = new Date()): Prom
     tomorrow: [],
     upcoming7: [],
     noDate: [],
+    cancelled: [],
   };
 
   for (const patient of patients) {
@@ -141,6 +142,14 @@ export async function getFollowUpBuckets(referenceDate: Date = new Date()): Prom
 
     if (!patient.nextFollowUpDate) {
       buckets.noDate.push(entry);
+      continue;
+    }
+
+    // Doctor explicitly cancelled this exact follow-up date -- see
+    // Patient.followUpCancelledDate's own comment for why this is a date
+    // comparison rather than a boolean flag.
+    if (patient.followUpCancelledDate && patient.followUpCancelledDate === patient.nextFollowUpDate) {
+      buckets.cancelled.push(entry);
       continue;
     }
 

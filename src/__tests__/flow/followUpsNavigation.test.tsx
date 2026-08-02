@@ -73,7 +73,9 @@ describe("Follow-ups navigation", () => {
     expect(screen.getByText("Intelligent Alerts")).toBeInTheDocument();
     expect(screen.getByText("Follow-up queue")).toBeInTheDocument();
     expect(screen.getByText(/Overdue \(\d+\)/)).toBeInTheDocument();
-    expect(screen.getByText(/Next 7 Days \(\d+\)/)).toBeInTheDocument();
+    // "Next 7 Days" was renamed "Upcoming" -- RC1's Follow-up Management
+    // status wording (Upcoming/Due Today/Overdue/Completed/Cancelled).
+    expect(screen.getByText(/Upcoming \(\d+\)/)).toBeInTheDocument();
   });
 
   it("shows an empty state instead of crashing when there is no follow-up data", async () => {

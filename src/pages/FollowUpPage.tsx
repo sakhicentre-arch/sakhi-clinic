@@ -15,6 +15,7 @@ import {
   History as HistoryIcon,
   ChevronDown,
   ChevronUp,
+  XCircle,
 } from "lucide-react";
 import { MobileCard, MobileSection, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
 import { ActivePage } from "../store/uiStore";
@@ -30,20 +31,34 @@ import {
   IntelligentAlert,
   FollowUpHistoryEntry,
 } from "../services/followUpIntelligenceService";
+import { cancelFollowUp } from "../services/patientService";
 
 interface Props {
   onNavigate?: (page: ActivePage) => void;
 }
 
-const BUCKET_LABELS: Record<FollowUpBucketKey, string> = {
+// "completed" isn't a real-time bucket (followUpIntelligenceService.ts's
+// FollowUpBucketKey) -- it's derived history (getFollowUpHistory()), shown
+// as a filter tab alongside the buckets per RC1's status list (Upcoming/Due
+// Today/Overdue/Completed/Cancelled) without inventing a second bucket shape.
+type FollowUpTab = FollowUpBucketKey | "completed";
+
+// Buckets a doctor can still act on -- these are the only ones "Cancel
+// follow-up" makes sense for. Cancelling from noDate/cancelled/completed
+// doesn't mean anything (nothing active to cancel).
+const CANCELLABLE_BUCKETS = new Set<FollowUpTab>(["overdue", "today", "tomorrow", "upcoming7"]);
+
+const BUCKET_LABELS: Record<FollowUpTab, string> = {
   overdue: "Overdue",
-  today: "Today",
+  today: "Due Today",
   tomorrow: "Tomorrow",
-  upcoming7: "Next 7 Days",
+  upcoming7: "Upcoming",
+  completed: "Completed",
+  cancelled: "Cancelled",
   noDate: "No Follow-up Set",
 };
 
-const BUCKET_ORDER: FollowUpBucketKey[] = ["overdue", "today", "tomorrow", "upcoming7", "noDate"];
+const TAB_ORDER: FollowUpTab[] = ["overdue", "today", "tomorrow", "upcoming7", "completed", "cancelled", "noDate"];
 
 function severityTone(severity: number): "success" | "muted" | "brand" {
   if (severity >= 3) return "brand";
@@ -68,8 +83,9 @@ export default function FollowUpPage({ onNavigate }: Props) {
   const [analytics, setAnalytics] = useState<FollowUpAnalytics | null>(null);
   const [alerts, setAlerts] = useState<IntelligentAlert[]>([]);
   const [history, setHistory] = useState<FollowUpHistoryEntry[]>([]);
-  const [activeBucket, setActiveBucket] = useState<FollowUpBucketKey>("overdue");
+  const [activeBucket, setActiveBucket] = useState<FollowUpTab>("overdue");
   const [expandedPatientId, setExpandedPatientId] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -100,6 +116,16 @@ export default function FollowUpPage({ onNavigate }: Props) {
     onNavigate?.("patients");
   };
 
+  const handleCancelFollowUp = async (patientId: string) => {
+    setCancellingId(patientId);
+    try {
+      await cancelFollowUp(patientId);
+      await load();
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
   const maxWorkload = useMemo(
     () => Math.max(1, ...(analytics?.dailyWorkload.map((d) => d.count) || [1])),
     [analytics]
@@ -109,7 +135,27 @@ export default function FollowUpPage({ onNavigate }: Props) {
     return Math.max(1, ...values);
   }, [analytics]);
 
-  const activeBucketEntries = buckets ? buckets[activeBucket] : [];
+  // "Completed" reuses the same row shape as the real-time buckets so the
+  // list below doesn't need a second render branch -- it's built from
+  // getFollowUpHistory()'s already-fetched data, deduplicated to one row
+  // per patient (most recent completion), matching the other tabs' "which
+  // patients" framing.
+  const completedEntries = useMemo(() => {
+    const byPatient = new Map<string, FollowUpHistoryEntry>();
+    for (const h of history) {
+      if (h.status !== "completed") continue;
+      const existing = byPatient.get(h.patientId);
+      if (!existing || h.followUpDate > existing.followUpDate) byPatient.set(h.patientId, h);
+    }
+    return Array.from(byPatient.values()).map((h) => ({
+      patientId: h.patientId,
+      patientName: h.patientName,
+      nextFollowUpDate: h.followUpDate,
+      isChronic: false,
+    }));
+  }, [history]);
+
+  const activeBucketEntries = activeBucket === "completed" ? completedEntries : buckets ? buckets[activeBucket] : [];
 
   return (
     <div className="sakhi-page" data-testid="followups-page">
@@ -242,7 +288,7 @@ export default function FollowUpPage({ onNavigate }: Props) {
               </div>
 
               <div className="sakhi-row" style={{ gap: 8, flexWrap: "wrap" }}>
-                {BUCKET_ORDER.map((key) => (
+                {TAB_ORDER.map((key) => (
                   <button
                     key={key}
                     type="button"
@@ -251,7 +297,7 @@ export default function FollowUpPage({ onNavigate }: Props) {
                     data-tone="brand"
                     onClick={() => setActiveBucket(key)}
                   >
-                    {BUCKET_LABELS[key]} ({buckets ? buckets[key].length : 0})
+                    {BUCKET_LABELS[key]} ({key === "completed" ? completedEntries.length : buckets ? buckets[key].length : 0})
                   </button>
                 ))}
               </div>
@@ -282,15 +328,30 @@ export default function FollowUpPage({ onNavigate }: Props) {
                             )}
                           </div>
                         </div>
-                        <div className="sakhi-row" style={{ justifyContent: "space-between", marginTop: 4 }}>
-                          <button
-                            type="button"
-                            onClick={() => goToPatient(entry.patientId)}
-                            className="sakhi-caption"
-                            style={{ background: "none", border: "none", padding: 0, color: "var(--brand-ink, #0D7377)", fontWeight: 800, cursor: "pointer" }}
-                          >
-                            Open patient
-                          </button>
+                        <div className="sakhi-row" style={{ justifyContent: "space-between", marginTop: 4, flexWrap: "wrap", gap: 8 }}>
+                          <div className="sakhi-row" style={{ gap: 12 }}>
+                            <button
+                              type="button"
+                              onClick={() => goToPatient(entry.patientId)}
+                              className="sakhi-caption"
+                              style={{ background: "none", border: "none", padding: 0, color: "var(--brand-ink, #0D7377)", fontWeight: 800, cursor: "pointer" }}
+                            >
+                              Open patient
+                            </button>
+                            {CANCELLABLE_BUCKETS.has(activeBucket) && (
+                              <button
+                                type="button"
+                                disabled={cancellingId === entry.patientId}
+                                onClick={() => handleCancelFollowUp(entry.patientId)}
+                                className="sakhi-caption"
+                                style={{ background: "none", border: "none", padding: 0, display: "inline-flex", alignItems: "center", gap: 4, color: "#b91c1c", fontWeight: 800, cursor: cancellingId === entry.patientId ? "default" : "pointer", opacity: cancellingId === entry.patientId ? 0.6 : 1 }}
+                                aria-label={`Cancel follow-up for ${entry.patientName}`}
+                              >
+                                <XCircle size={12} />
+                                {cancellingId === entry.patientId ? "Cancelling…" : "Cancel follow-up"}
+                              </button>
+                            )}
+                          </div>
                           {timeline.length > 0 && (
                             <button
                               type="button"
