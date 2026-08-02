@@ -44,6 +44,13 @@ export default {
       return errorResponse(500, "server_configuration_error", "Google Drive is not fully configured on the server.");
     }
 
+    // TEMPORARY diagnostic -- never the complete secret.
+    console.info({
+      clientSecretLength: clientSecret.length,
+      clientSecretPrefix: clientSecret.substring(0, 7),
+      clientSecretSuffix: clientSecret.substring(clientSecret.length - 4),
+    });
+
     const params = new URLSearchParams({
       client_id: clientId,
       code,
