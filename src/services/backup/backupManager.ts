@@ -95,32 +95,6 @@ export function resetActiveProviderToLocal(): void {
   testOverrideProvider = null;
 }
 
-/**
- * Automatic/unattended runs get one extra safety check manual runs
- * deliberately don't: if the persisted destination is currently
- * unavailable (e.g. Google Drive was chosen but has since been
- * disconnected), silently retrying against it forever would mean the
- * doctor's automatic backups quietly stop working with no visible
- * failure until they happen to check Settings. A manual "Backup Now"
- * click, by contrast, is attended -- getActiveProvider()'s honest
- * failure (the provider's own NOT_CONNECTED_MESSAGE) is exactly the
- * right, visible outcome there, so this fallback is NOT applied to
- * manual operations.
- */
-async function resolveAutoBackupProvider(): Promise<{ provider: StorageProvider; fellBackToLocal: boolean }> {
-  const provider = getActiveProvider();
-  if (provider.id === localBackupProvider.id || provider.available) {
-    return { provider, fellBackToLocal: false };
-  }
-  await logOperationalEvent({
-    level: "warn",
-    type: "backup.auto.destination_unavailable",
-    message: `${provider.label} is not connected -- automatic backup fell back to this device`,
-    data: { destination: provider.id },
-  }).catch(() => {});
-  return { provider: localBackupProvider, fellBackToLocal: true };
-}
-
 const ENVELOPE_VERSION = 1;
 
 type BackupEnvelope = {
@@ -351,16 +325,44 @@ export async function runAutoIfDue(input?: { reason?: string; minHoursBetweenBac
     const plan = planAutoBackup({ minHoursBetweenBackups: minHours });
     if (!plan.shouldRun) return;
 
-    // Only automatic runs get the connected-or-fall-back-to-local
-    // treatment -- see resolveAutoBackupProvider's own comment for why
-    // manual operations deliberately don't.
-    const { provider } = await resolveAutoBackupProvider();
+    const provider = getActiveProvider();
     const job = await createJob("auto", provider.id);
-    await runPipelineForJob(
-      job.id,
-      { kind: "auto", silent: true, reasonForLog: "Automatic backup snapshot created", eventType: "backup.auto.success" },
-      provider
-    );
+    try {
+      await runPipelineForJob(
+        job.id,
+        { kind: "auto", silent: true, reasonForLog: "Automatic backup snapshot created", eventType: "backup.auto.success" },
+        provider
+      );
+    } catch (primaryError) {
+      // Automatic/unattended runs get one extra safety net manual runs
+      // deliberately don't: if the chosen destination is unusable for
+      // ANY reason right now (not connected, token expired, network
+      // down, quota), retry once against local instead of letting the
+      // doctor's automatic backups silently stop with no visible failure
+      // until they happen to check Settings. This is deliberately
+      // reactive (an actual save attempt failed), not a pre-check --
+      // StorageProvider.available reflects configuration, not live
+      // connection state (see googleDriveProvider.ts's own comment), so
+      // a pre-check would miss the single most common real case: the
+      // destination is configured but simply not signed in right now.
+      // A manual "Backup Now" click, by contrast, is attended --
+      // runPipelineForJob's own honest failure (the provider's own
+      // NOT_CONNECTED_MESSAGE) is exactly the right, visible outcome
+      // there, so this retry is NOT applied to manual operations.
+      if (provider.id === localBackupProvider.id) throw primaryError; // already local -- nothing to fall back to
+      await logOperationalEvent({
+        level: "warn",
+        type: "backup.auto.destination_unavailable",
+        message: `${provider.label} backup failed -- automatic backup fell back to this device`,
+        data: { destination: provider.id, error: primaryError instanceof Error ? primaryError.message : String(primaryError) },
+      }).catch(() => {});
+      const fallbackJob = await createJob("auto", localBackupProvider.id);
+      await runPipelineForJob(
+        fallbackJob.id,
+        { kind: "auto", silent: true, reasonForLog: "Automatic backup snapshot created (local fallback)", eventType: "backup.auto.success" },
+        localBackupProvider
+      );
+    }
   } catch (error) {
     await logOperationalEvent({
       level: "warn",

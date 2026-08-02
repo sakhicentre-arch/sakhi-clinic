@@ -129,20 +129,28 @@ describe("Backup provider dispatch (restore listing/download, auto-backup fallba
     expect(job.providerId).toBe("fake-remote");
   });
 
-  it("automatic backup falls back to local (and logs a notification) when the chosen destination is unavailable", async () => {
+  it("automatic backup falls back to local (and logs a notification) when a save against the chosen destination actually fails", async () => {
     const { setActiveProvider, runAutoIfDue } = await import("../../services/backup/backupManager");
     const { listRecentJobs } = await import("../../services/backup/backupJobService");
     const { getRecentOperationalEvents } = await import("../../services/operationalEventLogService");
 
-    const disconnectedProvider = makeFakeRemoteProvider({ available: false });
-    setActiveProvider(disconnectedProvider);
+    // Deliberately available: true (matches googleDriveProvider.available,
+    // which reflects configuration, not live sign-in -- the fallback must
+    // trigger from an actual failed save, not a pre-check of this flag).
+    const failingProvider = makeFakeRemoteProvider({
+      available: true,
+      save: vi.fn(async () => ({ ok: false, error: "Fake Remote is not connected." })),
+    });
+    setActiveProvider(failingProvider);
 
     await runAutoIfDue({ minHoursBetweenBackups: 0 });
 
-    expect(disconnectedProvider.save).not.toHaveBeenCalled();
-    const [job] = await listRecentJobs(1);
-    expect(job.providerId).toBe("local"); // fell back, not a failed job against the unavailable provider
-    expect(job.status).toBe("succeeded");
+    expect(failingProvider.save).toHaveBeenCalledTimes(1); // it DID try the real destination first
+    const jobs = await listRecentJobs(2);
+    expect(jobs[0].providerId).toBe("local"); // most recent: the successful fallback
+    expect(jobs[0].status).toBe("succeeded");
+    expect(jobs[1].providerId).toBe("fake-remote"); // the original attempt, recorded as failed, not hidden
+    expect(jobs[1].status).toBe("failed");
 
     const events = await getRecentOperationalEvents(20);
     expect(events.some((e) => e.type === "backup.auto.destination_unavailable")).toBe(true);

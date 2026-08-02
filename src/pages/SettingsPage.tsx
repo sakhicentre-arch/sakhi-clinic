@@ -490,12 +490,9 @@ export default function SettingsPage() {
                         {f === "daily" ? "Daily" : "Weekly"}
                       </button>
                     ))}
-                    <span className="sakhi-caption" style={{ alignSelf: "center" }}>
-                      + automatically before every restore
-                    </span>
                   </div>
                 )}
-                {backupSettings.autoBackupEnabled && backupSettings.destination !== LOCAL_DESTINATION_ID && !getActiveProvider().available && (
+                {backupSettings.autoBackupEnabled && backupSettings.destination !== LOCAL_DESTINATION_ID && !driveConnected && (
                   <div className="sakhi-caption" style={{ marginTop: 6, color: "#b45309", fontWeight: 800 }}>
                     {getActiveProvider().label} isn't connected right now -- automatic backups will save to This Device until it's reconnected.
                   </div>
