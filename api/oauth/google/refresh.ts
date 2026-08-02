@@ -7,40 +7,34 @@
  * Never handles an authorization code -- see exchange.ts for that.
  */
 
-import {
-  type MinimalRequest,
-  type MinimalResponse,
-  forwardToGoogle,
-  readBody,
-  readStringField,
-  requireClientSecret,
-  sendError,
-} from "./_shared";
+import { errorResponse, forwardToGoogle, readJsonBody, readStringField, requireClientSecret } from "./_shared";
 
-export default async function handler(req: MinimalRequest, res: MinimalResponse): Promise<void> {
-  if (req.method !== "POST") {
-    sendError(res, 405, "method_not_allowed", "Only POST is supported.");
-    return;
-  }
+export default {
+  async fetch(request: Request): Promise<Response> {
+    if (request.method !== "POST") {
+      return errorResponse(405, "method_not_allowed", "Only POST is supported.");
+    }
 
-  const body = readBody(req);
-  const clientId = readStringField(body, "client_id");
-  const refreshToken = readStringField(body, "refresh_token");
+    const body = await readJsonBody(request);
+    const clientId = readStringField(body, "client_id");
+    const refreshToken = readStringField(body, "refresh_token");
 
-  if (!clientId || !refreshToken) {
-    sendError(res, 400, "invalid_request", "client_id and refresh_token are both required.");
-    return;
-  }
+    if (!clientId || !refreshToken) {
+      return errorResponse(400, "invalid_request", "client_id and refresh_token are both required.");
+    }
 
-  const clientSecret = requireClientSecret(res, "refresh");
-  if (!clientSecret) return;
+    const clientSecret = requireClientSecret("refresh");
+    if (!clientSecret) {
+      return errorResponse(500, "server_configuration_error", "Google Drive is not fully configured on the server.");
+    }
 
-  const params = new URLSearchParams({
-    client_id: clientId,
-    refresh_token: refreshToken,
-    grant_type: "refresh_token",
-    client_secret: clientSecret,
-  });
+    const params = new URLSearchParams({
+      client_id: clientId,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+      client_secret: clientSecret,
+    });
 
-  await forwardToGoogle(res, params, "refresh", "refresh_token");
-}
+    return forwardToGoogle(params, "refresh", "refresh_token");
+  },
+};

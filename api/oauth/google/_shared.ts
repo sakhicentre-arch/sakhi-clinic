@@ -9,9 +9,19 @@
  * endpoint file otherwise contains only the logic specific to its own
  * grant type -- see their own file comments).
  *
+ * Web Handler contract: every exported endpoint is `{ fetch(request:
+ * Request): Promise<Response> }` -- Vercel's currently-documented Node.js
+ * function signature (see https://vercel.com/docs/functions/functions-api-reference).
+ * It is plain ESM top to bottom (matches this project's root tsconfig.json,
+ * which is what Vercel's function builder actually compiles against --
+ * it does not read a tsconfig.json placed under api/) and needs no
+ * package.json "type" field or Vercel-side experimental flags to load
+ * correctly, unlike the legacy Node (req, res) callback style this file
+ * used before.
+ *
  * Logging contract: every log call in this file takes ONLY specific,
- * named, whitelisted fields -- never req.body, never the outgoing request
- * params (which can carry client_secret, code, code_verifier, or
+ * named, whitelisted fields -- never the request body, never the outgoing
+ * request params (which can carry client_secret, code, code_verifier, or
  * refresh_token), and never a parsed *successful* Google response (which
  * carries access_token/refresh_token). Google's error responses ARE safe
  * to log in full -- they are documented OAuth error codes and human
@@ -19,23 +29,15 @@
  * in api/oauth/google/, it must follow this same rule.
  */
 
-export const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
-/** Minimal shape actually used here -- avoids depending on @vercel/node
- * purely for types. Vercel's Node.js runtime provides req.body (auto-parsed
- * from the request's Content-Type) and res.status()/res.json() natively,
- * regardless of this local type declaration. */
-export interface MinimalRequest {
-  method?: string;
-  body?: unknown;
-}
-export interface MinimalResponse {
-  status(code: number): MinimalResponse;
-  json(body: unknown): void;
-}
-
-export function readBody(req: MinimalRequest): Record<string, unknown> {
-  return req.body && typeof req.body === "object" ? (req.body as Record<string, unknown>) : {};
+export async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
+  try {
+    const json = await request.json();
+    return json && typeof json === "object" ? (json as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
 }
 
 export function readStringField(body: Record<string, unknown>, key: string): string {
@@ -43,8 +45,15 @@ export function readStringField(body: Record<string, unknown>, key: string): str
   return typeof value === "string" ? value : "";
 }
 
-export function sendError(res: MinimalResponse, status: number, error: string, message: string): void {
-  res.status(status).json({ error, message });
+export function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+export function errorResponse(status: number, error: string, message: string): Response {
+  return jsonResponse(status, { error, message });
 }
 
 /**
@@ -72,15 +81,14 @@ export function safeMessageFor(googleErrorCode: string | undefined): string {
 
 /**
  * Validates the server-side secret is configured. Logs (safely -- no
- * value, ever) and sends a 500 if it's missing; returns the secret to the
- * caller otherwise. Centralized so exchange.ts and refresh.ts can't drift
- * on this check.
+ * value, ever) when it's missing; returns the secret to the caller
+ * otherwise. Centralized so exchange.ts and refresh.ts can't drift on this
+ * check. Callers turn a null return into a 500 via errorResponse.
  */
-export function requireClientSecret(res: MinimalResponse, endpointName: string): string | null {
+export function requireClientSecret(endpointName: string): string | null {
   const secret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
   if (!secret) {
     console.error(`[api/oauth/google/${endpointName}] GOOGLE_OAUTH_CLIENT_SECRET is not configured on the server`);
-    sendError(res, 500, "server_configuration_error", "Google Drive is not fully configured on the server.");
     return null;
   }
   return secret;
@@ -96,7 +104,7 @@ export function requireClientSecret(res: MinimalResponse, endpointName: string):
  *    structured { error, message } it can show a doctor directly.
  *  - network failure: reported as a safe 502, also logged server-side.
  */
-export async function forwardToGoogle(res: MinimalResponse, params: URLSearchParams, endpointName: string, grantType: string): Promise<void> {
+export async function forwardToGoogle(params: URLSearchParams, endpointName: string, grantType: string): Promise<Response> {
   let googleResponse: Response;
   try {
     googleResponse = await fetch(GOOGLE_TOKEN_ENDPOINT, {
@@ -108,8 +116,7 @@ export async function forwardToGoogle(res: MinimalResponse, params: URLSearchPar
     console.error(`[api/oauth/google/${endpointName}] Network error contacting Google`, {
       message: error instanceof Error ? error.message : String(error),
     });
-    sendError(res, 502, "upstream_unavailable", "Could not reach Google. Please check your connection and try again.");
-    return;
+    return errorResponse(502, "upstream_unavailable", "Could not reach Google. Please check your connection and try again.");
   }
 
   const text = await googleResponse.text();
@@ -123,8 +130,7 @@ export async function forwardToGoogle(res: MinimalResponse, params: URLSearchPar
       // Google returning a non-JSON 2xx would be unprecedented, but don't
       // throw over it -- pass through an empty object rather than crash.
     }
-    res.status(googleResponse.status).json(json);
-    return;
+    return jsonResponse(googleResponse.status, json);
   }
 
   let googleError: string | undefined;
@@ -147,5 +153,5 @@ export async function forwardToGoogle(res: MinimalResponse, params: URLSearchPar
     error_description: googleErrorDescription,
   });
 
-  sendError(res, googleResponse.status, googleError || "token_request_failed", safeMessageFor(googleError));
+  return errorResponse(googleResponse.status, googleError || "token_request_failed", safeMessageFor(googleError));
 }

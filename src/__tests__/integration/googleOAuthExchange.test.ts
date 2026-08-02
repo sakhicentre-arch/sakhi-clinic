@@ -11,16 +11,13 @@ import handler from "../../../api/oauth/google/exchange";
  * the secret, code, or verifier.
  */
 
-function createMockRes() {
-  const res: { statusCode?: number; body?: unknown; status: any; json: any } = {} as any;
-  res.status = vi.fn((code: number) => {
-    res.statusCode = code;
-    return res;
+const URL = "http://localhost/api/oauth/google/exchange";
+
+function request(method: string, body?: unknown): Request {
+  return new Request(URL, {
+    method,
+    ...(body !== undefined ? { body: JSON.stringify(body), headers: { "content-type": "application/json" } } : {}),
   });
-  res.json = vi.fn((body: unknown) => {
-    res.body = body;
-  });
-  return res;
 }
 
 const VALID_BODY = {
@@ -43,25 +40,22 @@ describe("api/oauth/google/exchange", () => {
   });
 
   it("rejects non-POST methods", async () => {
-    const res = createMockRes();
-    await handler({ method: "GET", body: VALID_BODY }, res);
-    expect(res.statusCode).toBe(405);
-    expect(res.body).toMatchObject({ error: "method_not_allowed" });
+    const res = await handler.fetch(request("GET"));
+    expect(res.status).toBe(405);
+    expect(await res.json()).toMatchObject({ error: "method_not_allowed" });
   });
 
   it("rejects a request missing code_verifier", async () => {
-    const res = createMockRes();
     const { code_verifier, ...rest } = VALID_BODY;
-    await handler({ method: "POST", body: rest }, res);
-    expect(res.statusCode).toBe(400);
-    expect(res.body).toMatchObject({ error: "invalid_request" });
+    const res = await handler.fetch(request("POST", rest));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_request" });
   });
 
   it("rejects a request missing client_id", async () => {
-    const res = createMockRes();
     const { client_id, ...rest } = VALID_BODY;
-    await handler({ method: "POST", body: rest }, res);
-    expect(res.statusCode).toBe(400);
+    const res = await handler.fetch(request("POST", rest));
+    expect(res.status).toBe(400);
   });
 
   it("fails with server_configuration_error and never calls Google when the secret is missing", async () => {
@@ -69,11 +63,10 @@ describe("api/oauth/google/exchange", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = createMockRes();
-    await handler({ method: "POST", body: VALID_BODY }, res);
+    const res = await handler.fetch(request("POST", VALID_BODY));
 
-    expect(res.statusCode).toBe(500);
-    expect(res.body).toMatchObject({ error: "server_configuration_error" });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "server_configuration_error" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -87,11 +80,10 @@ describe("api/oauth/google/exchange", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = createMockRes();
-    await handler({ method: "POST", body: VALID_BODY }, res);
+    const res = await handler.fetch(request("POST", VALID_BODY));
 
-    expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual(googleJson);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(googleJson);
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://oauth2.googleapis.com/token");
@@ -115,11 +107,10 @@ describe("api/oauth/google/exchange", () => {
     vi.stubGlobal("fetch", fetchMock);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const res = createMockRes();
-    await handler({ method: "POST", body: VALID_BODY }, res);
+    const res = await handler.fetch(request("POST", VALID_BODY));
 
-    expect(res.statusCode).toBe(400);
-    expect(res.body).toEqual({ error: "invalid_grant", message: "Authorization expired. Please reconnect Google Drive." });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_grant", message: "Authorization expired. Please reconnect Google Drive." });
 
     // Google's ORIGINAL error is not lost -- it's logged server-side, in full.
     const loggedCall = errorSpy.mock.calls.find((call) => String(call[0]).includes("Google rejected the request"));
@@ -136,11 +127,10 @@ describe("api/oauth/google/exchange", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = createMockRes();
-    await handler({ method: "POST", body: VALID_BODY }, res);
+    const res = await handler.fetch(request("POST", VALID_BODY));
 
-    expect(res.statusCode).toBe(401);
-    expect(res.body).toEqual({ error: "invalid_client", message: "Google Drive configuration error." });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "invalid_client", message: "Google Drive configuration error." });
   });
 
   it("maps access_denied to a safe message", async () => {
@@ -152,11 +142,10 @@ describe("api/oauth/google/exchange", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = createMockRes();
-    await handler({ method: "POST", body: VALID_BODY }, res);
+    const res = await handler.fetch(request("POST", VALID_BODY));
 
-    expect(res.statusCode).toBe(400);
-    expect(res.body).toEqual({ error: "access_denied", message: "Permission denied." });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "access_denied", message: "Permission denied." });
   });
 
   it("falls back to a generic safe message for an unrecognized Google error code", async () => {
@@ -168,22 +157,21 @@ describe("api/oauth/google/exchange", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = createMockRes();
-    await handler({ method: "POST", body: VALID_BODY }, res);
+    const res = await handler.fetch(request("POST", VALID_BODY));
 
-    expect(res.statusCode).toBe(400);
-    expect((res.body as any).error).toBe("some_new_google_error");
-    expect((res.body as any).message).toMatch(/failed.*reconnect/i);
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as any;
+    expect(json.error).toBe("some_new_google_error");
+    expect(json.message).toMatch(/failed.*reconnect/i);
   });
 
   it("returns a safe 502 when Google cannot be reached, without throwing", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new Error("getaddrinfo ENOTFOUND")));
 
-    const res = createMockRes();
-    await expect(handler({ method: "POST", body: VALID_BODY }, res)).resolves.toBeUndefined();
+    const res = await handler.fetch(request("POST", VALID_BODY));
 
-    expect(res.statusCode).toBe(502);
-    expect(res.body).toMatchObject({ error: "upstream_unavailable" });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ error: "upstream_unavailable" });
   });
 
   describe("never logs secrets", () => {
@@ -200,7 +188,7 @@ describe("api/oauth/google/exchange", () => {
           text: async () => JSON.stringify({ access_token: "at-1", expires_in: 3600 }),
         })
       );
-      await handler({ method: "POST", body: VALID_BODY }, createMockRes());
+      await handler.fetch(request("POST", VALID_BODY));
 
       vi.stubGlobal(
         "fetch",
@@ -211,7 +199,7 @@ describe("api/oauth/google/exchange", () => {
           text: async () => JSON.stringify({ error: "invalid_grant", error_description: "expired" }),
         })
       );
-      await handler({ method: "POST", body: VALID_BODY }, createMockRes());
+      await handler.fetch(request("POST", VALID_BODY));
 
       const allLoggedText = JSON.stringify([...infoSpy.mock.calls, ...errorSpy.mock.calls]);
       expect(allLoggedText).not.toContain("test-secret-value-shhh");

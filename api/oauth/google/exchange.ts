@@ -9,44 +9,38 @@
  * handles a refresh_token request -- see refresh.ts for that.
  */
 
-import {
-  type MinimalRequest,
-  type MinimalResponse,
-  forwardToGoogle,
-  readBody,
-  readStringField,
-  requireClientSecret,
-  sendError,
-} from "./_shared";
+import { errorResponse, forwardToGoogle, readJsonBody, readStringField, requireClientSecret } from "./_shared";
 
-export default async function handler(req: MinimalRequest, res: MinimalResponse): Promise<void> {
-  if (req.method !== "POST") {
-    sendError(res, 405, "method_not_allowed", "Only POST is supported.");
-    return;
-  }
+export default {
+  async fetch(request: Request): Promise<Response> {
+    if (request.method !== "POST") {
+      return errorResponse(405, "method_not_allowed", "Only POST is supported.");
+    }
 
-  const body = readBody(req);
-  const clientId = readStringField(body, "client_id");
-  const code = readStringField(body, "code");
-  const codeVerifier = readStringField(body, "code_verifier");
-  const redirectUri = readStringField(body, "redirect_uri");
+    const body = await readJsonBody(request);
+    const clientId = readStringField(body, "client_id");
+    const code = readStringField(body, "code");
+    const codeVerifier = readStringField(body, "code_verifier");
+    const redirectUri = readStringField(body, "redirect_uri");
 
-  if (!clientId || !code || !codeVerifier || !redirectUri) {
-    sendError(res, 400, "invalid_request", "client_id, code, code_verifier, and redirect_uri are all required.");
-    return;
-  }
+    if (!clientId || !code || !codeVerifier || !redirectUri) {
+      return errorResponse(400, "invalid_request", "client_id, code, code_verifier, and redirect_uri are all required.");
+    }
 
-  const clientSecret = requireClientSecret(res, "exchange");
-  if (!clientSecret) return;
+    const clientSecret = requireClientSecret("exchange");
+    if (!clientSecret) {
+      return errorResponse(500, "server_configuration_error", "Google Drive is not fully configured on the server.");
+    }
 
-  const params = new URLSearchParams({
-    client_id: clientId,
-    code,
-    code_verifier: codeVerifier,
-    redirect_uri: redirectUri,
-    grant_type: "authorization_code",
-    client_secret: clientSecret,
-  });
+    const params = new URLSearchParams({
+      client_id: clientId,
+      code,
+      code_verifier: codeVerifier,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code",
+      client_secret: clientSecret,
+    });
 
-  await forwardToGoogle(res, params, "exchange", "authorization_code");
-}
+    return forwardToGoogle(params, "exchange", "authorization_code");
+  },
+};

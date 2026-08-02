@@ -1,9 +1,10 @@
 {
+  "//": "Local editor/tsc convenience only -- Vercel's Node.js function builder compiles api/**/*.ts against the ROOT tsconfig.json, not this file (it only reads a tsconfig.json at the project root). Kept in sync with root's module settings so local type-checking matches what actually gets deployed.",
   "compilerOptions": {
-    "module": "commonjs",
-    "moduleResolution": "node",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
     "target": "ES2021",
-    "lib": ["ES2021"],
+    "lib": ["ES2021", "DOM"],
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,

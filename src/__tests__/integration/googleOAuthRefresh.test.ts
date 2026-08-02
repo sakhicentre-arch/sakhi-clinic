@@ -8,16 +8,13 @@ import handler from "../../../api/oauth/google/refresh";
  * authorization code, only a refresh_token.
  */
 
-function createMockRes() {
-  const res: { statusCode?: number; body?: unknown; status: any; json: any } = {} as any;
-  res.status = vi.fn((code: number) => {
-    res.statusCode = code;
-    return res;
+const URL = "http://localhost/api/oauth/google/refresh";
+
+function request(method: string, body?: unknown): Request {
+  return new Request(URL, {
+    method,
+    ...(body !== undefined ? { body: JSON.stringify(body), headers: { "content-type": "application/json" } } : {}),
   });
-  res.json = vi.fn((body: unknown) => {
-    res.body = body;
-  });
-  return res;
 }
 
 const VALID_BODY = {
@@ -38,25 +35,22 @@ describe("api/oauth/google/refresh", () => {
   });
 
   it("rejects non-POST methods", async () => {
-    const res = createMockRes();
-    await handler({ method: "GET", body: VALID_BODY }, res);
-    expect(res.statusCode).toBe(405);
-    expect(res.body).toMatchObject({ error: "method_not_allowed" });
+    const res = await handler.fetch(request("GET"));
+    expect(res.status).toBe(405);
+    expect(await res.json()).toMatchObject({ error: "method_not_allowed" });
   });
 
   it("rejects a request missing refresh_token", async () => {
-    const res = createMockRes();
     const { refresh_token, ...rest } = VALID_BODY;
-    await handler({ method: "POST", body: rest }, res);
-    expect(res.statusCode).toBe(400);
-    expect(res.body).toMatchObject({ error: "invalid_request" });
+    const res = await handler.fetch(request("POST", rest));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_request" });
   });
 
   it("rejects a request missing client_id", async () => {
-    const res = createMockRes();
     const { client_id, ...rest } = VALID_BODY;
-    await handler({ method: "POST", body: rest }, res);
-    expect(res.statusCode).toBe(400);
+    const res = await handler.fetch(request("POST", rest));
+    expect(res.status).toBe(400);
   });
 
   it("fails with server_configuration_error and never calls Google when the secret is missing", async () => {
@@ -64,11 +58,10 @@ describe("api/oauth/google/refresh", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = createMockRes();
-    await handler({ method: "POST", body: VALID_BODY }, res);
+    const res = await handler.fetch(request("POST", VALID_BODY));
 
-    expect(res.statusCode).toBe(500);
-    expect(res.body).toMatchObject({ error: "server_configuration_error" });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "server_configuration_error" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -82,11 +75,10 @@ describe("api/oauth/google/refresh", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = createMockRes();
-    await handler({ method: "POST", body: VALID_BODY }, res);
+    const res = await handler.fetch(request("POST", VALID_BODY));
 
-    expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual(googleJson);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(googleJson);
 
     const [, init] = fetchMock.mock.calls[0];
     const sent = new URLSearchParams(init.body);
@@ -109,11 +101,10 @@ describe("api/oauth/google/refresh", () => {
     vi.stubGlobal("fetch", fetchMock);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const res = createMockRes();
-    await handler({ method: "POST", body: VALID_BODY }, res);
+    const res = await handler.fetch(request("POST", VALID_BODY));
 
-    expect(res.statusCode).toBe(400);
-    expect(res.body).toEqual({ error: "invalid_grant", message: "Authorization expired. Please reconnect Google Drive." });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_grant", message: "Authorization expired. Please reconnect Google Drive." });
 
     const loggedCall = errorSpy.mock.calls.find((call) => String(call[0]).includes("Google rejected the request"));
     expect(loggedCall).toBeDefined();
@@ -123,11 +114,10 @@ describe("api/oauth/google/refresh", () => {
   it("returns a safe 502 when Google cannot be reached, without throwing", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new Error("network down")));
 
-    const res = createMockRes();
-    await expect(handler({ method: "POST", body: VALID_BODY }, res)).resolves.toBeUndefined();
+    const res = await handler.fetch(request("POST", VALID_BODY));
 
-    expect(res.statusCode).toBe(502);
-    expect(res.body).toMatchObject({ error: "upstream_unavailable" });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ error: "upstream_unavailable" });
   });
 
   describe("never logs secrets", () => {
@@ -144,7 +134,7 @@ describe("api/oauth/google/refresh", () => {
           text: async () => JSON.stringify({ access_token: "at-2", expires_in: 3600 }),
         })
       );
-      await handler({ method: "POST", body: VALID_BODY }, createMockRes());
+      await handler.fetch(request("POST", VALID_BODY));
 
       vi.stubGlobal(
         "fetch",
@@ -155,7 +145,7 @@ describe("api/oauth/google/refresh", () => {
           text: async () => JSON.stringify({ error: "invalid_grant", error_description: "expired" }),
         })
       );
-      await handler({ method: "POST", body: VALID_BODY }, createMockRes());
+      await handler.fetch(request("POST", VALID_BODY));
 
       const allLoggedText = JSON.stringify([...infoSpy.mock.calls, ...errorSpy.mock.calls]);
       expect(allLoggedText).not.toContain("test-secret-value-shhh");
