@@ -20,6 +20,7 @@ import {
   Medicine,
   ConsultationOutcome,
   PaymentStatus,
+  PaymentMode,
   normalizeOutcome,
 } from "../services/db";
 import {
@@ -27,6 +28,7 @@ import {
   saveConsultation,
 } from "../services/consultationService";
 import { getPatientById } from "../services/patientService";
+import { compressPaymentScreenshot } from "../services/paymentService";
 
 import PrescriptionEditor from "../components/PrescriptionEditor";
 import SmartInput from "../components/SmartInput";
@@ -668,6 +670,135 @@ const Field: React.FC<{ label: string; span?: boolean; required?: boolean; child
     {children}
   </div>
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PAYMENT DETAILS (Module 4) -- shared by both the mobile and desktop
+// billing sections below so the field set/behavior stays identical
+// regardless of which layout renders; only the surrounding container
+// styling differs per call site.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PAYMENT_MODE_LABELS: Record<PaymentMode, string> = {
+  cash: "Cash", upi: "UPI", card: "Card", bank_transfer: "Bank Transfer",
+};
+
+interface PaymentDetailsFieldsProps {
+  status: PaymentStatus;
+  mode?: PaymentMode;
+  fee: number;
+  amountReceived?: number;
+  referenceNumber?: string;
+  notes?: string;
+  screenshotDataUrl?: string;
+  onPatch: (patch: {
+    paymentMode?: PaymentMode;
+    amountReceived?: number;
+    paymentReferenceNumber?: string;
+    paymentNotes?: string;
+    paymentScreenshotDataUrl?: string;
+  }) => void;
+}
+
+/** Only rendered once status is anything other than "pending" -- for a
+ * simple "pending" consultation there's nothing more to record, and
+ * showing 4 extra inputs for every single visit would be exactly the
+ * kind of unnecessary click/cognitive load this whole module exists to
+ * reduce. */
+const PaymentDetailsFields: React.FC<PaymentDetailsFieldsProps> = ({ status, mode, fee, amountReceived, referenceNumber, notes, screenshotDataUrl, onPatch }) => {
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  if (status === "pending") return null;
+
+  const handleScreenshot = async (file: File) => {
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const dataUrl = await compressPaymentScreenshot(file);
+      onPatch({ paymentScreenshotDataUrl: dataUrl });
+    } catch {
+      setUploadError("Could not read that image. Please try another file.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="sakhi-row" style={{ gap: 10, flexWrap: "wrap", marginTop: 8, width: "100%" }}>
+      <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 130 }}>
+        <span className="sakhi-caption">Mode</span>
+        <select
+          value={mode || ""}
+          onChange={(e) => onPatch({ paymentMode: (e.target.value || undefined) as PaymentMode | undefined })}
+          className="sakhi-input sakhi-input-muted sakhi-focus-ring"
+        >
+          <option value="">Select…</option>
+          {(Object.keys(PAYMENT_MODE_LABELS) as PaymentMode[]).map((m) => (
+            <option key={m} value={m}>{PAYMENT_MODE_LABELS[m]}</option>
+          ))}
+        </select>
+      </label>
+
+      {status === "partial" && (
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 130 }}>
+          <span className="sakhi-caption">Amount received (₹)</span>
+          <input
+            type="number"
+            value={amountReceived ?? ""}
+            onChange={(e) => onPatch({ amountReceived: Number(e.target.value) })}
+            className="sakhi-input sakhi-input-muted sakhi-focus-ring"
+            placeholder={`of ₹${fee || 0}`}
+          />
+        </label>
+      )}
+
+      <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 150, flex: "1 1 150px" }}>
+        <span className="sakhi-caption">Reference number (optional)</span>
+        <input
+          type="text"
+          value={referenceNumber || ""}
+          onChange={(e) => onPatch({ paymentReferenceNumber: e.target.value })}
+          className="sakhi-input sakhi-input-muted sakhi-focus-ring"
+          placeholder="UPI/transaction ID"
+        />
+      </label>
+
+      <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 150, flex: "1 1 150px" }}>
+        <span className="sakhi-caption">Notes (optional)</span>
+        <input
+          type="text"
+          value={notes || ""}
+          onChange={(e) => onPatch({ paymentNotes: e.target.value })}
+          className="sakhi-input sakhi-input-muted sakhi-focus-ring"
+        />
+      </label>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span className="sakhi-caption">Screenshot (optional, evidence only)</span>
+        <div className="sakhi-row" style={{ gap: 8 }}>
+          <label
+            className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+            style={{ minHeight: 36, width: "auto", display: "inline-flex", alignItems: "center", cursor: "pointer" }}
+          >
+            {uploading ? "Processing…" : screenshotDataUrl ? "Replace" : "Attach"}
+            <input
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              disabled={uploading}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void handleScreenshot(f);
+                e.currentTarget.value = "";
+              }}
+            />
+          </label>
+          {screenshotDataUrl && <img src={screenshotDataUrl} alt="Payment screenshot" style={{ height: 36, width: 36, objectFit: "cover", borderRadius: 8, border: "1px solid #e2e8f0" }} />}
+        </div>
+        {uploadError && <span className="sakhi-caption" style={{ color: "#b91c1c" }}>{uploadError}</span>}
+      </div>
+    </div>
+  );
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PRINT RX HELPER (shared between modes)
@@ -1397,13 +1528,20 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
   const handleWhatsAppBill = () => {
     const rawNumber = patient?.phone || (patient as any)?.mobile || "";
+    const fee = formData.fee || 0;
+    const status = formData.paymentStatus || "pending";
+    const statusLine =
+      status === "paid" ? "✅ Paid"
+      : status === "waived" ? "— Waived"
+      : status === "partial" ? `◐ Partial — ₹${formData.amountReceived || 0} received, ₹${Math.max(0, fee - (formData.amountReceived || 0))} remaining`
+      : "⏳ Pending";
     openWhatsApp({
       phone: rawNumber,
       message:
         `*Sakhi Homeopathic Clinic — Bill*\n\n` +
         `Patient: ${patient?.name || "N/A"}\n` +
-        `Consultation Fee: ₹${formData.fee || 0}\n` +
-        `Payment Status: ${formData.paymentStatus === "paid" ? "✅ Paid" : "⏳ Pending"}\n\n` +
+        `Consultation Fee: ₹${fee}\n` +
+        `Payment Status: ${statusLine}\n\n` +
         `Thank you for visiting Sakhi Clinic.`,
     });
   };
@@ -2731,7 +2869,9 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                         onChange={(next) => patch({ paymentStatus: next as PaymentStatus })}
                         options={[
                           { value: "pending", label: "Pending" },
+                          { value: "partial", label: "Partial" },
                           { value: "paid", label: "Paid" },
+                          { value: "waived", label: "Waived" },
                         ]}
                         allowEmpty={false}
                         testId="consultation-payment-status-chips"
@@ -2743,10 +2883,22 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                         className="sakhi-input sakhi-input-muted sakhi-focus-ring"
                       >
                         <option value="pending">⏳ Pending</option>
+                        <option value="partial">◐ Partial</option>
                         <option value="paid">✅ Paid</option>
+                        <option value="waived">— Waived</option>
                       </select>
                     )}
                   </MobileField>
+                  <PaymentDetailsFields
+                    status={formData.paymentStatus || "pending"}
+                    mode={formData.paymentMode}
+                    fee={formData.fee || 0}
+                    amountReceived={formData.amountReceived}
+                    referenceNumber={formData.paymentReferenceNumber}
+                    notes={formData.paymentNotes}
+                    screenshotDataUrl={formData.paymentScreenshotDataUrl}
+                    onPatch={patch}
+                  />
                 </div>
               </div>
 
@@ -3357,9 +3509,21 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
             <Field label="Payment Status">
               <select style={{ ...INPUT, width: 160 }} value={formData.paymentStatus || "pending"} onChange={(e) => patch({ paymentStatus: e.target.value as PaymentStatus })}>
                 <option value="pending">⏳ Pending</option>
+                <option value="partial">◐ Partial</option>
                 <option value="paid">✅ Paid</option>
+                <option value="waived">— Waived</option>
               </select>
             </Field>
+            <PaymentDetailsFields
+              status={formData.paymentStatus || "pending"}
+              mode={formData.paymentMode}
+              fee={formData.fee || 0}
+              amountReceived={formData.amountReceived}
+              referenceNumber={formData.paymentReferenceNumber}
+              notes={formData.paymentNotes}
+              screenshotDataUrl={formData.paymentScreenshotDataUrl}
+              onPatch={patch}
+            />
           </div>
 
           {/* SMART CASE TEMPLATES */}
