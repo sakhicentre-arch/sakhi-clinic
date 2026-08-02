@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { navigateTo } from './testUtils';
 
 test('duplicate patient validation workflow', async ({ page }) => {
   const firstPatientName = `Duplicate Test Patient ${Date.now()}`;
@@ -9,7 +10,7 @@ test('duplicate patient validation workflow', async ({ page }) => {
 
   // Open the application and navigate to the patient management page.
   await page.goto('/');
-  await page.click('[data-testid="bottom-nav-patients-button"]');
+  await navigateTo(page, 'Patients');
 
   // Register the first patient.
   await page.fill('[data-testid="patient-name-input"]', firstPatientName);

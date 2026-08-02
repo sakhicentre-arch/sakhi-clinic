@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { navigateTo } from './testUtils';
 
 test('patient registration workflow', async ({ page }) => {
   // Use a realistic patient and unique phone number to avoid collisions.
@@ -11,7 +12,7 @@ test('patient registration workflow', async ({ page }) => {
   await page.goto('/');
 
   // Navigate to the patient management page using the app navigation.
-await page.click('[data-testid="bottom-nav-patients-button"]');
+  await navigateTo(page, 'Patients');
 
   // Verify the registration form is present.
   const registrationForm = page.locator('[data-testid="patient-registration-form"]');

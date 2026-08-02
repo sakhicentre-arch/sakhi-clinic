@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { navigateTo } from './testUtils';
 
 test('patient edit workflow', async ({ page }) => {
   const originalPatientName = `Edit Test Patient ${Date.now()}`;
@@ -10,7 +11,7 @@ test('patient edit workflow', async ({ page }) => {
 
   // Open the application and navigate to the patient management screen.
   await page.goto('/');
-  await page.click('[data-testid="bottom-nav-patients-button"]');
+  await navigateTo(page, 'Patients');
 
   // Create a new patient record.
   await page.fill('[data-testid="patient-name-input"]', originalPatientName);
@@ -26,8 +27,9 @@ test('patient edit workflow', async ({ page }) => {
   await expect(createdRow).toBeVisible();
   await expect(createdRow).toContainText(patientPhone);
 
-  // Trigger the edit workflow for the created patient.
-  await createdRow.locator('button:has-text("Edit")').click();
+  // Trigger the edit workflow for the created patient (icon-only button,
+  // labelled via aria-label rather than visible text).
+  await createdRow.getByRole('button', { name: 'Edit patient' }).click();
 
   // The form should populate with the selected patient values.
   await expect(page.locator('[data-testid="patient-name-input"]')).toHaveValue(originalPatientName);
