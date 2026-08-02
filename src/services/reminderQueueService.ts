@@ -74,6 +74,15 @@ export async function listAllReminders(): Promise<ReminderQueueEntry[]> {
   return rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
+/** One patient's full reminder history, most recent first -- the Patient
+ * Ledger's "Reminder Sent / Reminder Date / Reminder Count / Reminder
+ * Notes" tracking (RC1) reads straight off this; there is no separate
+ * per-patient reminder-count field to keep in sync. */
+export async function listRemindersByPatient(patientId: string): Promise<ReminderQueueEntry[]> {
+  const rows = await db.reminderQueue.where("patientId").equals(patientId).toArray();
+  return rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
 /**
  * Has a patient already got a live (pending/approved) reminder of this type
  * queued? Used by the scheduler to stay idempotent -- it can run on every

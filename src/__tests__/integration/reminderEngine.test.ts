@@ -124,6 +124,18 @@ describe("Reminder Engine (Phase 2)", () => {
       await queueSvc.rejectReminder(entry.id);
       expect(await queueSvc.hasActiveReminder("P1", "follow_up")).toBe(false);
     });
+
+    it("listRemindersByPatient returns only that patient's reminders, most recently updated first", async () => {
+      const a = await queueSvc.enqueueReminder({ patientId: "P1", patientName: "A", type: "follow_up", message: "first", dueAt: REF.toISOString() });
+      const b = await queueSvc.enqueueReminder({ patientId: "P1", patientName: "A", type: "custom", message: "second", dueAt: REF.toISOString() });
+      await queueSvc.enqueueReminder({ patientId: "P2", patientName: "Other Patient", type: "follow_up", message: "not this patient", dueAt: REF.toISOString() });
+
+      await queueSvc.approveReminder(b.id); // bumps b's updatedAt after a's
+
+      const rows = await queueSvc.listRemindersByPatient("P1");
+      expect(rows.map((r) => r.id)).toEqual([b.id, a.id]);
+      expect(rows.every((r) => r.patientId === "P1")).toBe(true);
+    });
   });
 
   describe("Delivery tracking", () => {

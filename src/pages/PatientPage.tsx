@@ -32,6 +32,8 @@ import { normalizePatientPhone } from "../utils/whatsapp";
 import { openWhatsApp } from "../services/whatsappService";
 import { addPatient as saveNewPatient, updatePatient as saveUpdatedPatient, deletePatient as removePatient } from "../services/patientService";
 import { getConsultationOutstanding, getConsultationCollected } from "../services/paymentService";
+import { listRemindersByPatient } from "../services/reminderQueueService";
+import type { ReminderQueueEntry } from "../services/db";
 import { generateId } from "../utils/generateId";
 import type { Consultation, Report } from "../types/models";
 
@@ -253,6 +255,10 @@ export default function PatientPage(
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<"overview" | "history" | "finance">("overview");
+  // RC1 Patient Ledger: Reminder Sent/Date/Count/Notes tracking -- reuses
+  // reminderQueueService.ts's own queue records rather than a separate
+  // per-patient counter that could drift out of sync with them.
+  const [patientReminders, setPatientReminders] = useState<ReminderQueueEntry[]>([]);
   // ✅ V43: Collapsible section state for left panel form
   const [showProfile, setShowProfile] = useState<boolean>(false);
   const [showHistory, setShowHistory] = useState<boolean>(false);
@@ -461,6 +467,23 @@ export default function PatientPage(
       setFormData(DEFAULT_FORM);
       setReports([]);
     }
+  }, [selectedPatient]);
+
+  // ── Reminder history (RC1 Patient Ledger) ─────────────────────────────────
+  useEffect(() => {
+    if (!selectedPatient) {
+      setPatientReminders([]);
+      return;
+    }
+    let cancelled = false;
+    listRemindersByPatient(selectedPatient.id)
+      .then((rows) => {
+        if (!cancelled) setPatientReminders(rows);
+      })
+      .catch((err) => console.error("[PatientPage] Failed to load reminder history:", err));
+    return () => {
+      cancelled = true;
+    };
   }, [selectedPatient]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
@@ -1184,6 +1207,56 @@ export default function PatientPage(
                         </div>
                       </div>
                     </div>
+
+                    {/* RC1 Patient Ledger: Reminder Sent/Date/Count/Notes -- reuses
+                        reminderQueueService.ts's own queue records. */}
+                    <div style={S.card}>
+                      <SectionTitle icon={<MessageCircle size={18} color="#0891b2" />} label={`Reminder History — ${patientReminders.length} Reminder${patientReminders.length !== 1 ? "s" : ""}`} />
+                      {patientReminders.length === 0 ? (
+                        <p style={{ margin: "12px 0 0", fontSize: "13px", color: "#94a3b8" }}>No reminders sent to this patient yet.</p>
+                      ) : (
+                        <>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "14px", marginTop: "12px" }}>
+                            <FinanceCard
+                              label="Reminder Sent"
+                              amount={undefined}
+                              color={patientReminders.some((r) => r.status === "sent") ? "#059669" : "#94a3b8"}
+                              display={patientReminders.some((r) => r.status === "sent") ? "Yes" : "Not yet"}
+                            />
+                            <FinanceCard
+                              label="Last Reminder"
+                              amount={undefined}
+                              color="#0f172a"
+                              display={new Date(patientReminders[0].updatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                            />
+                            <FinanceCard label="Reminder Count" amount={undefined} color="#0891b2" display={String(patientReminders.length)} />
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "16px" }}>
+                            {patientReminders.slice(0, 5).map((r) => (
+                              <div key={r.id} style={{ padding: "12px 14px", borderRadius: "10px", background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                                  <span style={{ fontSize: "12px", fontWeight: 800, color: "#0f172a" }}>{new Date(r.updatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} &bull; {r.type.replace(/_/g, " ")}</span>
+                                  <span
+                                    style={{
+                                      fontSize: "10.5px",
+                                      fontWeight: 800,
+                                      padding: "2px 8px",
+                                      borderRadius: "999px",
+                                      textTransform: "uppercase",
+                                      backgroundColor: r.status === "sent" ? "#dcfce7" : r.status === "failed" || r.status === "rejected" ? "#fee2e2" : "#fef3c7",
+                                      color: r.status === "sent" ? "#166534" : r.status === "failed" || r.status === "rejected" ? "#991b1b" : "#92400e",
+                                    }}
+                                  >
+                                    {r.status}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: "12px", color: "#64748b", whiteSpace: "pre-line" }}>{r.message}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -1460,10 +1533,13 @@ function SummaryCard({ icon, iconBg, accent, bg, border, label, value }: {
   );
 }
 
-function FinanceCard({ label, amount, color }: { label: string; amount: number; color: string }) {
+/** `display` overrides the default currency formatting for non-money
+ * stats (e.g. Reminder History's "Yes"/date/count) that otherwise want
+ * the exact same card layout. */
+function FinanceCard({ label, amount, color, display }: { label: string; amount?: number; color: string; display?: string }) {
   return (
     <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "16px", padding: "20px", textAlign: "center", boxShadow: "0 2px 8px rgba(15,23,42,0.03)" }}>
-      <div style={{ fontSize: "22px", fontWeight: 900, color, marginBottom: "6px" }}>{formatCurrency(amount)}</div>
+      <div style={{ fontSize: "22px", fontWeight: 900, color, marginBottom: "6px" }}>{display ?? formatCurrency(amount)}</div>
       <div style={{ fontSize: "12px", color: "#64748b", fontWeight: 600 }}>{label}</div>
     </div>
   );
