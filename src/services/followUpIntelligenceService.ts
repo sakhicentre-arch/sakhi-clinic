@@ -19,6 +19,7 @@
 import { db, Patient, Consultation } from "./db";
 import { getAllConsultations } from "./consultationService";
 import { getFollowUpAlerts, FollowUpAlert } from "./followupEngine";
+import { parseDateOnly, startOfDay, daysBetween, dateKey, monthKey, isoWeekStart } from "../utils/dateOnly";
 
 export type FollowUpBucketKey = "overdue" | "today" | "tomorrow" | "upcoming7" | "noDate";
 
@@ -77,51 +78,10 @@ export interface IntelligentAlert {
 const LONG_GAP_DAYS = 60;
 const RECURRING_MISS_THRESHOLD = 2;
 
-function startOfDay(d: Date): Date {
-  const copy = new Date(d);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
-}
-
-function daysBetween(a: Date, b: Date): number {
-  return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
-}
-
-// Local calendar date, NOT toISOString().slice(0,10) -- toISOString always
-// reports the UTC date, which silently shifts by a day in any non-UTC
-// timezone (e.g. IST, UTC+5:30) right at local midnight boundaries. Every
-// "today"/"which day" comparison in this module must key off the LOCAL
-// calendar date a doctor actually experiences.
-function dateKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-// nextFollowUpDate/followUpDate are persisted as bare "YYYY-MM-DD" strings
-// (see patientService.ts/consultationService.ts). `new Date("YYYY-MM-DD")`
-// parses that as UTC midnight per the ECMAScript Date Time String Format --
-// combined with startOfDay's local .setHours(0,0,0,0), that can land on the
-// PREVIOUS local calendar day in any timezone behind UTC, and interacts
-// badly with dateKey's local-date reporting even in timezones ahead of UTC.
-// Parse these explicitly as local-midnight dates instead.
-function parseDateOnly(dateOnly: string): Date {
-  const [y, m, d] = dateOnly.split("-").map(Number);
-  return new Date(y, (m || 1) - 1, d || 1);
-}
-
-function isoWeekStart(d: Date): string {
-  const copy = startOfDay(d);
-  const day = copy.getDay(); // 0=Sun..6=Sat
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-  copy.setDate(copy.getDate() + diffToMonday);
-  return dateKey(copy);
-}
-
-function monthKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
+// startOfDay/daysBetween/dateKey/parseDateOnly/isoWeekStart/monthKey now
+// live in ../utils/dateOnly.ts (shared with paymentService.ts) -- see that
+// file's own comment for the local-calendar-date parsing rule this module
+// depends on throughout.
 
 async function loadData(): Promise<{ patients: Patient[]; consultations: Consultation[] }> {
   const [patients, consultations] = await Promise.all([

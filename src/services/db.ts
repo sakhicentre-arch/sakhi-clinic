@@ -25,7 +25,8 @@ export enum ConsultationOutcome {
 }
 
 export type ClinicId = "Dabholi" | "City Light";
-export type PaymentStatus = "paid" | "pending" | "waived";
+export type PaymentStatus = "paid" | "pending" | "partial" | "waived";
+export type PaymentMode = "cash" | "upi" | "card" | "bank_transfer";
 export type AppointmentStatus = "booked" | "arrived" | "in-progress" | "done" | "missed" | "cancelled";
 export type AppointmentType = "scheduled" | "walk-in";
 
@@ -136,7 +137,17 @@ export interface Consultation {
   heringsLawMatch?: boolean;
   fee?: number;
   paymentStatus?: PaymentStatus;
-  paymentMode?: "cash" | "upi" | "card";
+  paymentMode?: PaymentMode;
+  // V54: operational payment tracking -- evidence/record-keeping only, never
+  // accounting (see docs/CLINIC_WORKFLOW_MODULES.md). amountReceived can be
+  // less than fee for "partial"; paymentScreenshotDataUrl is a client-side-
+  // compressed data URL (never a raw multi-MB photo -- see paymentService.ts),
+  // stored as evidence only, not a receipt/invoice document.
+  paymentDate?: string;
+  amountReceived?: number;
+  paymentReferenceNumber?: string;
+  paymentNotes?: string;
+  paymentScreenshotDataUrl?: string;
 
   createdAt?: string;
   updatedAt?: string;
@@ -572,6 +583,30 @@ class SakhiDB extends Dexie {
     this.version(53).stores({
       patients: "id, name, phone, nextFollowUpDate, lastVisit, deletedAt, createdAt, updatedAt",
       consultations: "id, patientId, appointmentId, date, outcome, clinicId, learnedAt, deletedAt, createdAt, updatedAt",
+      learning: "++id, [remedy+symptomKey], remedy, symptomKey",
+      caseMemory: "++id, patientId, remedy, outcome, deletedAt, createdAt, updatedAt",
+      appointments: "id, date, patientId, status, clinic, [date+time+clinic], [clinic+date], deletedAt, createdAt, updatedAt",
+      drafts: "id, patientId, savedAt",
+      syncOutbox: "id, entityType, entityId, operationType, timestamp, syncStatus, retryCount",
+      operationalEvents: "id, timestamp, level, type",
+      appMeta: "id",
+      reminderQueue: "id, patientId, type, status, dueAt, channel",
+      reminderHistory: "id, reminderId, patientId, attemptedAt, action",
+      backupJobs: "id, kind, providerId, status, createdAt, nextRetryAt"
+    });
+
+    // V54 (Clinic Workflow Modules -- Payment Tracker): adds a paymentStatus
+    // index to consultations so the Payment Dashboard/Patient Ledger can
+    // efficiently query "which consultations are pending/partial" instead of
+    // scanning every row. The new Consultation fields themselves
+    // (paymentDate, amountReceived, paymentReferenceNumber, paymentNotes,
+    // paymentScreenshotDataUrl) are plain object properties, not new
+    // indexes -- same "purely additive" pattern as V53's BackupJob fields.
+    // Existing rows are read with these simply absent/undefined, which
+    // paymentService.ts treats as "no payment recorded yet."
+    this.version(54).stores({
+      patients: "id, name, phone, nextFollowUpDate, lastVisit, deletedAt, createdAt, updatedAt",
+      consultations: "id, patientId, appointmentId, date, outcome, clinicId, paymentStatus, learnedAt, deletedAt, createdAt, updatedAt",
       learning: "++id, [remedy+symptomKey], remedy, symptomKey",
       caseMemory: "++id, patientId, remedy, outcome, deletedAt, createdAt, updatedAt",
       appointments: "id, date, patientId, status, clinic, [date+time+clinic], [clinic+date], deletedAt, createdAt, updatedAt",
