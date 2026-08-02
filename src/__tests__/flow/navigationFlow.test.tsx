@@ -1,14 +1,27 @@
+import "fake-indexeddb/auto";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { indexedDB as fakeIndexedDB } from "fake-indexeddb";
 import App from "../../App";
 import ConsultationPage from "../../pages/ConsultationPage";
 import { VoiceSessionProvider } from "../../hooks/VoiceSessionContext";
+import { db } from "../../services/db";
 import { usePatientStore } from "../../store/usePatientStore";
 import { useConsultationStore } from "../../store/useConsultationStore";
 import { useAppointmentStore } from "../../store/useAppointmentStore";
 import { useQueueStore } from "../../store/queueStore";
 import { useUIStore } from "../../store/uiStore";
+
+async function resetDatabase() {
+  db.close();
+  await new Promise<void>((resolve, reject) => {
+    const req = fakeIndexedDB.deleteDatabase("SakhiClinicDB");
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+    req.onblocked = () => resolve();
+  });
+}
 
 vi.mock("../../components/shared/PatientHistoryTimeline", () => ({
   default: () => null,
@@ -51,7 +64,18 @@ const previousConsultation = {
   outcome: "Improved",
 };
 
-function seedStores(consultations: any[] = []) {
+// Also seeds the real (fake-indexeddb) db, not just the zustand stores --
+// ConsultationPage's loadData() reads from the real db whenever a real
+// IndexedDB API is present (see its own hasIndexedDbApi check), which it
+// now always is here since this file imports fake-indexeddb/auto.
+async function seedStores(consultations: any[] = []) {
+  await resetDatabase();
+  await db.open();
+  await db.patients.add(patient as any);
+  for (const c of consultations) {
+    await db.consultations.add(c as any);
+  }
+
   usePatientStore.setState({
     patients: [patient as any],
     loadPatients: vi.fn(async () => undefined),
@@ -89,8 +113,8 @@ function seedStores(consultations: any[] = []) {
   });
 }
 
-beforeEach(() => {
-  seedStores();
+beforeEach(async () => {
+  await seedStores();
   vi.spyOn(window, "alert").mockImplementation(() => undefined);
   vi.spyOn(window, "open").mockImplementation(() => null);
   vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
@@ -122,7 +146,7 @@ describe("Navigation flow into Consultation", () => {
   });
 
   it("should render Full Mode when this is the patient's first visit", async () => {
-    seedStores([]);
+    await seedStores([]);
 
     render(<VoiceSessionProvider><ConsultationPage patientId={patient.id} /></VoiceSessionProvider>);
 
@@ -133,13 +157,19 @@ describe("Navigation flow into Consultation", () => {
   });
 
   it("should render Quick Mode when the patient has follow-up history", async () => {
-    seedStores([previousConsultation]);
+    await seedStores([previousConsultation]);
 
     render(<VoiceSessionProvider><ConsultationPage patientId={patient.id} appointmentId="APT-001" /></VoiceSessionProvider>);
 
-    expect(await screen.findByText("Consultation")).toBeInTheDocument();
-    const debugPanel = screen.getByTestId("consultation-debug-panel");
-    expect(debugPanel).toHaveTextContent("Mode: Quick");
+    // Mode is decided once the patient's real consultation history has
+    // loaded (async against the db) -- it starts on "Full" and flips to
+    // "Quick" once that resolves, re-rendering into a different JSX branch.
+    // Wait for that final settled state in one step rather than asserting
+    // on an intermediate render.
+    await waitFor(() => {
+      expect(screen.getByTestId("consultation-debug-panel")).toHaveTextContent("Mode: Quick");
+    });
+    expect(screen.getByText("Consultation")).toBeInTheDocument();
     expect(screen.getByText(/how is the patient today/i)).toBeInTheDocument();
   });
 
