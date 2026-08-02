@@ -149,22 +149,31 @@ export async function forwardToGoogle(params: URLSearchParams, endpointName: str
 
   let googleError: string | undefined;
   let googleErrorDescription: string | undefined;
+  let googleErrorUri: string | undefined;
+  let parseFailed = false;
   try {
     const parsed = JSON.parse(text);
     googleError = typeof parsed.error === "string" ? parsed.error : undefined;
     googleErrorDescription = typeof parsed.error_description === "string" ? parsed.error_description : undefined;
+    googleErrorUri = typeof parsed.error_uri === "string" ? parsed.error_uri : undefined;
   } catch {
-    // Not JSON -- googleError/googleErrorDescription stay undefined below.
+    parseFailed = true;
   }
 
   // The ONLY place Google's full error is preserved -- server-side logs
   // only, never sent to the browser as-is (see safeMessageFor above).
+  // error/error_description/error_uri are Google's own documented OAuth
+  // error fields (RFC 6749 §5.2) -- safe to log in full, never token
+  // material. If Google's body didn't parse as JSON, the raw text is
+  // logged instead (still just Google's own error response, same rule).
   console.error(`[api/oauth/google/${endpointName}] Google rejected the request`, {
     status: googleResponse.status,
     statusText: googleResponse.statusText,
     grant_type: grantType,
     error: googleError,
     error_description: googleErrorDescription,
+    error_uri: googleErrorUri,
+    ...(parseFailed ? { raw_response: text } : {}),
   });
 
   return errorResponse(googleResponse.status, googleError || "token_request_failed", safeMessageFor(googleError));
