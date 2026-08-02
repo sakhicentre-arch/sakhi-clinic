@@ -43,3 +43,24 @@ export async function completeGoogleDriveConnection(search: string): Promise<{ o
     return { ok: false, error: message };
   }
 }
+
+/**
+ * Re-syncs the active backup provider with the already-persisted OAuth
+ * connection state. Needed on EVERY app boot, not just the one-time
+ * callback above: setActiveProvider() only lives in memory (see
+ * backupManager.ts's `activeProvider`), and the callback flow above is
+ * immediately followed by a full-page reload back to "/" (see App.tsx) --
+ * which throws that in-memory change away before the doctor ever sees it.
+ * Without this, "Google Drive: Connected" (persisted via
+ * googleOAuthService's own token storage) and "Active backup destination"
+ * (in-memory only, reset to local on every reload) silently drift apart
+ * after the very first reload following a successful connection.
+ */
+export async function restoreActiveProviderFromConnection(): Promise<void> {
+  try {
+    const connected = await googleOAuthService.isAuthenticated();
+    if (connected) setActiveProvider(googleDriveProvider);
+  } catch {
+    // ignore -- worst case the doctor sees "This device" and can reconnect
+  }
+}

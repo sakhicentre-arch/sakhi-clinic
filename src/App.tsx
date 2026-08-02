@@ -18,7 +18,7 @@ import RemindersPage from "./pages/RemindersPage";
 import { VoiceSessionProvider } from "./hooks/VoiceSessionContext";
 import OriginMismatchBanner from "./components/OriginMismatchBanner";
 import { acknowledgeOriginChange, checkOriginIdentity, OriginCheckResult } from "./services/originIdentityService";
-import { GOOGLE_OAUTH_CALLBACK_PATH, completeGoogleDriveConnection } from "./services/backup/oauth/completeGoogleDriveConnection";
+import { GOOGLE_OAUTH_CALLBACK_PATH, completeGoogleDriveConnection, restoreActiveProviderFromConnection } from "./services/backup/oauth/completeGoogleDriveConnection";
 
 function hasPendingDriveConnectResult(): boolean {
   try {
@@ -81,6 +81,16 @@ export default function App() {
       window.location.replace("/");
     });
   }, [isOAuthCallbackPath]);
+
+  // Restores "Google Drive" as the active backup destination on every
+  // normal app boot, not just the one-time OAuth callback above --
+  // setActiveProvider() only lives in memory, and the callback path always
+  // reloads immediately after setting it (see completeGoogleDriveConnection.ts),
+  // which would otherwise silently reset the active destination back to
+  // "This device" on every single subsequent page load.
+  useEffect(() => {
+    void restoreActiveProviderFromConnection();
+  }, []);
 
   // Module A: origin-identity self-check, once per app load. Detection only —
   // never blocks rendering or navigation.

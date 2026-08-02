@@ -40,6 +40,7 @@ import { listRecentJobs } from "../services/backup/backupJobService";
 import { retryEligibleBackupJobs } from "../services/backup/backupRetryService";
 import { googleDriveProvider } from "../services/backup/providers/googleDriveProvider";
 import { googleOAuthService } from "../services/backup/oauth/googleOAuthService";
+import { restoreActiveProviderFromConnection } from "../services/backup/oauth/completeGoogleDriveConnection";
 import type { BackupJob } from "../services/db";
 
 declare const __APP_VERSION__: string;
@@ -150,11 +151,21 @@ export default function SettingsPage() {
   const [cloudNote, setCloudNote] = useState<string>("");
 
   const driveConfigured = googleDriveProvider.available; // reflects isConfigured(), not sign-in state -- see the provider's own comment
-  const activeProviderId = getActiveProvider().id;
+  const [activeProviderId, setActiveProviderId] = useState(getActiveProvider().id);
 
   const load = async () => {
     setLoading(true);
     try {
+      // Re-derives the active provider from persisted OAuth state before
+      // reading it below -- setActiveProvider() only lives in memory (see
+      // backupManager.ts), so without this, a plain re-render can never
+      // pick up a connection that was completed on a now-gone page load
+      // (App.tsx's OAuth callback handler reloads immediately after
+      // setting it). Cheap and idempotent: a no-op whenever Drive isn't
+      // actually connected.
+      await restoreActiveProviderFromConnection();
+      setActiveProviderId(getActiveProvider().id);
+
       try {
         const rawConnectResult = window.localStorage.getItem("sakhi.driveConnectResult.v1");
         if (rawConnectResult) {
