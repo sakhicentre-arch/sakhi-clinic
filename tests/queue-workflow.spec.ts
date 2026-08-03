@@ -46,6 +46,79 @@ test('queue workflow: appointment → queue → consultation start', async ({ pa
   // ============================================================
   console.log('🔄 Navigating to Today/Queue page...');
   await navigateTo(page, 'Today');
+
+  const viewport = page.viewportSize();
+  const isMobile = !!viewport && viewport.width < 768;
+
+  if (isMobile) {
+    // ============================================================
+    // MOBILE FLOW: Today page renders the "Command Center" (FAB +
+    // chip strip), not the desktop QueuePanel -- different testids
+    // entirely, see src/pages/TodayPage.tsx's MobileTodayCommandCenter.
+    // ============================================================
+    console.log('📱 Mobile viewport detected, using Command Center flow...');
+
+    const fab = page.locator('[data-testid="mobile-fab-add-walkin"]');
+    await expect(fab).toBeVisible();
+    console.log('✅ Navigated to Today page');
+
+    console.log('🔍 Verifying patient appears in queue...');
+    let patientChip = page.locator('[data-status]').filter({ hasText: patient.name });
+    let chipCount = await patientChip.count();
+
+    if (chipCount === 0) {
+      console.log('📋 Patient not in queue yet, adding manually...');
+      await fab.click();
+      await expect(page.locator('[data-testid="queue-search-input"]')).toBeVisible();
+      await page.fill('[data-testid="queue-search-input"]', patient.name);
+      const patientAddBtn = page.locator('button').filter({ hasText: new RegExp(patient.name, 'i') }).first();
+      await expect(patientAddBtn).toBeVisible();
+      await patientAddBtn.click();
+      await expect(page.locator('[data-status]').filter({ hasText: patient.name })).toHaveCount(1);
+      patientChip = page.locator('[data-status]').filter({ hasText: patient.name });
+      chipCount = await patientChip.count();
+      console.log(`📊 Queue chips with patient name after adding: ${chipCount}`);
+    } else {
+      console.log(`📊 Queue chips with patient name: ${chipCount}`);
+    }
+
+    expect(chipCount).toBeGreaterThanOrEqual(1);
+    console.log(`✅ Found patient in queue`);
+
+    console.log('🔍 Verifying initial queue status...');
+    const statusText = await patientChip.first().getAttribute('data-status');
+    console.log(`📊 Initial status: ${statusText}`);
+    expect(statusText).toBe('waiting');
+    console.log('✅ Status is "Waiting"');
+
+    console.log('🔍 Verifying no duplicate queue entries...');
+    const patientChipCount = await patientChip.count();
+    console.log(`📊 Queue entries for ${patient.name}: ${patientChipCount}`);
+    expect(patientChipCount).toBe(1);
+    console.log('✅ No duplicate queue entries');
+
+    console.log('🩺 Starting consultation from queue...');
+    const startCta = page.locator('[data-testid^="mobile-now-serving-start-"]').first();
+    await expect(startCta).toBeVisible({ timeout: 5000 });
+    await startCta.click();
+    console.log('✅ Started consultation');
+
+    console.log('🔍 Verifying consultation page or state...');
+    const consultationRoot = page.locator('[data-testid="consultation-root"]');
+    const consultationVisible = await consultationRoot.isVisible().catch(() => false);
+    if (consultationVisible) {
+      console.log('✅ Consultation page loaded successfully');
+    } else {
+      console.log('ℹ️ Still on Today page or consultation loading');
+    }
+
+    console.log('🎉 Queue workflow test completed successfully!');
+    return;
+  }
+
+  // ============================================================
+  // DESKTOP FLOW: original QueuePanel-based workflow
+  // ============================================================
   await expect(page.locator('[data-testid="queue-panel"]')).toBeVisible();
   console.log('✅ Navigated to Today page');
 
@@ -61,10 +134,10 @@ test('queue workflow: appointment → queue → consultation start', async ({ pa
   // Check if patient is already in queue, if not add them
   let patientQueueRows = page.locator('[data-testid^="queue-row-"]').filter({ hasText: patient.name });
   let queueRowCount = await patientQueueRows.count();
-  
+
   if (queueRowCount === 0) {
     console.log('📋 Patient not in queue yet, adding manually...');
-    
+
     // Click "Add Patient to Queue" button
     await page.click('[data-testid="add-patient-to-queue-btn"]');
     await expect(page.locator('[data-testid="queue-search-input"]')).toBeVisible();
@@ -99,7 +172,7 @@ test('queue workflow: appointment → queue → consultation start', async ({ pa
   const statusChip = queueRow.locator('[data-testid^="queue-status-"]');
   const statusText = await statusChip.textContent();
   console.log(`📊 Initial status: ${statusText}`);
-  
+
   // Status should indicate waiting
   await expect(statusChip).toContainText(/waiting|Waiting/i);
   console.log('✅ Status is "Waiting"');
@@ -150,7 +223,7 @@ test('queue workflow: appointment → queue → consultation start', async ({ pa
   // Filter for only this patient's entries
   const patientQueueEntriesCount = await patientQueueRows.count();
   console.log(`📊 Queue entries for ${patient.name}: ${patientQueueEntriesCount}`);
-  
+
   expect(patientQueueEntriesCount).toBe(1);
   console.log('✅ No duplicate queue entries');
 
@@ -162,7 +235,7 @@ test('queue workflow: appointment → queue → consultation start', async ({ pa
   // The start consultation button is inside the active queue row
   // Re-fetch the active row and find the button within it
   const activeQueueRow = page.locator('[data-testid^="queue-row-active-"]').first();
-  
+
   // Wait for button to appear
   await activeQueueRow.waitFor({ state: 'visible', timeout: 3000 });
 
@@ -181,11 +254,11 @@ test('queue workflow: appointment → queue → consultation start', async ({ pa
   // After clicking start consultation, the page may navigate or state updates
   // Check if we're still on the Today page
   const queuePanelVisible = await page.locator('[data-testid="queue-panel"]').isVisible().catch(() => false);
-  
+
   if (queuePanelVisible) {
     // Still on Today page, verify status changed
     const updatedStatusChip = page.locator('[data-testid^="queue-status-"]').filter({ hasText: /in-progress|In Progress/i }).first();
-    
+
     try {
       await expect(updatedStatusChip).toBeVisible({ timeout: 2000 });
       const updatedStatusText = await updatedStatusChip.textContent();
@@ -223,7 +296,7 @@ test('queue workflow: appointment → queue → consultation start', async ({ pa
   if (queuePanelVisible) {
     const finalPatientQueueRows = page.locator('[data-testid^="queue-row"]').filter({ hasText: patient.name });
     const finalPatientQueueCount = await finalPatientQueueRows.count();
-    
+
     console.log(`📊 Final queue entries for patient: ${finalPatientQueueCount}`);
     expect(finalPatientQueueCount).toBe(1);
     console.log('✅ Final verification passed - no duplicates');

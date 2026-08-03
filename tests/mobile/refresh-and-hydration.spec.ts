@@ -42,12 +42,20 @@ test.describe('Mobile refresh and hydration recovery', () => {
       await page.reload();
       // app should still show an offline shell or cached content
       await expect(page.locator('#root')).toBeVisible();
-      await context.setOffline(false);
-      await page.reload();
     } catch (err) {
       // In dev server mode the SW is not active; reload may fail. Log and continue.
       console.warn('[mobile test] offline reload simulation skipped:', err.message || err);
+    } finally {
+      // Must always run, even when the reload above throws -- otherwise the
+      // browser context is left offline and every assertion after this
+      // point fails on an unrelated network-error interstitial, not on
+      // anything the app actually did.
+      await context.setOffline(false);
     }
+
+    // Always attempt a final online reload so hydration can be verified,
+    // regardless of whether the offline-simulation reload above succeeded.
+    await page.reload().catch(() => {});
 
     // After reload (or skipped), hydration should bring the queue back (mobile chips or desktop list)
     await expect(page.locator('body').filter({ hasText: patient.name })).toBeVisible({ timeout: 10000 });

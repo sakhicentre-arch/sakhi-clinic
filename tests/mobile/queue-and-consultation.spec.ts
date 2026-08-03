@@ -66,6 +66,17 @@ test.describe('Mobile queue and consultation workflow', () => {
     await expect(page.locator('[data-testid="consultation-action-bar"]')).toBeVisible({ timeout: 10000 }).catch(() => {});
 
     if (isMobile) {
+      // Newly-registered patients are always first-visit, and ConsultationPage
+      // deliberately defaults first-visit consultations to Classic Mode (see
+      // ConsultationPage.tsx's `setMode(isFirstVisit ? "classic" : "quick")`)
+      // -- a real clinical-documentation safeguard, not a bug. The mobile
+      // stage strip (`consultation-stage-*`) only renders in Quick Mode, so
+      // switch to it explicitly before exercising stage switching.
+      const quickModeToggle = page.getByRole('tab', { name: /Quick Mode/i });
+      if (await quickModeToggle.isVisible().catch(() => false)) {
+        await quickModeToggle.click();
+      }
+
       // Stage switching must be stable and sections must remain reachable.
       await page.click('[data-testid="consultation-stage-exam"]');
       await expect(page.locator('[data-testid="section-examination"]')).toBeVisible({ timeout: 10000 });

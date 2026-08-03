@@ -3511,7 +3511,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
           <button className="btn-secondary" onClick={() => setShowSticker(true)}>🏷️ Print Sticker</button>
           <button className="btn-secondary" onClick={handlePrintLetter}>📄 Print Certificate</button>
           <button className="btn-secondary" onClick={handlePrintRx} disabled={formData.medicines.length === 0}>📋 Print Rx</button>
-          <button onClick={handleWhatsAppShare} className="btn-whatsapp">📲 WhatsApp Rx</button>
+          <button data-testid="consultation-whatsapp-button" onClick={handleWhatsAppShare} className="btn-whatsapp">📲 WhatsApp Rx</button>
           <button onClick={handleWhatsAppBill} className="btn-whatsapp">💰 Send Bill</button>
         </div>
       </header>

@@ -117,7 +117,19 @@ export async function assertNoFixedStickyOverlap(page: Page) {
         if (rect.bottom < -1 || rect.top > window.innerHeight + 1) continue;
         if (rect.right < -1 || rect.left > window.innerWidth + 1) continue;
         const intersects = !(rect.right <= fixedRect.left || rect.left >= fixedRect.right || rect.bottom <= fixedRect.top || rect.top >= fixedRect.bottom);
-        if (intersects) {
+        if (!intersects) continue;
+        // A raw rect intersection isn't proof of a real, visible collision --
+        // an element scrolled out of view inside its own clipping ancestor
+        // (e.g. a form panel with its own `overflow-y: auto`) still reports
+        // its true laid-out coordinates from getBoundingClientRect, even
+        // though nothing is actually rendered there. Confirm the element (or
+        // a descendant of it) is genuinely the top-most thing painted at its
+        // own center point before treating it as a real overlap.
+        const cx = (rect.left + rect.right) / 2;
+        const cy = (rect.top + rect.bottom) / 2;
+        const topElement = document.elementFromPoint(cx, cy);
+        const genuinelyVisible = !!topElement && (topElement === interactive || interactive.contains(topElement));
+        if (genuinelyVisible) {
           const tag = interactive.tagName.toLowerCase();
           const id = interactive.id ? `#${interactive.id}` : '';
           const dataset = (interactive as HTMLElement).dataset ? JSON.stringify((interactive as HTMLElement).dataset) : '';

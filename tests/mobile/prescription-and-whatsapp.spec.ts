@@ -56,6 +56,18 @@ test.describe('Mobile prescription and WhatsApp workflow', () => {
       if ((await startBtn.count()) > 0) await startBtn.click();
     }
 
+    // Newly-registered patients are always first-visit, and ConsultationPage
+    // deliberately defaults first-visit consultations to Classic Mode (see
+    // ConsultationPage.tsx's `setMode(isFirstVisit ? "classic" : "quick")`)
+    // -- a real clinical-documentation safeguard, not a bug. Classic mode
+    // renders its own WhatsApp button but has no `consultation-action-bar`
+    // (that's Quick-mode-only), so switch to Quick Mode explicitly to keep
+    // the rest of this flow on one consistent, fully-featured surface.
+    const quickModeToggle = page.getByRole('tab', { name: /Quick Mode/i });
+    if (await quickModeToggle.isVisible().catch(() => false)) {
+      await quickModeToggle.click();
+    }
+
     // attempt to find a visible WhatsApp share button (consultation UI may expose different labels)
     await page.evaluate(() => { (window as any)._opened = null; window.open = (u: any) => { (window as any)._opened = u; return null; }; });
     const waBtn = page.locator('[data-testid="consultation-whatsapp-button"]').first();
