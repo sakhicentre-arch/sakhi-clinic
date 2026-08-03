@@ -90,6 +90,40 @@ export async function cancelFollowUp(patientId: string): Promise<void> {
   broadcastSyncEvent({ type: "patient:updated", payload: { id: patientId } });
 }
 
+/**
+ * Doctor-initiated follow-up reschedule (Doctor Workflow Completion).
+ * Sets nextFollowUpDate directly to a new doctor-chosen date and clears
+ * any prior cancellation marker -- symmetric to cancelFollowUp() above.
+ * This persists until the patient's next real consultation, at which
+ * point syncPatientFollowUp() re-derives nextFollowUpDate from that
+ * consultation's own followUpDate as usual; a reschedule is a deliberate
+ * override of the current due date, not a replacement for actually
+ * seeing the patient.
+ */
+export async function rescheduleFollowUp(patientId: string, newDate: string): Promise<void> {
+  const patient = await db.patients.get(patientId);
+  if (!patient) return;
+
+  await db.patients.update(patientId, {
+    nextFollowUpDate: newDate,
+    followUpCancelledDate: undefined,
+    updatedAt: nowIso(),
+  });
+
+  try {
+    const p = await db.patients.get(patientId);
+    if (p && !p.deletedAt) {
+      usePatientStore.setState((s) => ({
+        patients: s.patients.map((x) => (x.id === patientId ? p : x)),
+      }));
+    }
+  } catch (err) {
+    console.warn('[patientService] rescheduleFollowUp store sync failed', err);
+  }
+
+  broadcastSyncEvent({ type: "patient:updated", payload: { id: patientId } });
+}
+
 export async function getAllPatients(): Promise<Patient[]> {
   return db.patients.filter((p) => !p.deletedAt).toArray();
 }

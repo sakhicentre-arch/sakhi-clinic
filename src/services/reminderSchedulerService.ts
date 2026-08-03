@@ -18,7 +18,11 @@ import { ReminderQueueEntry } from "./db";
 
 const CLINIC_NAME = "Sakhi Homeopathic Clinic";
 
-function buildFollowUpMessage(entry: FollowUpBucketEntry, isOverdue: boolean): string {
+// Exported for FollowUpPage.tsx's manual per-row "Send Reminder" action --
+// same message a doctor would get automatically for overdue/due-today
+// patients, reused rather than re-built, so a manual send and an
+// automatic one never drift into two different message formats.
+export function buildFollowUpMessage(entry: FollowUpBucketEntry, isOverdue: boolean): string {
   const greeting = `*${CLINIC_NAME}*`;
   const body = isOverdue
     ? `Hi ${entry.patientName}, your follow-up visit was due on ${entry.nextFollowUpDate ? new Date(entry.nextFollowUpDate).toLocaleDateString() : "an earlier date"}. Please book a visit at your earliest convenience.`

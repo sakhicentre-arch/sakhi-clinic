@@ -16,6 +16,11 @@ import {
   ChevronDown,
   ChevronUp,
   XCircle,
+  Phone,
+  MessageCircle,
+  BellRing,
+  CalendarDays,
+  Stethoscope,
 } from "lucide-react";
 import { MobileCard, MobileSection, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
 import { ActivePage } from "../store/uiStore";
@@ -27,21 +32,34 @@ import {
   getFollowUpHistory,
   FollowUpBuckets,
   FollowUpBucketKey,
+  FollowUpBucketEntry,
   FollowUpAnalytics,
   IntelligentAlert,
   FollowUpHistoryEntry,
 } from "../services/followUpIntelligenceService";
-import { cancelFollowUp } from "../services/patientService";
+import { cancelFollowUp, rescheduleFollowUp } from "../services/patientService";
+import { openWhatsApp } from "../services/whatsappService";
+import { enqueueReminder, hasActiveReminder } from "../services/reminderQueueService";
+import { buildFollowUpMessage } from "../services/reminderSchedulerService";
 
 interface Props {
   onNavigate?: (page: ActivePage) => void;
+  goToConsultation?: (patientId: string, appointmentId: string) => void;
 }
 
 // "completed" isn't a real-time bucket (followUpIntelligenceService.ts's
 // FollowUpBucketKey) -- it's derived history (getFollowUpHistory()), shown
 // as a filter tab alongside the buckets per RC1's status list (Upcoming/Due
 // Today/Overdue/Completed/Cancelled) without inventing a second bucket shape.
-type FollowUpTab = FollowUpBucketKey | "completed";
+//
+// needsReview/missedRecurring/neverReturned are likewise not new buckets --
+// they're the existing getIntelligentAlerts() output (CHRONIC_OVERDUE /
+// MISSED_RECURRING / LONG_GAP), regrouped as filterable tabs instead of only
+// appearing as alert messages. "Long Pending" was considered as a fourth tab
+// but dropped: it would just be a duplicate view of the Overdue tab (already
+// sorted worst-first by daysOverdue) filtered by an arbitrary threshold --
+// not a genuinely different question from what Overdue already answers.
+type FollowUpTab = FollowUpBucketKey | "completed" | "needsReview" | "missedRecurring" | "neverReturned";
 
 // Buckets a doctor can still act on -- these are the only ones "Cancel
 // follow-up" makes sense for. Cancelling from noDate/cancelled/completed
@@ -56,9 +74,22 @@ const BUCKET_LABELS: Record<FollowUpTab, string> = {
   completed: "Completed",
   cancelled: "Cancelled",
   noDate: "No Follow-up Set",
+  needsReview: "Needing Review",
+  missedRecurring: "Multiple Missed Visits",
+  neverReturned: "Never Returned",
 };
 
-const TAB_ORDER: FollowUpTab[] = ["overdue", "today", "tomorrow", "upcoming7", "completed", "cancelled", "noDate"];
+const TAB_ORDER: FollowUpTab[] = [
+  "overdue", "today", "tomorrow", "upcoming7",
+  "needsReview", "missedRecurring", "neverReturned",
+  "completed", "cancelled", "noDate",
+];
+
+const ALERT_TAB_TYPE: Record<"needsReview" | "missedRecurring" | "neverReturned", IntelligentAlert["type"]> = {
+  needsReview: "CHRONIC_OVERDUE",
+  missedRecurring: "MISSED_RECURRING",
+  neverReturned: "LONG_GAP",
+};
 
 function severityTone(severity: number): "success" | "muted" | "brand" {
   if (severity >= 3) return "brand";
@@ -75,7 +106,7 @@ function formatDate(iso?: string): string {
   }
 }
 
-export default function FollowUpPage({ onNavigate }: Props) {
+export default function FollowUpPage({ onNavigate, goToConsultation }: Props) {
   const setActivePatientId = useUIStore((s) => s.setActivePatientId);
 
   const [loading, setLoading] = useState(true);
@@ -86,6 +117,10 @@ export default function FollowUpPage({ onNavigate }: Props) {
   const [activeBucket, setActiveBucket] = useState<FollowUpTab>("overdue");
   const [expandedPatientId, setExpandedPatientId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [sendingReminderId, setSendingReminderId] = useState<string | null>(null);
+  const [reschedulingId, setReschedulingId] = useState<string | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState<string>("");
+  const [savingRescheduleId, setSavingRescheduleId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -130,6 +165,69 @@ export default function FollowUpPage({ onNavigate }: Props) {
     }
   };
 
+  const handleCall = (phone?: string) => {
+    if (!phone) return;
+    window.location.href = `tel:${phone}`;
+  };
+
+  const handleWhatsApp = (entry: { patientId: string; patientName: string; phone?: string; nextFollowUpDate?: string; daysOverdue?: number }) => {
+    if (!entry.phone) return;
+    const message = buildFollowUpMessage(entry as FollowUpBucketEntry, !!entry.daysOverdue);
+    openWhatsApp({ phone: entry.phone, message });
+  };
+
+  // Queues a doctor-editable reminder via the same infrastructure the
+  // automatic overdue/due-today scheduler uses (reminderSchedulerService.ts)
+  // -- this is a manual, one-off send, so it still goes through the
+  // Reminders page's approve/reject queue rather than sending immediately.
+  const handleSendReminder = async (entry: { patientId: string; patientName: string; phone?: string; nextFollowUpDate?: string; daysOverdue?: number }) => {
+    if (!entry.phone) return;
+    setSendingReminderId(entry.patientId);
+    try {
+      const alreadyQueued = await hasActiveReminder(entry.patientId, "follow_up");
+      if (!alreadyQueued) {
+        await enqueueReminder({
+          patientId: entry.patientId,
+          patientName: entry.patientName,
+          phone: entry.phone,
+          type: "follow_up",
+          message: buildFollowUpMessage(entry as FollowUpBucketEntry, !!entry.daysOverdue),
+          dueAt: new Date().toISOString(),
+          sourceRef: "followups:manual",
+        });
+      }
+      onNavigate?.("reminders");
+    } finally {
+      setSendingReminderId(null);
+    }
+  };
+
+  const startReschedule = (patientId: string, currentDate?: string) => {
+    setReschedulingId(patientId);
+    setRescheduleDate(currentDate || new Date().toISOString().slice(0, 10));
+  };
+
+  const handleSaveReschedule = async (patientId: string) => {
+    if (!rescheduleDate) return;
+    setSavingRescheduleId(patientId);
+    try {
+      await rescheduleFollowUp(patientId, rescheduleDate);
+      await load();
+      setReschedulingId(null);
+    } finally {
+      setSavingRescheduleId(null);
+    }
+  };
+
+  // "Complete" a follow-up isn't a manual toggle -- a follow-up is only
+  // genuinely complete once the patient actually returns for a real
+  // consultation (see followUpIntelligenceService.ts's derivation logic).
+  // This starts that real consultation directly rather than faking
+  // completion without a clinical encounter behind it.
+  const handleCompleteViaConsultation = (patientId: string) => {
+    goToConsultation?.(patientId, "");
+  };
+
   const maxWorkload = useMemo(
     () => Math.max(1, ...(analytics?.dailyWorkload.map((d) => d.count) || [1])),
     [analytics]
@@ -159,7 +257,35 @@ export default function FollowUpPage({ onNavigate }: Props) {
     }));
   }, [history]);
 
-  const activeBucketEntries = activeBucket === "completed" ? completedEntries : buckets ? buckets[activeBucket] : [];
+  // Needing Review / Multiple Missed Visits / Never Returned are all
+  // derived from getIntelligentAlerts() (already fetched) rather than a
+  // second aggregation pass -- one alert per patient per type already,
+  // per followUpIntelligenceService.ts's own dedup logic.
+  const alertEntriesByTab = useMemo(() => {
+    const build = (type: IntelligentAlert["type"]): FollowUpBucketEntry[] =>
+      alerts
+        .filter((a) => a.type === type)
+        .map((a) => ({
+          patientId: a.patientId,
+          patientName: a.patientName,
+          phone: a.phone,
+          isChronic: type === "CHRONIC_OVERDUE",
+        }));
+    return {
+      needsReview: build(ALERT_TAB_TYPE.needsReview),
+      missedRecurring: build(ALERT_TAB_TYPE.missedRecurring),
+      neverReturned: build(ALERT_TAB_TYPE.neverReturned),
+    };
+  }, [alerts]);
+
+  const activeBucketEntries =
+    activeBucket === "completed"
+      ? completedEntries
+      : activeBucket === "needsReview" || activeBucket === "missedRecurring" || activeBucket === "neverReturned"
+      ? alertEntriesByTab[activeBucket]
+      : buckets
+      ? buckets[activeBucket]
+      : [];
 
   return (
     <div className="sakhi-page" data-testid="followups-page">
@@ -301,7 +427,15 @@ export default function FollowUpPage({ onNavigate }: Props) {
                     data-tone="brand"
                     onClick={() => setActiveBucket(key)}
                   >
-                    {BUCKET_LABELS[key]} ({key === "completed" ? completedEntries.length : buckets ? buckets[key].length : 0})
+                    {BUCKET_LABELS[key]} ({
+                      key === "completed"
+                        ? completedEntries.length
+                        : key === "needsReview" || key === "missedRecurring" || key === "neverReturned"
+                        ? alertEntriesByTab[key].length
+                        : buckets
+                        ? buckets[key].length
+                        : 0
+                    })
                   </button>
                 ))}
               </div>
@@ -371,6 +505,96 @@ export default function FollowUpPage({ onNavigate }: Props) {
                             </button>
                           )}
                         </div>
+
+                        <div className="sakhi-row" style={{ gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            data-testid={`followup-call-${entry.patientId}`}
+                            disabled={!entry.phone}
+                            onClick={() => handleCall(entry.phone)}
+                            className="sakhi-caption"
+                            style={{ background: "none", border: "none", padding: 0, display: "inline-flex", alignItems: "center", gap: 4, color: entry.phone ? "#0f172a" : "#cbd5e1", fontWeight: 700, cursor: entry.phone ? "pointer" : "default" }}
+                            aria-label={`Call ${entry.patientName}`}
+                          >
+                            <Phone size={12} /> Call
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`followup-whatsapp-${entry.patientId}`}
+                            disabled={!entry.phone}
+                            onClick={() => handleWhatsApp(entry)}
+                            className="sakhi-caption"
+                            style={{ background: "none", border: "none", padding: 0, display: "inline-flex", alignItems: "center", gap: 4, color: entry.phone ? "#16a34a" : "#cbd5e1", fontWeight: 700, cursor: entry.phone ? "pointer" : "default" }}
+                            aria-label={`WhatsApp ${entry.patientName}`}
+                          >
+                            <MessageCircle size={12} /> WhatsApp
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`followup-remind-${entry.patientId}`}
+                            disabled={!entry.phone || sendingReminderId === entry.patientId}
+                            onClick={() => handleSendReminder(entry)}
+                            className="sakhi-caption"
+                            style={{ background: "none", border: "none", padding: 0, display: "inline-flex", alignItems: "center", gap: 4, color: entry.phone ? "#7c3aed" : "#cbd5e1", fontWeight: 700, cursor: entry.phone && sendingReminderId !== entry.patientId ? "pointer" : "default", opacity: sendingReminderId === entry.patientId ? 0.6 : 1 }}
+                            aria-label={`Queue a reminder for ${entry.patientName}`}
+                          >
+                            <BellRing size={12} /> {sendingReminderId === entry.patientId ? "Queuing…" : "Send Reminder"}
+                          </button>
+                          {CANCELLABLE_BUCKETS.has(activeBucket) && (
+                            <button
+                              type="button"
+                              data-testid={`followup-reschedule-${entry.patientId}`}
+                              onClick={() => startReschedule(entry.patientId, entry.nextFollowUpDate)}
+                              className="sakhi-caption"
+                              style={{ background: "none", border: "none", padding: 0, display: "inline-flex", alignItems: "center", gap: 4, color: "#0d7377", fontWeight: 700, cursor: "pointer" }}
+                              aria-label={`Reschedule follow-up for ${entry.patientName}`}
+                            >
+                              <CalendarDays size={12} /> Reschedule
+                            </button>
+                          )}
+                          {goToConsultation && (
+                            <button
+                              type="button"
+                              data-testid={`followup-complete-${entry.patientId}`}
+                              onClick={() => handleCompleteViaConsultation(entry.patientId)}
+                              className="sakhi-caption"
+                              style={{ background: "none", border: "none", padding: 0, display: "inline-flex", alignItems: "center", gap: 4, color: "#059669", fontWeight: 700, cursor: "pointer" }}
+                              aria-label={`Start consultation to complete follow-up for ${entry.patientName}`}
+                            >
+                              <Stethoscope size={12} /> Complete
+                            </button>
+                          )}
+                        </div>
+
+                        {reschedulingId === entry.patientId && (
+                          <div className="sakhi-row" style={{ gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+                            <input
+                              type="date"
+                              data-testid={`followup-reschedule-date-${entry.patientId}`}
+                              value={rescheduleDate}
+                              onChange={(e) => setRescheduleDate(e.target.value)}
+                              className="sakhi-input"
+                              style={{ width: 150, height: 36, fontSize: 12 }}
+                            />
+                            <button
+                              type="button"
+                              disabled={savingRescheduleId === entry.patientId}
+                              onClick={() => handleSaveReschedule(entry.patientId)}
+                              className="sakhi-caption"
+                              style={{ background: "#0d7377", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontWeight: 800, cursor: "pointer" }}
+                            >
+                              {savingRescheduleId === entry.patientId ? "Saving…" : "Save new date"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setReschedulingId(null)}
+                              className="sakhi-caption"
+                              style={{ background: "none", border: "none", padding: "8px 4px", color: "#64748b", fontWeight: 700, cursor: "pointer" }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
 
                         {isExpanded && (
                           <div className="sakhi-stack-tight" style={{ marginTop: "var(--space-2)", paddingTop: "var(--space-2)", borderTop: "1px solid rgba(226,232,240,0.95)" }}>

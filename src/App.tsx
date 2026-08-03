@@ -202,7 +202,7 @@ export default function App() {
       )}
       {page === "revenue" && <RevenuePage onNavigate={setPage} />}
       {page === "settings" && <SettingsPage />}
-      {page === "followups" && <FollowUpPage onNavigate={setPage} />}
+      {page === "followups" && <FollowUpPage onNavigate={setPage} goToConsultation={goToConsultation} />}
       {page === "reminders" && <RemindersPage />}
       </AppShell>
     </>
