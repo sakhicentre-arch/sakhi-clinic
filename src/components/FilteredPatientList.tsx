@@ -19,8 +19,8 @@
  * rather than a second, parallel selectable-list component.
  */
 
-import { useState } from "react";
-import { ArrowLeft, MessageCircle } from "lucide-react";
+import { useMemo, useState } from "react";
+import { ArrowLeft, MessageCircle, Search } from "lucide-react";
 import { MobileCard, MobileSection, ResponsiveContainer } from "./layout/ResponsivePrimitives";
 
 export interface FilteredListEntry {
@@ -42,6 +42,11 @@ export interface FilteredPatientListProps {
   onBack: () => void;
   selectable?: boolean;
   onSendReminders?: (patientIds: string[]) => void;
+  /** Client-side name filter over the already-fetched `entries` -- the
+   * caller still owns what "belongs on this list" (Payment Dashboard,
+   * Follow-up drill-downs, etc.); this only narrows within that set, no
+   * new data-access logic. */
+  searchable?: boolean;
 }
 
 export default function FilteredPatientList({
@@ -54,8 +59,16 @@ export default function FilteredPatientList({
   onBack,
   selectable,
   onSendReminders,
+  searchable,
 }: FilteredPatientListProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState("");
+
+  const visibleEntries = useMemo(() => {
+    if (!searchable || !query.trim()) return entries;
+    const q = query.trim().toLowerCase();
+    return entries.filter((e) => e.name.toLowerCase().includes(q));
+  }, [entries, searchable, query]);
 
   const toggle = (patientId: string) => {
     setSelected((prev) => {
@@ -86,8 +99,21 @@ export default function FilteredPatientList({
         <ResponsiveContainer>
           <MobileSection>
             <MobileCard>
+              {searchable && (
+                <div className="sakhi-row" style={{ gap: 8, alignItems: "center", marginBottom: "var(--space-2)", padding: "0 var(--space-2)", border: "1px solid var(--border, #e2e8f0)", borderRadius: "var(--radius-2)", height: 44 }}>
+                  <Search size={15} color="#94a3b8" />
+                  <input
+                    type="text"
+                    data-testid="filtered-list-search"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search by name…"
+                    style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 14 }}
+                  />
+                </div>
+              )}
               <div className="sakhi-row" style={{ justifyContent: "space-between", marginBottom: "var(--space-3)" }}>
-                <span className="sakhi-caption">{entries.length} patient{entries.length === 1 ? "" : "s"}</span>
+                <span className="sakhi-caption">{visibleEntries.length} patient{visibleEntries.length === 1 ? "" : "s"}</span>
                 {selectable && selected.size > 0 && onSendReminders && (
                   <button
                     type="button"
@@ -104,10 +130,10 @@ export default function FilteredPatientList({
               <div className="sakhi-progress-rail">
                 {loading ? (
                   <div className="sakhi-caption">Loading…</div>
-                ) : entries.length === 0 ? (
-                  <div className="sakhi-caption">{emptyMessage}</div>
+                ) : visibleEntries.length === 0 ? (
+                  <div className="sakhi-caption">{entries.length > 0 ? "No patients match your search." : emptyMessage}</div>
                 ) : (
-                  entries.map((entry) => (
+                  visibleEntries.map((entry) => (
                     <div key={entry.patientId} className="sakhi-progress-card" style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       {selectable && (
                         <input

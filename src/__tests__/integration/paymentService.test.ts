@@ -319,4 +319,48 @@ describe("paymentService", () => {
       expect(await svc.getRecentPayments()).toEqual([]);
     });
   });
+
+  describe("getPaymentHistoryInRange", () => {
+    it("includes only consultations with a fee whose date falls within the inclusive range", async () => {
+      await seedPatient("p1", "Asha");
+      await seedConsultation({ id: "before", patientId: "p1", date: isoOnLocalDay(2026, 0, 4), fee: 500 });
+      await seedConsultation({ id: "start-boundary", patientId: "p1", date: isoOnLocalDay(2026, 0, 5), fee: 500 });
+      await seedConsultation({ id: "middle", patientId: "p1", date: isoOnLocalDay(2026, 0, 7), fee: 500 });
+      await seedConsultation({ id: "end-boundary", patientId: "p1", date: isoOnLocalDay(2026, 0, 10), fee: 500 });
+      await seedConsultation({ id: "after", patientId: "p1", date: isoOnLocalDay(2026, 0, 11), fee: 500 });
+      await seedConsultation({ id: "no-fee", patientId: "p1", date: isoOnLocalDay(2026, 0, 7), fee: 0 });
+
+      const history = await svc.getPaymentHistoryInRange("2026-01-05", "2026-01-10");
+      expect(history.map((h) => h.consultationId).sort()).toEqual(["end-boundary", "middle", "start-boundary"]);
+    });
+
+    it("resolves patient names and includes the payment reference number", async () => {
+      await seedPatient("p1", "Chandni");
+      await seedConsultation({
+        id: "c1", patientId: "p1", date: isoOnLocalDay(2026, 0, 6), fee: 500,
+        paymentStatus: "paid", amountReceived: 500,
+      });
+      await db.consultations.update("c1", { paymentReferenceNumber: "UPI-123" } as any);
+
+      const [entry] = await svc.getPaymentHistoryInRange("2026-01-01", "2026-01-31");
+      expect(entry.patientName).toBe("Chandni");
+      expect(entry.paymentReferenceNumber).toBe("UPI-123");
+      expect(entry.amountReceived).toBe(500);
+    });
+
+    it("respects clinicId scoping the same way getPaymentSummary does", async () => {
+      await seedPatient("p1", "Asha");
+      await seedConsultation({ id: "c1", patientId: "p1", date: isoOnLocalDay(2026, 0, 6), fee: 500, clinicId: "Dabholi" });
+      await seedConsultation({ id: "c2", patientId: "p1", date: isoOnLocalDay(2026, 0, 6), fee: 500, clinicId: "City Light" });
+
+      const dabholiOnly = await svc.getPaymentHistoryInRange("2026-01-01", "2026-01-31", "Dabholi");
+      expect(dabholiOnly.map((h) => h.consultationId)).toEqual(["c1"]);
+    });
+
+    it("returns an empty array for a range with no matching consultations", async () => {
+      await seedPatient("p1", "Asha");
+      await seedConsultation({ id: "c1", patientId: "p1", date: isoOnLocalDay(2026, 0, 6), fee: 500 });
+      expect(await svc.getPaymentHistoryInRange("2026-02-01", "2026-02-28")).toEqual([]);
+    });
+  });
 });

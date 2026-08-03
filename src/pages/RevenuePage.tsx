@@ -21,11 +21,15 @@ import {
   getPaymentSummary,
   getOutstandingPatients,
   getPaymentDashboardDrilldowns,
+  getPaymentHistoryInRange,
   PaymentSummary,
   OutstandingPatientEntry,
   PaymentPatientRef,
+  PaymentHistoryEntry,
 } from "../services/paymentService";
 import { enqueueReminder, hasActiveReminder } from "../services/reminderQueueService";
+import { exportPaymentsCsv } from "../services/csvExportService";
+import { Download, Search } from "lucide-react";
 
 interface Props {
   onNavigate?: (page: ActivePage) => void;
@@ -84,6 +88,19 @@ export default function RevenuePage({ onNavigate }: Props) {
   } | null>(null);
   const [activeCardKey, setActiveCardKey] = useState<PaymentCardKey | null>(null);
 
+  // Payment Workflow completion: date-range history + search, separate
+  // from the five fixed cards above (today/this-month/all-time-outstanding
+  // buckets) -- a doctor picking a custom range needs getPaymentHistoryInRange,
+  // not a widened version of getPaymentSummary's fixed buckets.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const thirtyDaysAgoIso = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const [rangeStart, setRangeStart] = useState(thirtyDaysAgoIso);
+  const [rangeEnd, setRangeEnd] = useState(todayIso);
+  const [rangeHistory, setRangeHistory] = useState<PaymentHistoryEntry[]>([]);
+  const [rangeLoading, setRangeLoading] = useState(true);
+  const [historySearch, setHistorySearch] = useState("");
+  const [exporting, setExporting] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -110,6 +127,38 @@ export default function RevenuePage({ onNavigate }: Props) {
       cancelled = true;
     };
   }, [activeClinic]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setRangeLoading(true);
+      try {
+        const clinicId = activeClinic === "All" ? undefined : activeClinic;
+        const history = await getPaymentHistoryInRange(rangeStart, rangeEnd, clinicId);
+        if (!cancelled) setRangeHistory(history);
+      } catch (err) {
+        console.error("[RevenuePage] Failed to load payment history range:", err);
+      } finally {
+        if (!cancelled) setRangeLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [rangeStart, rangeEnd, activeClinic]);
+
+  const visibleHistory = historySearch.trim()
+    ? rangeHistory.filter((h) => h.patientName.toLowerCase().includes(historySearch.trim().toLowerCase()))
+    : rangeHistory;
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await exportPaymentsCsv();
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const activeEntries: FilteredListEntry[] =
     activeCardKey === "outstanding"
@@ -164,6 +213,7 @@ export default function RevenuePage({ onNavigate }: Props) {
         onBack={() => setActiveCardKey(null)}
         selectable={activeCardKey === "outstanding" || activeCardKey === "pendingCollectionToday"}
         onSendReminders={handleSendReminders}
+        searchable
       />
     );
   }
@@ -176,16 +226,28 @@ export default function RevenuePage({ onNavigate }: Props) {
             <div className="sakhi-title">Payment Dashboard</div>
             <div className="sakhi-caption" style={{ marginTop: 4 }}>Every card opens the patients behind it</div>
           </div>
-          <select
-            value={activeClinic}
-            onChange={(e) => setActiveClinic(e.target.value)}
-            className="sakhi-input"
-            style={{ width: 170, height: 44 }}
-          >
-            <option value="All">All Branches</option>
-            <option value="Dabholi">Dabholi</option>
-            <option value="City Light">City Light</option>
-          </select>
+          <div className="sakhi-row" style={{ gap: 8 }}>
+            <select
+              value={activeClinic}
+              onChange={(e) => setActiveClinic(e.target.value)}
+              className="sakhi-input"
+              style={{ width: 170, height: 44 }}
+            >
+              <option value="All">All Branches</option>
+              <option value="Dabholi">Dabholi</option>
+              <option value="City Light">City Light</option>
+            </select>
+            <button
+              type="button"
+              data-testid="revenue-export-csv"
+              disabled={exporting}
+              onClick={handleExport}
+              className="sakhi-btn-secondary sakhi-tap sakhi-focus-ring"
+              style={{ height: 44, width: "auto", padding: "0 16px", display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              <Download size={15} /> {exporting ? "Exporting…" : "Export CSV"}
+            </button>
+          </div>
         </header>
 
         <ResponsiveContainer>
@@ -215,6 +277,87 @@ export default function RevenuePage({ onNavigate }: Props) {
                   </button>
                 ))}
               </div>
+            </MobileCard>
+
+            {/* Payment History: date-range filter + search, separate from
+                the fixed cards above -- getPaymentHistoryInRange, not a
+                widened getPaymentSummary bucket. */}
+            <MobileCard style={{ marginTop: "var(--space-3)" }}>
+              <div className="sakhi-row" style={{ justifyContent: "space-between", marginBottom: "var(--space-2)" }}>
+                <div className="sakhi-body" style={{ fontWeight: 950 }}>Payment History</div>
+                <span className="sakhi-caption">{visibleHistory.length} record{visibleHistory.length === 1 ? "" : "s"}</span>
+              </div>
+
+              <div className="sakhi-row" style={{ gap: 8, flexWrap: "wrap", marginBottom: "var(--space-2)" }}>
+                <input
+                  type="date"
+                  data-testid="revenue-range-start"
+                  value={rangeStart}
+                  max={rangeEnd}
+                  onChange={(e) => setRangeStart(e.target.value)}
+                  className="sakhi-input"
+                  style={{ height: 40, width: 150, fontSize: 13 }}
+                />
+                <span className="sakhi-caption" style={{ alignSelf: "center" }}>to</span>
+                <input
+                  type="date"
+                  data-testid="revenue-range-end"
+                  value={rangeEnd}
+                  min={rangeStart}
+                  max={todayIso}
+                  onChange={(e) => setRangeEnd(e.target.value)}
+                  className="sakhi-input"
+                  style={{ height: 40, width: 150, fontSize: 13 }}
+                />
+              </div>
+
+              <div className="sakhi-row" style={{ gap: 8, alignItems: "center", marginBottom: "var(--space-3)", padding: "0 var(--space-2)", border: "1px solid var(--border, #e2e8f0)", borderRadius: "var(--radius-2)", height: 40 }}>
+                <Search size={14} color="#94a3b8" />
+                <input
+                  type="text"
+                  data-testid="revenue-history-search"
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
+                  placeholder="Search by patient name…"
+                  style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 13 }}
+                />
+              </div>
+
+              {rangeLoading ? (
+                <div className="sakhi-caption">Loading…</div>
+              ) : visibleHistory.length === 0 ? (
+                <div className="sakhi-caption">No payment records in this range.</div>
+              ) : (
+                <div style={{ maxHeight: 320, overflowY: "auto" }}>
+                  <table width="100%" style={{ borderCollapse: "collapse" }}>
+                    <thead style={{ position: "sticky", top: 0, background: "#fff" }}>
+                      <tr style={{ textAlign: "left", fontSize: 11, color: "#94a3b8" }}>
+                        <th style={{ padding: "8px" }}>Date</th>
+                        <th style={{ padding: "8px" }}>Patient</th>
+                        <th style={{ padding: "8px" }}>Fee</th>
+                        <th style={{ padding: "8px" }}>Received</th>
+                        <th style={{ padding: "8px" }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleHistory.map((h) => (
+                        <tr
+                          key={h.consultationId}
+                          data-testid={`revenue-history-row-${h.consultationId}`}
+                          onClick={() => handleSelectPatient(h.patientId)}
+                          style={{ borderTop: "1px solid #f1f5f9", cursor: "pointer", fontSize: 13 }}
+                        >
+                          <td style={{ padding: "8px" }}>{new Date(h.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</td>
+                          <td style={{ padding: "8px", fontWeight: 700 }}>{h.patientName}</td>
+                          <td style={{ padding: "8px" }}>₹{h.fee.toLocaleString("en-IN")}</td>
+                          <td style={{ padding: "8px", color: h.amountReceived >= h.fee ? "#16a34a" : "#d97706" }}>₹{h.amountReceived.toLocaleString("en-IN")}</td>
+                          <td style={{ padding: "8px" }}>{h.paymentStatus || "pending"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </MobileCard>
           </MobileSection>
         </ResponsiveContainer>

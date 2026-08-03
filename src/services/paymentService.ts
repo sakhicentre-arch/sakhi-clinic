@@ -26,7 +26,7 @@
 import { db, Consultation, PaymentStatus, PaymentMode } from "./db";
 import { getAllConsultations, saveConsultation } from "./consultationService";
 import { patientRepository } from "../repositories/patientRepository";
-import { isSameLocalDay, isSameLocalMonth } from "../utils/dateOnly";
+import { isSameLocalDay, isSameLocalMonth, parseDateOnly, startOfDay } from "../utils/dateOnly";
 
 const formatMoney = (amount: number): string => `₹${Math.round(amount).toLocaleString("en-IN")}`;
 
@@ -192,6 +192,60 @@ export async function getPaymentSummary(referenceDate: Date = new Date(), clinic
     pendingPaymentsCount,
     outstandingAmount,
   };
+}
+
+export interface PaymentHistoryEntry {
+  consultationId: string;
+  patientId: string;
+  patientName: string;
+  date: string;
+  fee: number;
+  amountReceived: number;
+  paymentStatus?: PaymentStatus;
+  paymentMode?: PaymentMode;
+  paymentReferenceNumber?: string;
+}
+
+/** Payment Dashboard's date-range filter -- consultations with a fee,
+ * inclusive of both ends, filtered by the consultation's own date (not
+ * paymentDate, so a doctor filtering "last week" sees every visit billed
+ * that week, matching how the fixed billedToday/collectedToday cards
+ * already key off consultation date for "billed" and paymentDate only
+ * for "collected"). clinicId matches getPaymentSummary's own optional
+ * scoping. */
+export async function getPaymentHistoryInRange(
+  startDate: string,
+  endDate: string,
+  clinicId?: string
+): Promise<PaymentHistoryEntry[]> {
+  const [consultations, patients] = await Promise.all([
+    getAllConsultations(),
+    patientRepository.list(),
+  ]);
+  const patientById = new Map(patients.map((p) => [p.id, p]));
+  const start = startOfDay(parseDateOnly(startDate));
+  const end = startOfDay(parseDateOnly(endDate));
+
+  return consultations
+    .filter((c) => {
+      if (!c.fee || c.fee <= 0) return false;
+      if (clinicId && c.clinicId !== clinicId) return false;
+      if (!c.date) return false;
+      const d = startOfDay(new Date(c.date));
+      return d.getTime() >= start.getTime() && d.getTime() <= end.getTime();
+    })
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+    .map((c) => ({
+      consultationId: c.id,
+      patientId: c.patientId,
+      patientName: patientById.get(c.patientId)?.name || "Unknown Patient",
+      date: c.date,
+      fee: c.fee || 0,
+      amountReceived: c.amountReceived || 0,
+      paymentStatus: c.paymentStatus,
+      paymentMode: c.paymentMode,
+      paymentReferenceNumber: c.paymentReferenceNumber,
+    }));
 }
 
 export interface OutstandingPatientEntry {

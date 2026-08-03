@@ -1,6 +1,7 @@
 import type { Appointment, Consultation, Patient } from "./db";
 import { db } from "./db";
 import { logOperationalEvent } from "./operationalEventLogService";
+import { patientRepository } from "../repositories/patientRepository";
 
 function escapeCsvCell(value: any): string {
   const s = String(value ?? "");
@@ -78,5 +79,41 @@ export async function exportConsultationSummaryCsv(): Promise<void> {
   ];
   downloadCsv(rowsToCsv(rows), `sakhi-consultations-${stamp()}.csv`);
   await logOperationalEvent({ level: "info", type: "csv.consultations.export.success", message: "Consultation summary CSV export completed", data: { count: consultations.length } }).catch(() => {});
+}
+
+/** Payment Workflow completion: every consultation with a fee, including
+ * the reference/notes fields the Patient Ledger already renders (see
+ * PatientPage.tsx) -- reuses the same payment fields paymentService.ts
+ * defines rather than recomputing "outstanding" independently here. */
+export async function exportPaymentsCsv(): Promise<void> {
+  const startedAt = new Date().toISOString();
+  await logOperationalEvent({ level: "info", type: "csv.payments.export.start", message: "Payment CSV export started", timestamp: startedAt }).catch(() => {});
+  const [consultations, patients] = await Promise.all([
+    db.consultations.filter((c) => !(c as any).deletedAt && (c.fee || 0) > 0).toArray(),
+    patientRepository.list(),
+  ]);
+  const patientById = new Map(patients.map((p) => [p.id, p]));
+  const rows = [
+    ["date", "patientName", "clinicId", "fee", "amountReceived", "outstanding", "paymentStatus", "paymentMode", "paymentDate", "paymentReferenceNumber", "paymentNotes"],
+    ...consultations.map((c: Consultation) => {
+      const fee = c.fee || 0;
+      const received = c.amountReceived || 0;
+      return [
+        c.date || "",
+        patientById.get(c.patientId)?.name || "Unknown Patient",
+        (c as any).clinicId || "",
+        fee,
+        received,
+        Math.max(0, fee - received),
+        c.paymentStatus || "pending",
+        c.paymentMode || "",
+        c.paymentDate || "",
+        c.paymentReferenceNumber || "",
+        c.paymentNotes || "",
+      ];
+    }),
+  ];
+  downloadCsv(rowsToCsv(rows), `sakhi-payments-${stamp()}.csv`);
+  await logOperationalEvent({ level: "info", type: "csv.payments.export.success", message: "Payment CSV export completed", data: { count: consultations.length } }).catch(() => {});
 }
 
