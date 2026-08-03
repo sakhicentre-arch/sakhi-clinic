@@ -653,6 +653,7 @@ export default function PatientPage(
     async (consultation: PatientPageConsultation) => {
       if (!selectedPatient || !consultation.id) return;
       setSendingReceiptId(consultation.id);
+      setActionNoteForReceipt("");
       try {
         const alreadyQueued = await hasActiveReminder(String(selectedPatient.id), "custom");
         if (alreadyQueued) {
@@ -669,6 +670,9 @@ export default function PatientPage(
           sourceRef: `payment-receipt:${consultation.id}`,
         });
         props.onNavigate?.("reminders");
+      } catch (error) {
+        console.error("Error queuing payment receipt:", error);
+        setActionNoteForReceipt("Couldn't queue the receipt. Please try again.");
       } finally {
         setSendingReceiptId(null);
       }

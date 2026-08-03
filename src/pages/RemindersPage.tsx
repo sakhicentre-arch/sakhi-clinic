@@ -86,6 +86,7 @@ export default function RemindersPage() {
   const [composeRecipients, setComposeRecipients] = useState<{ id: string; name: string; phone?: string }[]>([]);
   const [composeMessage, setComposeMessage] = useState("");
   const [composeQueuing, setComposeQueuing] = useState(false);
+  const [composeError, setComposeError] = useState("");
   const allPatients = usePatientStore((s) => s.patients);
 
   const load = async (tab: ReminderStatus = activeTab) => {
@@ -129,6 +130,7 @@ export default function RemindersPage() {
   };
 
   const handleSaveEdit = async (id: string) => {
+    if (!editDraft.trim()) return;
     setSavingEditId(id);
     try {
       await updateReminderMessage(id, editDraft);
@@ -145,11 +147,24 @@ export default function RemindersPage() {
   // window per message) doesn't get hit with a burst of calls at once.
   const handleBulkAction = async (action: (id: string) => Promise<unknown>) => {
     setBulkBusy(true);
+    setActionNote("");
     try {
       const ids = Array.from(selectedIds);
+      let succeeded = 0;
+      let firstError: unknown = null;
       for (let i = 0; i < ids.length; i++) {
         if (i > 0) await delay(BULK_STAGGER_MS);
-        await action(ids[i]);
+        try {
+          await action(ids[i]);
+          succeeded++;
+        } catch (err) {
+          firstError = firstError ?? err;
+        }
+      }
+      if (firstError) {
+        setActionNote(
+          `${succeeded} of ${ids.length} completed; ${ids.length - succeeded} failed. First error: ${firstError instanceof Error ? firstError.message : String(firstError)}`
+        );
       }
       setSelectedIds(new Set());
       await load(activeTab);
@@ -203,18 +218,32 @@ export default function RemindersPage() {
   const handleQueueBulkMessage = async () => {
     if (!composeMessage.trim() || composeRecipients.length === 0) return;
     setComposeQueuing(true);
+    setComposeError("");
     try {
       const sourceRef = `bulk:${Date.now()}`;
+      let succeeded = 0;
+      let firstError: unknown = null;
       for (const recipient of composeRecipients) {
-        await enqueueReminder({
-          patientId: recipient.id,
-          patientName: recipient.name,
-          phone: recipient.phone,
-          type: "custom",
-          message: buildBulkMessage(composeMessage.trim()),
-          dueAt: new Date().toISOString(),
-          sourceRef,
-        });
+        try {
+          await enqueueReminder({
+            patientId: recipient.id,
+            patientName: recipient.name,
+            phone: recipient.phone,
+            type: "custom",
+            message: buildBulkMessage(composeMessage.trim()),
+            dueAt: new Date().toISOString(),
+            sourceRef,
+          });
+          succeeded++;
+        } catch (err) {
+          firstError = firstError ?? err;
+        }
+      }
+      if (firstError) {
+        setComposeError(
+          `Queued ${succeeded} of ${composeRecipients.length}. First error: ${firstError instanceof Error ? firstError.message : String(firstError)}`
+        );
+        return;
       }
       setComposeStep("closed");
       setComposeRecipients([]);
@@ -274,6 +303,11 @@ export default function RemindersPage() {
                 <div className="sakhi-caption" style={{ marginTop: 8 }}>
                   Each message is queued individually for your review -- nothing sends until you approve it in the Pending tab, same as any other reminder.
                 </div>
+                {composeError && (
+                  <div className="sakhi-caption" data-testid="bulk-message-error" style={{ marginTop: 8, color: "#b91c1c", fontWeight: 800 }}>
+                    {composeError}
+                  </div>
+                )}
                 <button
                   type="button"
                   data-testid="bulk-message-queue"
@@ -455,7 +489,7 @@ export default function RemindersPage() {
                           <div className="sakhi-row" style={{ gap: 8, marginTop: 6 }}>
                             <button
                               type="button"
-                              disabled={savingEditId === r.id}
+                              disabled={savingEditId === r.id || !editDraft.trim()}
                               onClick={() => handleSaveEdit(r.id)}
                               className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring"
                               style={{ minHeight: 36, width: "auto", padding: "0 12px" }}

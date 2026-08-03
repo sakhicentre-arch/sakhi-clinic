@@ -96,6 +96,12 @@ export async function exportClinicBundle(): Promise<ClinicExportBundleV2> {
           "sakhi.remedyDefaults.v1",
           "sakhi_followups",
           "sakhi.remedyComposer.autoAdvance.v1",
+          // Doctor Productivity: pinned-favorite remedies and per-patient
+          // quick notes are localStorage, same as the keys above -- without
+          // this they'd silently vanish on backup/restore instead of
+          // round-tripping like every other localStorage feature.
+          "sakhi.favoriteMedicines.v1",
+          "sakhi.quickNotes.v1",
         ];
         const out: Record<string, string> = {};
         keys.forEach((k) => {

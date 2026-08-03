@@ -155,6 +155,9 @@ export default function RevenuePage({ onNavigate }: Props) {
     setExporting(true);
     try {
       await exportPaymentsCsv();
+    } catch (err) {
+      console.error("[RevenuePage] CSV export failed:", err);
+      alert("Couldn't export the CSV. Please try again.");
     } finally {
       setExporting(false);
     }

@@ -127,9 +127,14 @@ describe("Doctor Productivity: pinned patients + quick notes + command palette",
     await vi.waitFor(async () => {
       const patient = await db.patients.get("p1");
       expect(patient?.pinned).toBe(true);
-    });
-    await screen.findByTestId("patient-pin-toggle-p1");
-    expect(await screen.findByTestId("patient-pin-toggle-p1")).toHaveAttribute("aria-label", "Unpin patient");
+    }, { timeout: 5000 });
+    // findByTestId only waits for the element to EXIST, not for its
+    // attributes to change -- the button persists across the re-render
+    // (same DOM node), so it resolves instantly with whatever aria-label
+    // it has at that moment. Poll the attribute itself instead.
+    await vi.waitFor(() => {
+      expect(screen.getByTestId("patient-pin-toggle-p1")).toHaveAttribute("aria-label", "Unpin patient");
+    }, { timeout: 5000 });
   });
 
   it("saves a Quick Note for the selected patient and reloads it on reselect", async () => {

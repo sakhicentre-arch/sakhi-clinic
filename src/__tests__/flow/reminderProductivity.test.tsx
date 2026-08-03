@@ -10,6 +10,7 @@ import { useConsultationStore } from "../../store/useConsultationStore";
 import { useAppointmentStore } from "../../store/useAppointmentStore";
 import { useQueueStore } from "../../store/queueStore";
 import { useUIStore } from "../../store/uiStore";
+import * as reminderQueueService from "../../services/reminderQueueService";
 
 /**
  * Doctor Workflow Completion, item 3: RemindersPage.tsx already had
@@ -155,5 +156,41 @@ describe("Reminder Productivity: edit and bulk actions", () => {
     const r5 = await db.reminderQueue.get("R5");
     expect(r4?.status).toBe("sent");
     expect(r5?.status).toBe("sent");
+  }, 10000);
+
+  it("blocks Save on an edited reminder whose message has been cleared to blank", async () => {
+    await seedReminder({ id: "R6", patientName: "Blank Edit Patient", status: "pending" });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /reminders/i }));
+    await screen.findByTestId("reminders-page");
+
+    fireEvent.click(await screen.findByTestId("reminder-edit-R6"));
+    const textarea = await screen.findByTestId("reminder-edit-textarea-R6");
+    fireEvent.change(textarea, { target: { value: "   " } });
+
+    expect(screen.getByText("Save")).toBeDisabled();
+    const stored = await db.reminderQueue.get("R6");
+    expect(stored?.message).toBe("Original message for Blank Edit Patient"); // unchanged
+  });
+
+  it("surfaces a partial-failure note when a bulk action fails partway through", async () => {
+    await seedReminder({ id: "R7", patientName: "Bulk Fail A", status: "pending" });
+    await seedReminder({ id: "R8", patientName: "Bulk Fail B", status: "pending" });
+
+    const spy = vi.spyOn(reminderQueueService, "approveReminder").mockImplementation(async (id: string) => {
+      if (id === "R8") throw new Error("simulated write failure");
+      return db.reminderQueue.get(id) as any;
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /reminders/i }));
+    await screen.findByTestId("reminders-page");
+
+    fireEvent.click(await screen.findByTestId("reminders-select-all"));
+    fireEvent.click(await screen.findByTestId("reminders-bulk-action"));
+
+    await screen.findByText(/1 of 2 completed; 1 failed/, {}, { timeout: 5000 });
+    spy.mockRestore();
   }, 10000);
 });
