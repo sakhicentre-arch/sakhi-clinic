@@ -16,12 +16,21 @@ import {
   Ban,
   History as HistoryIcon,
   TrendingUp,
+  Pencil,
 } from "lucide-react";
 import { MobileCard, MobileSection, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
 import { ReminderQueueEntry, ReminderStatus } from "../services/db";
-import { listRemindersByStatus, approveReminder, rejectReminder, cancelReminder } from "../services/reminderQueueService";
+import { listRemindersByStatus, approveReminder, rejectReminder, cancelReminder, updateReminderMessage } from "../services/reminderQueueService";
 import { sendReminder, resendReminder } from "../services/reminderDeliveryService";
 import { getReminderAnalytics, ReminderAnalytics } from "../services/reminderAnalyticsService";
+
+// Small stagger between bulk WhatsApp opens -- mirrors AppointmentPage.tsx's
+// existing bulk-reminder pattern (index * 2500ms) so popup blockers/WhatsApp
+// itself never see a burst of near-simultaneous window.open() calls.
+const BULK_STAGGER_MS = 1200;
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 const TAB_ORDER: ReminderStatus[] = ["pending", "approved", "sent", "failed", "cancelled", "rejected"];
 const TAB_LABELS: Record<ReminderStatus, string> = {
@@ -51,6 +60,11 @@ export default function RemindersPage() {
   const [analytics, setAnalytics] = useState<ReminderAnalytics | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionNote, setActionNote] = useState<string>("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<string>("");
+  const [savingEditId, setSavingEditId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = async (tab: ReminderStatus = activeTab) => {
     setLoading(true);
@@ -73,9 +87,54 @@ export default function RemindersPage() {
   };
 
   useEffect(() => {
+    setSelectedIds(new Set());
     void load(activeTab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const startEdit = (r: ReminderQueueEntry) => {
+    setEditingId(r.id);
+    setEditDraft(r.message);
+  };
+
+  const handleSaveEdit = async (id: string) => {
+    setSavingEditId(id);
+    try {
+      await updateReminderMessage(id, editDraft);
+      setEditingId(null);
+      await load(activeTab);
+    } finally {
+      setSavingEditId(null);
+    }
+  };
+
+  // Bulk approve (pending tab) / bulk send (approved tab) -- both reuse the
+  // exact same single-item functions the per-row buttons already call, just
+  // looped with a stagger so WhatsApp's own send flow (sendReminder opens a
+  // window per message) doesn't get hit with a burst of calls at once.
+  const handleBulkAction = async (action: (id: string) => Promise<unknown>) => {
+    setBulkBusy(true);
+    try {
+      const ids = Array.from(selectedIds);
+      for (let i = 0; i < ids.length; i++) {
+        if (i > 0) await delay(BULK_STAGGER_MS);
+        await action(ids[i]);
+      }
+      setSelectedIds(new Set());
+      await load(activeTab);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   const runAction = async (id: string, action: () => Promise<unknown>, note?: string) => {
     setBusyId(id);
@@ -183,6 +242,38 @@ export default function RemindersPage() {
                 </div>
               )}
 
+              {(activeTab === "pending" || activeTab === "approved") && reminders.length > 0 && (
+                <div className="sakhi-row" style={{ gap: 10, marginTop: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    data-testid="reminders-select-all"
+                    onClick={() => setSelectedIds(selectedIds.size === reminders.length ? new Set() : new Set(reminders.map((r) => r.id)))}
+                    className="sakhi-caption"
+                    style={{ background: "none", border: "none", padding: 0, color: "#0d7377", fontWeight: 800, cursor: "pointer" }}
+                  >
+                    {selectedIds.size === reminders.length ? "Deselect all" : "Select all"}
+                  </button>
+                  {selectedIds.size > 0 && (
+                    <button
+                      type="button"
+                      data-testid="reminders-bulk-action"
+                      disabled={bulkBusy}
+                      onClick={() =>
+                        handleBulkAction(activeTab === "pending" ? (id) => approveReminder(id) : (id) => sendReminder(id))
+                      }
+                      className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring"
+                      style={{ minHeight: 36, width: "auto", padding: "0 14px" }}
+                    >
+                      {bulkBusy
+                        ? "Working…"
+                        : activeTab === "pending"
+                        ? `Approve ${selectedIds.size} selected`
+                        : `Send ${selectedIds.size} selected`}
+                    </button>
+                  )}
+                </div>
+              )}
+
               <div className="sakhi-progress-rail" style={{ marginTop: "var(--space-3)" }}>
                 {loading ? (
                   <div className="sakhi-caption">Loading…</div>
@@ -193,16 +284,68 @@ export default function RemindersPage() {
                     <div key={r.id} className="sakhi-progress-card">
                       <div className="sakhi-progress-title">
                         <div className="sakhi-progress-title-left">
+                          {(r.status === "pending" || r.status === "approved") && (
+                            <input
+                              type="checkbox"
+                              data-testid={`reminder-select-${r.id}`}
+                              checked={selectedIds.has(r.id)}
+                              onChange={() => toggleSelected(r.id)}
+                              aria-label={`Select reminder for ${r.patientName}`}
+                              style={{ width: 16, height: 16, cursor: "pointer" }}
+                            />
+                          )}
                           <span className="sakhi-body" style={{ fontSize: 13, fontWeight: 950, color: "#0f172a" }}>{r.patientName}</span>
                           <span className="sakhi-pill" data-tone="muted">{r.type.replace("_", " ")}</span>
                         </div>
                         <span className="sakhi-caption">{formatDateTime(r.updatedAt)}</span>
                       </div>
-                      <div className="sakhi-progress-snippet" style={{ whiteSpace: "pre-line" }}>{r.message}</div>
+
+                      {editingId === r.id ? (
+                        <div style={{ marginTop: 8 }}>
+                          <textarea
+                            data-testid={`reminder-edit-textarea-${r.id}`}
+                            value={editDraft}
+                            onChange={(e) => setEditDraft(e.target.value)}
+                            className="sakhi-input"
+                            style={{ width: "100%", minHeight: 80, fontSize: 13, resize: "vertical" }}
+                          />
+                          <div className="sakhi-row" style={{ gap: 8, marginTop: 6 }}>
+                            <button
+                              type="button"
+                              disabled={savingEditId === r.id}
+                              onClick={() => handleSaveEdit(r.id)}
+                              className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring"
+                              style={{ minHeight: 36, width: "auto", padding: "0 12px" }}
+                            >
+                              {savingEditId === r.id ? "Saving…" : "Save"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingId(null)}
+                              className="sakhi-caption"
+                              style={{ background: "none", border: "none", padding: "0 8px", color: "#64748b", fontWeight: 700, cursor: "pointer" }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="sakhi-progress-snippet" style={{ whiteSpace: "pre-line" }}>{r.message}</div>
+                      )}
 
                       <div className="sakhi-row" style={{ gap: 8, flexWrap: "wrap", marginTop: "var(--space-2)" }}>
-                        {r.status === "pending" && (
+                        {r.status === "pending" && editingId !== r.id && (
                           <>
+                            <button
+                              type="button"
+                              data-testid={`reminder-edit-${r.id}`}
+                              disabled={busyId === r.id}
+                              onClick={() => startEdit(r)}
+                              className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring"
+                              style={{ minHeight: 40, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
+                            >
+                              <Pencil size={14} /> Edit
+                            </button>
                             <button
                               type="button"
                               disabled={busyId === r.id}

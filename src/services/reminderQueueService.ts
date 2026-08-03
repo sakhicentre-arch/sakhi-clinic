@@ -145,6 +145,27 @@ export async function cancelReminder(id: string): Promise<ReminderQueueEntry | n
   return updated;
 }
 
+/**
+ * Doctor-initiated message edit before approval (Doctor Workflow
+ * Completion / Reminder Productivity). Only meaningful on a pending
+ * reminder -- editing an already-approved/sent/rejected/cancelled one
+ * would rewrite history rather than the message about to go out.
+ */
+export async function updateReminderMessage(id: string, message: string): Promise<ReminderQueueEntry | null> {
+  const existing = await db.reminderQueue.get(id);
+  if (!existing || existing.status !== "pending") return null;
+
+  const updated: ReminderQueueEntry = { ...existing, message, updatedAt: nowIso() };
+  await db.reminderQueue.put(updated);
+  await logOperationalEvent({
+    level: "info",
+    type: "reminder.edited",
+    message: "Reminder message edited before approval",
+    data: { reminderId: id, patientId: updated.patientId },
+  }).catch(() => {});
+  return updated;
+}
+
 /** Used internally by reminderDeliveryService.ts -- not a public workflow action. */
 export async function setReminderStatus(id: string, status: ReminderStatus, patch?: Partial<ReminderQueueEntry>): Promise<ReminderQueueEntry | null> {
   const existing = await db.reminderQueue.get(id);
