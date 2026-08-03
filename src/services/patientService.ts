@@ -124,6 +124,47 @@ export async function rescheduleFollowUp(patientId: string, newDate: string): Pr
   broadcastSyncEvent({ type: "patient:updated", payload: { id: patientId } });
 }
 
+/**
+ * Doctor Productivity: pin/unpin a patient for quick access (Recent/Pinned
+ * Patients widgets, Command Palette). Thin wrapper over updatePatient so
+ * pins get the same outbox/sync/store handling as every other patient
+ * field edit, rather than a parallel write path.
+ */
+export async function togglePinPatient(id: string, pinned: boolean): Promise<void> {
+  await updatePatient(id, { pinned });
+}
+
+export interface QuickAccessPatient {
+  id: string;
+  name: string;
+  phone?: string;
+  pinned: boolean;
+  lastVisit?: string;
+}
+
+/**
+ * Doctor Productivity: Quick Access widget (Dashboard) -- pinned patients
+ * first, then most-recently-seen patients fill the remaining slots.
+ * lastVisit is already maintained by syncPatientFollowUp() on every
+ * consultation save, so this needs no new derived field.
+ */
+export async function getQuickAccessPatients(limit = 8): Promise<QuickAccessPatient[]> {
+  const patients = await db.patients.filter((p) => !p.deletedAt).toArray();
+  const pinned = patients
+    .filter((p) => (p as any).pinned)
+    .sort((a, b) => (b.lastVisit || "").localeCompare(a.lastVisit || ""));
+  const recent = patients
+    .filter((p) => !(p as any).pinned && p.lastVisit)
+    .sort((a, b) => (b.lastVisit || "").localeCompare(a.lastVisit || ""));
+  return [...pinned, ...recent].slice(0, limit).map((p) => ({
+    id: String(p.id),
+    name: p.name || "Unknown Patient",
+    phone: p.phone,
+    pinned: Boolean((p as any).pinned),
+    lastVisit: p.lastVisit,
+  }));
+}
+
 export async function getAllPatients(): Promise<Patient[]> {
   return db.patients.filter((p) => !p.deletedAt).toArray();
 }

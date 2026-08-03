@@ -38,7 +38,38 @@ type PaletteItem =
       patientId: string;
       actionLabel: string;
       run: () => void;
+    }
+  | {
+      kind: "action";
+      key: string;
+      title: string;
+      subtitle?: string;
+      hint?: string;
+      actionLabel: string;
+      run: () => void;
     };
+
+// Doctor Productivity: Quick Actions -- static, always-available shortcuts
+// shown alongside search results (prioritized when the query is empty).
+// Reuses the palette's own onNavigate/onSelectPatient plumbing, same as
+// every other item kind here, instead of a separate quick-action menu.
+function buildQuickActions(
+  onNavigate: (page: ActivePage) => void,
+  setOpen: (open: boolean) => void
+): PaletteItem[] {
+  const go = (page: ActivePage) => () => {
+    onNavigate(page);
+    setOpen(false);
+  };
+  return [
+    { kind: "action", key: "action:today", title: "Today's Queue", actionLabel: "Go", run: go("today") },
+    { kind: "action", key: "action:patients", title: "New Patient", subtitle: "Open Patients to register", actionLabel: "Go", run: go("patients") },
+    { kind: "action", key: "action:followups", title: "Follow-ups", actionLabel: "Go", run: go("followups") },
+    { kind: "action", key: "action:reminders", title: "Reminders", actionLabel: "Go", run: go("reminders") },
+    { kind: "action", key: "action:revenue", title: "Revenue", actionLabel: "Go", run: go("revenue") },
+    { kind: "action", key: "action:reports", title: "Reports", actionLabel: "Go", run: go("reports") },
+  ];
+}
 
 export default function CommandPalette({
   onNavigate,
@@ -110,6 +141,8 @@ export default function CommandPalette({
     return qi === normalizedQuery.length ? 2 : 999;
   };
 
+  const quickActions = useMemo(() => buildQuickActions(onNavigate, setOpen), [onNavigate, setOpen]);
+
   const results: PaletteItem[] = useMemo(() => {
     if (!isOpen) return [];
 
@@ -145,17 +178,23 @@ export default function CommandPalette({
     const patientItems = (patients || [])
       .map((p) => {
         const s = Math.min(score(p.name || ""), score(String(p.id || "")));
-        return { p, s };
+        return { p, s, pinned: Boolean((p as any).pinned) };
       })
       .filter(({ s }) => s < 999)
-      .sort((a, b) => a.s - b.s)
+      // Pinned patients (Doctor Productivity) float to the top regardless
+      // of match quality, since they're the doctor's own explicit picks.
+      .sort((a, b) => (b.pinned === a.pinned ? a.s - b.s : b.pinned ? 1 : -1))
       .slice(0, 10)
-      .map(({ p }) => {
+      .map(({ p, pinned }) => {
         return {
           kind: "patient" as const,
           key: `patient:${p.id}`,
           title: p.name || `Patient ${p.id}`,
-          subtitle: p.phone ? `Phone: ${p.phone}` : undefined,
+          subtitle: pinned
+            ? `★ Pinned${p.phone ? ` · ${p.phone}` : ""}`
+            : p.phone
+            ? `Phone: ${p.phone}`
+            : undefined,
           patientId: String(p.id),
           actionLabel: "Open",
           run: () => {
@@ -193,11 +232,23 @@ export default function CommandPalette({
         };
       });
 
+    // Quick Actions only surface with no query (or a query that matches
+    // their title) -- with no query they lead, since they're the fastest
+    // path to a common task; once the doctor starts typing a patient name,
+    // search results should dominate instead of static actions.
+    const quickActionItems = quickActions.filter((a) => score(a.title) < 999);
+
+    if (!normalizedQuery) {
+      items.push(...quickActionItems);
+    }
     items.push(...queueItems);
     items.push(...patientItems);
     items.push(...recentItems);
+    if (normalizedQuery) {
+      items.push(...quickActionItems);
+    }
     return items;
-  }, [isOpen, query, patients, queue, recentConsultations]);
+  }, [isOpen, query, patients, queue, recentConsultations, quickActions]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -333,7 +384,13 @@ export default function CommandPalette({
                       {item.title}
                     </div>
                     <span className="sakhi-kbd-hint" style={{ fontWeight: 800 }}>
-                      {item.kind === "queue" ? "Queue" : item.kind === "patient" ? "Patient" : "Recent"}
+                      {item.kind === "queue"
+                        ? "Queue"
+                        : item.kind === "patient"
+                        ? "Patient"
+                        : item.kind === "action"
+                        ? "Action"
+                        : "Recent"}
                     </span>
                   </div>
                   {item.subtitle && (

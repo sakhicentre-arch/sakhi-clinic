@@ -23,6 +23,8 @@ import {
   Trash2,
   X,
   Eye,
+  Star,
+  StickyNote,
 } from "lucide-react";
 import { usePatientStore } from "../store/usePatientStore";
 import { useConsultationStore } from "../store/useConsultationStore";
@@ -32,7 +34,8 @@ import { PullToRefreshScrollRegion, SplitPane, ScrollRegion } from "../component
 import PaymentScreenshotViewer from "../components/PaymentScreenshotViewer";
 import { normalizePatientPhone } from "../utils/whatsapp";
 import { openWhatsApp } from "../services/whatsappService";
-import { addPatient as saveNewPatient, updatePatient as saveUpdatedPatient, deletePatient as removePatient } from "../services/patientService";
+import { addPatient as saveNewPatient, updatePatient as saveUpdatedPatient, deletePatient as removePatient, togglePinPatient } from "../services/patientService";
+import { getQuickNote, saveQuickNote } from "../utils/quickNotes";
 import { getConsultationOutstanding, getConsultationCollected } from "../services/paymentService";
 import { listRemindersByPatient } from "../services/reminderQueueService";
 import type { ReminderQueueEntry } from "../services/db";
@@ -269,6 +272,10 @@ export default function PatientPage(
   // paymentScreenshotDataUrl already exist on Consultation (recorded via
   // paymentService.ts) but were never rendered in the Finance tab.
   const [viewingScreenshot, setViewingScreenshot] = useState<{ dataUrl: string; date?: string } | null>(null);
+  // Doctor Productivity: Quick Notes -- non-clinical scratchpad, deliberately
+  // separate from the Consultation record (see utils/quickNotes.ts).
+  const [quickNoteDraft, setQuickNoteDraft] = useState<string>("");
+  const [quickNoteSaved, setQuickNoteSaved] = useState<boolean>(true);
 
   const [formData, setFormData] = useState<FormData>(DEFAULT_FORM);
 
@@ -310,6 +317,17 @@ export default function PatientPage(
     }
   }, [syncSelectedId]);
 
+  // Doctor Productivity: pinned patients float to the top of the list.
+  // Reorders only -- same patient object references, so identity lookups
+  // elsewhere (e.g. selectedPatient's useMemo) are unaffected.
+  const sortedPatients = useMemo(() => {
+    return [...patients].sort((a, b) => {
+      const pa = (a as any).pinned ? 1 : 0;
+      const pb = (b as any).pinned ? 1 : 0;
+      return pb - pa;
+    });
+  }, [patients]);
+
   // ── Task 4: usePatientSearch — uses handleOpenPatient defined above ──────
   // ✅ FIX: Added safe defaults (filteredPatients = [], focusedIndex = 0)
   //         to prevent "Cannot read properties of undefined" crash
@@ -320,7 +338,7 @@ export default function PatientPage(
     focusedIndex = 0,
     setFocusedIndex,
     handleSearchKeyDown,
-  } = usePatientSearch({ patients, onOpen: handleOpenPatient });
+  } = usePatientSearch({ patients: sortedPatients, onOpen: handleOpenPatient });
 
   // ── Data Loading ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -469,9 +487,13 @@ export default function PatientPage(
         pastHistory: (selectedPatient as any).pastHistory || "",
       });
       setReports((selectedPatient as any).reports || []);
+      setQuickNoteDraft(getQuickNote(String(selectedPatient.id)));
+      setQuickNoteSaved(true);
     } else {
       setFormData(DEFAULT_FORM);
       setReports([]);
+      setQuickNoteDraft("");
+      setQuickNoteSaved(true);
     }
   }, [selectedPatient]);
 
@@ -573,6 +595,19 @@ export default function PatientPage(
       console.error("Error deleting patient:", error);
       setPatientStoreError(error instanceof Error ? error.message : "Error deleting patient.");
       alert("Error deleting patient. Please try again.");
+    }
+  };
+
+  const handleTogglePin = async (
+    e: React.MouseEvent,
+    id: string,
+    currentlyPinned: boolean
+  ): Promise<void> => {
+    e.stopPropagation();
+    try {
+      await togglePinPatient(id, !currentlyPinned);
+    } catch (error) {
+      console.error("Error pinning patient:", error);
     }
   };
 
@@ -958,6 +993,16 @@ export default function PatientPage(
                 <div className="patient-row-actions" style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
                   <button
                     type="button"
+                    data-testid={`patient-pin-toggle-${p.id}`}
+                    className="sakhi-mini-iconbtn sakhi-tap sakhi-focus-ring sakhi-ripple"
+                    onClick={(e) => handleTogglePin(e, String(p.id), Boolean((p as any).pinned))}
+                    aria-label={(p as any).pinned ? "Unpin patient" : "Pin patient"}
+                    title={(p as any).pinned ? "Unpin" : "Pin for quick access"}
+                  >
+                    <Star size={16} fill={(p as any).pinned ? "#f59e0b" : "none"} color={(p as any).pinned ? "#f59e0b" : undefined} />
+                  </button>
+                  <button
+                    type="button"
                     className="sakhi-mini-iconbtn sakhi-tap sakhi-focus-ring sakhi-ripple"
                     onClick={(e) => handleEditPatient(e, p.id)}
                     aria-label="Edit patient"
@@ -1029,14 +1074,97 @@ export default function PatientPage(
                   )}
                 </div>
               </div>
-              <button
-                className="hero-consult-btn"
-                style={S.heroConsultBtn}
-                onClick={() => goToConsultation()}
-              >
-                <Zap size={16} />
-                Start Consultation
-              </button>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "stretch" }}>
+                <button
+                  className="hero-consult-btn"
+                  style={S.heroConsultBtn}
+                  onClick={() => goToConsultation()}
+                >
+                  <Zap size={16} />
+                  Start Consultation
+                </button>
+                <button
+                  type="button"
+                  data-testid="patient-hero-pin-toggle"
+                  className="sakhi-tap sakhi-focus-ring"
+                  onClick={(e) => handleTogglePin(e, String(selectedPatient.id), Boolean((selectedPatient as any).pinned))}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                    padding: "8px 12px",
+                    borderRadius: "10px",
+                    border: (selectedPatient as any).pinned ? "1.5px solid #f59e0b" : "1.5px solid #e2e8f0",
+                    background: (selectedPatient as any).pinned ? "#fffbeb" : "#fff",
+                    color: (selectedPatient as any).pinned ? "#b45309" : "#475569",
+                    fontWeight: 800,
+                    fontSize: "12.5px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <Star size={14} fill={(selectedPatient as any).pinned ? "#f59e0b" : "none"} />
+                  {(selectedPatient as any).pinned ? "Pinned" : "Pin patient"}
+                </button>
+              </div>
+            </div>
+
+            {/* Doctor Productivity: Quick Note -- non-clinical scratchpad
+                ("prefers evening slots", "call about lab results"),
+                deliberately not part of the Consultation record. Sits above
+                the tab bar (not inside it) because the tab bar itself only
+                renders once the patient has at least one consultation --
+                a brand-new patient should still be able to get a note. */}
+            <div style={S.card}>
+              <SectionTitle icon={<StickyNote size={18} color="#d97706" />} label="Quick Note" />
+              <textarea
+                data-testid="patient-quick-note"
+                value={quickNoteDraft}
+                onChange={(e) => {
+                  setQuickNoteDraft(e.target.value);
+                  setQuickNoteSaved(false);
+                }}
+                placeholder="Private scratch note for this patient (not part of the clinical record)…"
+                rows={3}
+                style={{
+                  width: "100%",
+                  marginTop: "10px",
+                  padding: "10px 12px",
+                  borderRadius: "10px",
+                  border: "1.5px solid #e2e8f0",
+                  background: "#f8fafc",
+                  color: "#0f172a",
+                  fontSize: "13px",
+                  fontFamily: "inherit",
+                  resize: "vertical",
+                  outline: "none",
+                }}
+              />
+              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "10px", marginTop: "8px" }}>
+                {quickNoteSaved && <span style={{ fontSize: "12px", color: "#94a3b8" }}>Saved</span>}
+                <button
+                  type="button"
+                  data-testid="patient-quick-note-save"
+                  disabled={quickNoteSaved}
+                  onClick={() => {
+                    if (!selectedPatient) return;
+                    saveQuickNote(String(selectedPatient.id), quickNoteDraft);
+                    setQuickNoteSaved(true);
+                  }}
+                  style={{
+                    padding: "8px 16px",
+                    borderRadius: "10px",
+                    border: "none",
+                    background: quickNoteSaved ? "#e2e8f0" : "#2563eb",
+                    color: quickNoteSaved ? "#94a3b8" : "#fff",
+                    fontWeight: 800,
+                    fontSize: "12.5px",
+                    cursor: quickNoteSaved ? "default" : "pointer",
+                  }}
+                >
+                  Save Note
+                </button>
+              </div>
             </div>
 
             {/* ── 2. LAST VISIT BANNER ──────────────────────────────────── */}

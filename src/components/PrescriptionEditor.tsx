@@ -1,6 +1,8 @@
-import React, { memo, useEffect, useRef, useState } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
+import { Star } from "lucide-react";
 import { Medicine } from "../services/db";
 import { generateId } from "../utils/generateId";
+import { loadFavoriteMedicineNames, toggleFavoriteMedicine } from "../utils/favoriteMedicines";
 
 interface Suggestion {
   name: string;
@@ -34,6 +36,8 @@ interface MedicineRowProps {
   onFocus: (index: number) => void;
   onRemove: (index: number) => void;
   suggestions: Suggestion[];
+  favorites: string[];
+  onToggleFavorite: (name: string) => void;
 }
 
 const MedicineRow = memo(function MedicineRow({
@@ -45,6 +49,8 @@ const MedicineRow = memo(function MedicineRow({
   onFocus,
   onRemove,
   suggestions,
+  favorites,
+  onToggleFavorite,
 }: MedicineRowProps) {
   const remedyRef = useRef<HTMLInputElement>(null);
 
@@ -53,6 +59,11 @@ const MedicineRow = memo(function MedicineRow({
       remedyRef.current?.focus();
     }
   }, [autoFocus]);
+
+  const trimmedName = (medicine.name || "").trim();
+  const isFavorite = trimmedName
+    ? favorites.some((n) => n.toLowerCase() === trimmedName.toLowerCase())
+    : false;
 
   return (
     <div style={rowStyle}>
@@ -66,8 +77,22 @@ const MedicineRow = memo(function MedicineRow({
           }}
           onFocus={() => onFocus(index)}
           placeholder="Remedy"
-          style={inputStyle}
+          style={{ ...inputStyle, paddingRight: trimmedName ? 34 : 12 }}
         />
+
+        {trimmedName && (
+          <button
+            type="button"
+            data-testid={`favorite-medicine-toggle-${index}`}
+            aria-label={isFavorite ? "Unfavorite remedy" : "Favorite remedy"}
+            title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onToggleFavorite(trimmedName)}
+            style={favoriteButtonStyle}
+          >
+            <Star size={15} fill={isFavorite ? "#f59e0b" : "none"} color={isFavorite ? "#f59e0b" : "#94a3b8"} />
+          </button>
+        )}
 
         {active && suggestions.length > 0 && (
           <div style={dropdownStyle}>
@@ -80,7 +105,7 @@ const MedicineRow = memo(function MedicineRow({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onChange(index, "name", s.name)}
               >
-                {s.name}
+                {s.reason === "Favorite" ? "★ " : ""}{s.name}
               </button>
             ))}
           </div>
@@ -141,6 +166,24 @@ export default function PrescriptionEditor({
 }: Props) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [focusedMedicineId, setFocusedMedicineId] = useState<string | null>(null);
+  // Doctor Productivity: Favorite Medicines -- single-remedy favorites
+  // (distinct from the existing Rx Templates feature, which saves whole
+  // multi-medicine combos). favVersion forces favorites/mergedSuggestions
+  // to recompute after a toggle, since favoriteMedicines.ts is plain
+  // localStorage with no reactive subscription.
+  const [favVersion, setFavVersion] = useState(0);
+  const favorites = useMemo(() => loadFavoriteMedicineNames(), [favVersion]);
+  const handleToggleFavorite = (name: string) => {
+    toggleFavoriteMedicine(name);
+    setFavVersion((v) => v + 1);
+  };
+
+  const mergedSuggestions = useMemo<Suggestion[]>(() => {
+    const favSuggestions: Suggestion[] = favorites
+      .filter((n) => !suggestions.some((s) => s.name.toLowerCase() === n.toLowerCase()))
+      .map((n) => ({ name: n, score: 0, reason: "Favorite" }));
+    return [...favSuggestions, ...suggestions];
+  }, [favorites, suggestions]);
 
   const handleChange = (index: number, key: keyof Medicine, val: string) => {
     const updated = [...value];
@@ -182,7 +225,9 @@ export default function PrescriptionEditor({
           onChange={handleChange}
           onFocus={setActiveIndex}
           onRemove={removeMedicine}
-          suggestions={suggestions}
+          suggestions={mergedSuggestions}
+          favorites={favorites}
+          onToggleFavorite={handleToggleFavorite}
         />
       ))}
 
@@ -216,6 +261,22 @@ const inputStyle: React.CSSProperties = {
   outline: "none",
   flex: 1,
   minWidth: 100,
+};
+
+const favoriteButtonStyle: React.CSSProperties = {
+  position: "absolute",
+  right: 6,
+  top: "50%",
+  transform: "translateY(-50%)",
+  width: 26,
+  height: 26,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "none",
+  border: "none",
+  cursor: "pointer",
+  padding: 0,
 };
 
 const dropdownStyle: React.CSSProperties = {

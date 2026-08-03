@@ -192,6 +192,11 @@ export interface Patient {
   // ✅ V44: Allergy record — patient-level, permanent clinical fact
   allergies?: string;   // e.g. "Penicillin, Sulfa drugs, Dust mites"
 
+  // Doctor Productivity: pinned patients shown first in Recent Patients /
+  // Quick Actions. Plain unindexed property -- no version bump needed,
+  // same pattern as the V54 payment fields.
+  pinned?: boolean;
+
   createdAt?: string;
   updatedAt?: string;
   deletedAt?: number;
