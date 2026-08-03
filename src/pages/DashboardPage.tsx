@@ -704,7 +704,7 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
             ) : (
               recentActivity.slice(0, 5).map((event) => (
                 <div key={event.id} style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-2)", minWidth: 0 }}>
-                  <span className="sakhi-caption" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                  <span className="sakhi-caption" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
                     {event.message}
                   </span>
                   <span className="sakhi-caption" style={{ color: "#94a3b8", flexShrink: 0 }}>
@@ -1024,8 +1024,8 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
             {recentActivity.slice(0, 8).map((event) => (
-              <div key={event.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13 }}>
-                <span style={{ color: "#334155", fontWeight: 700 }}>{event.message}</span>
+              <div key={event.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13, minWidth: 0 }}>
+                <span style={{ color: "#334155", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{event.message}</span>
                 <span style={{ color: "#94a3b8", fontWeight: 700, flexShrink: 0 }}>
                   {new Date(event.timestamp).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                 </span>

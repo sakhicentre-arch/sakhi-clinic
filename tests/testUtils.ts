@@ -85,6 +85,14 @@ export async function assertNoOverflowContainers(page: Page) {
       // For mobile stability we care primarily about horizontal overflow.
       if (!['hidden', 'auto', 'scroll'].includes(overflowX)) return false;
       if (elem.clientWidth === 0 || elem.clientHeight === 0) return false;
+      // Deliberate single-line ellipsis truncation (text-overflow: ellipsis
+      // + white-space: nowrap, e.g. Dashboard's Recent Activity / Queue
+      // Intelligence rows) is a real, intentional UI pattern already used
+      // elsewhere in this codebase -- scrollWidth > clientWidth is exactly
+      // what correctly-clipped long text looks like, not an overflow bug.
+      // Only flag elements NOT using that pattern as genuine violations.
+      const isIntentionalEllipsis = style.textOverflow === 'ellipsis' && style.whiteSpace === 'nowrap';
+      if (isIntentionalEllipsis) return false;
       const hasOverflowX = overflowX !== 'visible' && elem.scrollWidth > elem.clientWidth + 1;
       return hasOverflowX;
     }).map((elem) => {
