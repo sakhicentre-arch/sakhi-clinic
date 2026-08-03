@@ -6,6 +6,7 @@ import ConsultationPage from "./pages/ConsultationPage";
 import PrescriptionPrint from "./pages/PrescriptionPrint";
 import RevenuePage from "./pages/RevenuePage";
 import AnalyticsPage from "./pages/AnalyticsPage";
+import RubricReviewPage from "./pages/RubricReviewPage";
 import TodayPage from "./pages/TodayPage";
 import DashboardPage from "./pages/DashboardPage";
 import ReviewPage from "./pages/ReviewPage";
@@ -207,6 +208,7 @@ export default function App() {
       {page === "settings" && <SettingsPage />}
       {page === "followups" && <FollowUpPage onNavigate={setPage} goToConsultation={goToConsultation} />}
       {page === "reminders" && <RemindersPage />}
+      {page === "rubrics" && <RubricReviewPage />}
       </AppShell>
     </>
   );

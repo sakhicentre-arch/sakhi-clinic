@@ -68,6 +68,33 @@ export const RUBRIC_KEYWORDS: Partial<Record<RubricCategory, string[]>> = {
   ],
 };
 
+/** Human-readable labels for the 18 rubric categories -- shared across the
+ * Review page, Dashboard widgets, and Reports so the taxonomy reads
+ * consistently everywhere rather than each surface inventing its own
+ * casing/wording. */
+export const RUBRIC_CATEGORY_LABELS: Record<RubricCategory, string> = {
+  mind: "Mind",
+  generals: "Generals",
+  particulars: "Particulars",
+  modalities: "Modalities",
+  sensations: "Sensations",
+  locations: "Locations",
+  concomitants: "Concomitants",
+  etiology: "Etiology",
+  sleep: "Sleep",
+  foodDesires: "Food Desires",
+  foodAversions: "Food Aversions",
+  thermals: "Thermals",
+  perspiration: "Perspiration",
+  menses: "Menses",
+  pregnancy: "Pregnancy",
+  children: "Children",
+  oldAge: "Old Age",
+  familyHistory: "Family History",
+};
+
+export const ALL_RUBRIC_CATEGORIES: RubricCategory[] = Object.keys(RUBRIC_CATEGORY_LABELS) as RubricCategory[];
+
 /** Structured Consultation fields that map directly to a rubric category
  * with no free-text keyword search needed — the doctor already entered
  * this content under exactly this heading, so it's a direct, high-

@@ -12,6 +12,7 @@ import {
   CalendarClock,
   MessageCircle,
   BarChart3,
+  ListChecks,
 } from "lucide-react";
 import { ActivePage } from "../../store/uiStore";
 
@@ -32,6 +33,7 @@ const navItems = [
   { id: "reminders", label: "Reminders", icon: MessageCircle, badge: false },
   { id: "revenue", label: "Revenue", icon: TrendingUp, badge: false },
   { id: "reports", label: "Reports", icon: BarChart3, badge: false },
+  { id: "rubrics", label: "Rubrics", icon: ListChecks, badge: false },
 ];
 
 export default function LeftNav({ onNavigate, isMobile = false, isOpen = false, onClose }: LeftNavProps) {
