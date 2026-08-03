@@ -1,8 +1,8 @@
 # Sakhi Clinic — RC1 Certification Report
 
-**Commit base:** `4231dc2522b96c9435dffe9804e747f8b15ca8aa` plus this session's Playwright test-infrastructure fixes (uncommitted at time of writing — see `git status`).
+**Commit:** `3914f643d8f32f170800ed24e757e65fe07417c3` (tag `v1.0.0-rc1`), built on base commit `4231dc2522b96c9435dffe9804e747f8b15ca8aa`.
 **Date:** 2026-08-03
-**Scope:** RC1 final certification pass — Playwright suite investigation and repair, quality-gate re-verification, and the four certification deliverables below. **No new doctor-facing functionality was added in this pass.**
+**Scope:** RC1 final certification pass — Playwright suite investigation and repair, quality-gate re-verification, and the four certification deliverables below. **No new doctor-facing functionality was added in this pass.** This document certifies the *quality gates* (tests, type-checking, build) for the RC1 release; it is not an inventory of RC1's features — see `RC1_RELEASE_NOTES.md` for the full feature set this release actually ships.
 
 **Evidence discipline:** every claim is tagged **[MEASURED]** (a command was run, output quoted or described), **[REASONED]** (derived from reading the code, not executed), or **[UNTESTED]** (not verified — stated as a gap, not glossed over).
 
