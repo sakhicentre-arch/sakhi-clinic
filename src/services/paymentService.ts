@@ -248,6 +248,46 @@ export async function getPaymentHistoryInRange(
     }));
 }
 
+const PAYMENT_MODE_LABEL: Record<string, string> = {
+  cash: "Cash",
+  upi: "UPI",
+  card: "Card",
+  bank_transfer: "Bank Transfer",
+  cheque: "Cheque",
+  other: "Other",
+};
+
+/**
+ * WhatsApp Productivity: Payment Receipt. Pure text builder -- reuses the
+ * exact payment fields already recorded via recordPayment()/PaymentInput
+ * (see file header: payment fields live on Consultation, no separate
+ * receipt/invoice document). Same "*Clinic Name*\nbody" convention as
+ * buildFollowUpMessage()/buildPaymentReminderMessage() elsewhere.
+ */
+export function buildPaymentReceiptMessage(
+  patientName: string,
+  consultation: Pick<Consultation, "fee" | "amountReceived" | "paymentMode" | "paymentReferenceNumber" | "paymentDate" | "date">
+): string {
+  const fee = consultation.fee || 0;
+  const received = consultation.amountReceived || 0;
+  const outstanding = Math.max(0, fee - received);
+  const modeLabel = consultation.paymentMode ? PAYMENT_MODE_LABEL[consultation.paymentMode] || consultation.paymentMode : undefined;
+  const paidOn = consultation.paymentDate || consultation.date;
+  const dateLabel = paidOn ? new Date(paidOn).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : undefined;
+
+  const lines = [
+    `Hi ${patientName}, here's your payment receipt:`,
+    `Fee: ${formatMoney(fee)}`,
+    `Received: ${formatMoney(received)}${modeLabel ? ` via ${modeLabel}` : ""}`,
+  ];
+  if (consultation.paymentReferenceNumber) lines.push(`Reference: ${consultation.paymentReferenceNumber}`);
+  if (dateLabel) lines.push(`Date: ${dateLabel}`);
+  if (outstanding > 0) lines.push(`Balance due: ${formatMoney(outstanding)}`);
+  lines.push("Thank you!");
+
+  return `*Sakhi Homeopathic Clinic*\n${lines.join("\n")}`;
+}
+
 export interface OutstandingPatientEntry {
   patientId: string;
   name: string;

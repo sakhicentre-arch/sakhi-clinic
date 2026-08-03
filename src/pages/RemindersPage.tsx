@@ -17,12 +17,24 @@ import {
   History as HistoryIcon,
   TrendingUp,
   Pencil,
+  Megaphone,
 } from "lucide-react";
 import { MobileCard, MobileSection, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
+import FilteredPatientList, { FilteredListEntry } from "../components/FilteredPatientList";
+import { usePatientStore } from "../store/usePatientStore";
 import { ReminderQueueEntry, ReminderStatus } from "../services/db";
-import { listRemindersByStatus, approveReminder, rejectReminder, cancelReminder, updateReminderMessage } from "../services/reminderQueueService";
+import { listRemindersByStatus, approveReminder, rejectReminder, cancelReminder, updateReminderMessage, enqueueReminder } from "../services/reminderQueueService";
 import { sendReminder, resendReminder } from "../services/reminderDeliveryService";
 import { getReminderAnalytics, ReminderAnalytics } from "../services/reminderAnalyticsService";
+
+// WhatsApp Productivity: Bulk Messaging -- the doctor writes the message
+// once; this only adds the same clinic-name branding prefix every other
+// WhatsApp send in the app already uses (buildFollowUpMessage,
+// buildPaymentReminderMessage), so a broadcast doesn't look different from
+// any other message the clinic sends.
+function buildBulkMessage(body: string): string {
+  return `*Sakhi Homeopathic Clinic*\n${body}`;
+}
 
 // Small stagger between bulk WhatsApp opens -- mirrors AppointmentPage.tsx's
 // existing bulk-reminder pattern (index * 2500ms) so popup blockers/WhatsApp
@@ -65,6 +77,16 @@ export default function RemindersPage() {
   const [savingEditId, setSavingEditId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+
+  // WhatsApp Productivity: Bulk Messaging -- two-step compose flow (pick
+  // recipients, then write one message for all of them), landing in the
+  // exact same pending queue as every other reminder so it goes through
+  // the normal preview/edit/approve/send review, not a direct send.
+  const [composeStep, setComposeStep] = useState<"closed" | "select" | "message">("closed");
+  const [composeRecipients, setComposeRecipients] = useState<{ id: string; name: string; phone?: string }[]>([]);
+  const [composeMessage, setComposeMessage] = useState("");
+  const [composeQueuing, setComposeQueuing] = useState(false);
+  const allPatients = usePatientStore((s) => s.patients);
 
   const load = async (tab: ReminderStatus = activeTab) => {
     setLoading(true);
@@ -161,6 +183,115 @@ export default function RemindersPage() {
     return "#dc2626";
   }, [analytics]);
 
+  const bulkComposeEntries: FilteredListEntry[] = (allPatients || []).map((p) => ({
+    patientId: String(p.id),
+    name: p.name || "Unknown Patient",
+    phone: p.phone,
+    subtitle: p.phone || "No phone on file",
+  }));
+
+  const handleComposeSelectRecipients = (patientIds: string[]) => {
+    const byId = new Map((allPatients || []).map((p) => [String(p.id), p]));
+    const recipients = patientIds
+      .map((id) => byId.get(id))
+      .filter((p): p is NonNullable<typeof p> => Boolean(p))
+      .map((p) => ({ id: String(p.id), name: p.name || "Unknown Patient", phone: p.phone }));
+    setComposeRecipients(recipients);
+    setComposeStep("message");
+  };
+
+  const handleQueueBulkMessage = async () => {
+    if (!composeMessage.trim() || composeRecipients.length === 0) return;
+    setComposeQueuing(true);
+    try {
+      const sourceRef = `bulk:${Date.now()}`;
+      for (const recipient of composeRecipients) {
+        await enqueueReminder({
+          patientId: recipient.id,
+          patientName: recipient.name,
+          phone: recipient.phone,
+          type: "custom",
+          message: buildBulkMessage(composeMessage.trim()),
+          dueAt: new Date().toISOString(),
+          sourceRef,
+        });
+      }
+      setComposeStep("closed");
+      setComposeRecipients([]);
+      setComposeMessage("");
+      setActiveTab("pending");
+      await load("pending");
+    } finally {
+      setComposeQueuing(false);
+    }
+  };
+
+  if (composeStep === "select") {
+    return (
+      <FilteredPatientList
+        title="Bulk Message — Select Recipients"
+        subtitle="Choose who should receive this message."
+        entries={bulkComposeEntries}
+        onSelectPatient={() => {}}
+        onBack={() => setComposeStep("closed")}
+        selectable
+        onSendReminders={handleComposeSelectRecipients}
+        actionLabel="Continue"
+        searchable
+      />
+    );
+  }
+
+  if (composeStep === "message") {
+    return (
+      <div className="sakhi-page" data-testid="bulk-message-compose">
+        <div className="sakhi-stack">
+          <header>
+            <button
+              type="button"
+              onClick={() => setComposeStep("select")}
+              className="sakhi-caption"
+              style={{ background: "none", border: "none", padding: 0, marginBottom: 8, color: "#0d7377", fontWeight: 800, cursor: "pointer" }}
+            >
+              ← Back to recipients
+            </button>
+            <div className="sakhi-title">Bulk Message — Write Message</div>
+            <div className="sakhi-caption" style={{ marginTop: 4 }}>
+              {composeRecipients.length} recipient{composeRecipients.length === 1 ? "" : "s"} selected
+            </div>
+          </header>
+          <ResponsiveContainer>
+            <MobileSection>
+              <MobileCard>
+                <textarea
+                  data-testid="bulk-message-textarea"
+                  value={composeMessage}
+                  onChange={(e) => setComposeMessage(e.target.value)}
+                  placeholder="Write the message every selected patient will receive…"
+                  className="sakhi-input"
+                  style={{ width: "100%", minHeight: 120, fontSize: 13, resize: "vertical" }}
+                />
+                <div className="sakhi-caption" style={{ marginTop: 8 }}>
+                  Each message is queued individually for your review -- nothing sends until you approve it in the Pending tab, same as any other reminder.
+                </div>
+                <button
+                  type="button"
+                  data-testid="bulk-message-queue"
+                  disabled={composeQueuing || !composeMessage.trim()}
+                  onClick={handleQueueBulkMessage}
+                  className="sakhi-btn-primary sakhi-tap sakhi-focus-ring"
+                  style={{ marginTop: "var(--space-3)", minHeight: 48 }}
+                >
+                  {composeQueuing ? "Adding to queue…" : `Add to Queue (${composeRecipients.length})`}
+                </button>
+              </MobileCard>
+            </MobileSection>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="sakhi-page" data-testid="reminders-page">
       <div className="sakhi-stack">
@@ -216,9 +347,21 @@ export default function RemindersPage() {
 
             {/* ================= Queue ================= */}
             <MobileCard>
-              <div className="sakhi-row" style={{ gap: "var(--space-2)", marginBottom: "var(--space-3)" }}>
-                <MessageCircle size={18} />
-                <div className="sakhi-body" style={{ fontWeight: 950 }}>Reminder queue</div>
+              <div className="sakhi-row" style={{ gap: "var(--space-2)", marginBottom: "var(--space-3)", justifyContent: "space-between" }}>
+                <div className="sakhi-row" style={{ gap: "var(--space-2)" }}>
+                  <MessageCircle size={18} />
+                  <div className="sakhi-body" style={{ fontWeight: 950 }}>Reminder queue</div>
+                </div>
+                <button
+                  type="button"
+                  data-testid="bulk-message-start"
+                  onClick={() => setComposeStep("select")}
+                  className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring sakhi-ripple"
+                  style={{ minHeight: 36, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
+                >
+                  <Megaphone size={14} />
+                  New Bulk Message
+                </button>
               </div>
 
               <div className="sakhi-row" style={{ gap: 8, flexWrap: "wrap" }}>

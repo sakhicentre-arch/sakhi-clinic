@@ -173,6 +173,7 @@ export default function App() {
   <PatientPage
     goToConsultation={goToConsultation}
     initialPatientId={activePatientId || undefined}
+    onNavigate={setPage}
   />
 )}
       {page === "appointments" && (

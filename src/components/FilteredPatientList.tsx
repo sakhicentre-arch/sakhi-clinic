@@ -42,6 +42,12 @@ export interface FilteredPatientListProps {
   onBack: () => void;
   selectable?: boolean;
   onSendReminders?: (patientIds: string[]) => void;
+  /** Overrides the selection action button's label (default "Send
+   * Reminders") -- e.g. WhatsApp Productivity's Bulk Messaging reuses this
+   * same selectable list to pick recipients for a one-off message, where
+   * "Send Reminders" would be a misleading label for what's actually a
+   * two-step compose flow (select, then write the message). */
+  actionLabel?: string;
   /** Client-side name filter over the already-fetched `entries` -- the
    * caller still owns what "belongs on this list" (Payment Dashboard,
    * Follow-up drill-downs, etc.); this only narrows within that set, no
@@ -59,6 +65,7 @@ export default function FilteredPatientList({
   onBack,
   selectable,
   onSendReminders,
+  actionLabel = "Send Reminders",
   searchable,
 }: FilteredPatientListProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -122,7 +129,7 @@ export default function FilteredPatientList({
                     style={{ minHeight: 36, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
                   >
                     <MessageCircle size={14} />
-                    Send Reminders ({selected.size})
+                    {actionLabel} ({selected.size})
                   </button>
                 )}
               </div>

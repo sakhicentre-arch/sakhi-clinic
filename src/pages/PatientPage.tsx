@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { usePatientStore } from "../store/usePatientStore";
 import { useConsultationStore } from "../store/useConsultationStore";
-import { useUIStore } from "../store/uiStore";
+import { useUIStore, ActivePage } from "../store/uiStore";
 import { usePatientSearch } from "../hooks/usePatientSearch";
 import { PullToRefreshScrollRegion, SplitPane, ScrollRegion } from "../components/layout/LayoutPrimitives";
 import PaymentScreenshotViewer from "../components/PaymentScreenshotViewer";
@@ -36,8 +36,8 @@ import { normalizePatientPhone } from "../utils/whatsapp";
 import { openWhatsApp } from "../services/whatsappService";
 import { addPatient as saveNewPatient, updatePatient as saveUpdatedPatient, deletePatient as removePatient, togglePinPatient } from "../services/patientService";
 import { getQuickNote, saveQuickNote } from "../utils/quickNotes";
-import { getConsultationOutstanding, getConsultationCollected } from "../services/paymentService";
-import { listRemindersByPatient } from "../services/reminderQueueService";
+import { getConsultationOutstanding, getConsultationCollected, buildPaymentReceiptMessage } from "../services/paymentService";
+import { listRemindersByPatient, enqueueReminder, hasActiveReminder } from "../services/reminderQueueService";
 import type { ReminderQueueEntry } from "../services/db";
 import { generateId } from "../utils/generateId";
 import type { Consultation, Report } from "../types/models";
@@ -74,6 +74,7 @@ interface FormData {
 interface PatientPageProps {
   goToConsultation?: (patientId: string, appointmentId: string) => void;
   initialPatientId?: string;
+  onNavigate?: (page: ActivePage) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -276,6 +277,9 @@ export default function PatientPage(
   // separate from the Consultation record (see utils/quickNotes.ts).
   const [quickNoteDraft, setQuickNoteDraft] = useState<string>("");
   const [quickNoteSaved, setQuickNoteSaved] = useState<boolean>(true);
+  // WhatsApp Productivity: Payment Receipt queueing state.
+  const [sendingReceiptId, setSendingReceiptId] = useState<string | null>(null);
+  const [actionNoteForReceipt, setActionNoteForReceipt] = useState<string>("");
 
   const [formData, setFormData] = useState<FormData>(DEFAULT_FORM);
 
@@ -640,6 +644,37 @@ export default function PatientPage(
     const phone = selectedPatient.phone || (selectedPatient as any).mobile || "";
     if (!openWhatsApp({ phone, message })) return alert("⚠️ Patient mobile number is missing or invalid.");
   }, [selectedPatient, revenueAnalytics.totalPending]);
+
+  // WhatsApp Productivity: Payment Receipt. Queues via reminderQueueService
+  // (same pending -> approved -> sent review the doctor already uses for
+  // every other WhatsApp send) rather than an immediate openWhatsApp() call
+  // -- a receipt still deserves a look before it goes out.
+  const handleSendReceipt = useCallback(
+    async (consultation: PatientPageConsultation) => {
+      if (!selectedPatient || !consultation.id) return;
+      setSendingReceiptId(consultation.id);
+      try {
+        const alreadyQueued = await hasActiveReminder(String(selectedPatient.id), "custom");
+        if (alreadyQueued) {
+          setActionNoteForReceipt("A message is already pending or approved for this patient.");
+          return;
+        }
+        await enqueueReminder({
+          patientId: String(selectedPatient.id),
+          patientName: selectedPatient.name || "Patient",
+          phone: selectedPatient.phone,
+          type: "custom",
+          message: buildPaymentReceiptMessage(selectedPatient.name || "Patient", consultation as any),
+          dueAt: new Date().toISOString(),
+          sourceRef: `payment-receipt:${consultation.id}`,
+        });
+        props.onNavigate?.("reminders");
+      } finally {
+        setSendingReceiptId(null);
+      }
+    },
+    [selectedPatient, props]
+  );
 
   const goToConsultation = useCallback(
     (appointmentId = "") => {
@@ -1527,11 +1562,16 @@ export default function PatientPage(
                     )}
                     <div style={S.card}>
                       <SectionTitle icon={<Receipt size={18} color="#d97706" />} label="Payment History" />
+                      {actionNoteForReceipt && (
+                        <div className="sakhi-caption" style={{ marginTop: 8, color: "#b45309", fontWeight: 700 }}>
+                          {actionNoteForReceipt}
+                        </div>
+                      )}
                       <div style={{ overflowX: "auto", marginTop: "16px" }}>
                         <table style={{ width: "100%", borderCollapse: "collapse" }}>
                           <thead>
                             <tr style={{ borderBottom: "2px solid #e2e8f0" }}>
-                              {["Date", "Fee", "Status", "Mode", "Reference", "Notes", "Proof"].map((h) => (
+                              {["Date", "Fee", "Status", "Mode", "Reference", "Notes", "Proof", "Receipt"].map((h) => (
                                 <th key={h} style={S.th}>{h}</th>
                               ))}
                             </tr>
@@ -1600,12 +1640,39 @@ export default function PatientPage(
                                         <span style={{ color: "#cbd5e1" }}>—</span>
                                       )}
                                     </td>
+                                    <td style={S.td}>
+                                      {(c.amountReceived || 0) > 0 ? (
+                                        <button
+                                          type="button"
+                                          data-testid={`payment-send-receipt-${c.id || i}`}
+                                          disabled={sendingReceiptId === c.id}
+                                          onClick={() => handleSendReceipt(c)}
+                                          style={{
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            gap: 4,
+                                            padding: "4px 10px",
+                                            borderRadius: "6px",
+                                            border: "1px solid #bbf7d0",
+                                            background: "#f0fdf4",
+                                            color: "#15803d",
+                                            fontSize: "11.5px",
+                                            fontWeight: 700,
+                                            cursor: sendingReceiptId === c.id ? "default" : "pointer",
+                                          }}
+                                        >
+                                          <MessageCircle size={12} /> {sendingReceiptId === c.id ? "…" : "Send"}
+                                        </button>
+                                      ) : (
+                                        <span style={{ color: "#cbd5e1" }}>—</span>
+                                      )}
+                                    </td>
                                   </tr>
                                 );
                               })}
                             {sortedConsultations.filter((c) => c.fee && c.fee > 0).length === 0 && (
                               <tr>
-                                <td colSpan={7} style={{ padding: "40px", textAlign: "center", color: "#94a3b8", fontSize: "15px" }}>
+                                <td colSpan={8} style={{ padding: "40px", textAlign: "center", color: "#94a3b8", fontSize: "15px" }}>
                                   No payment records found
                                 </td>
                               </tr>

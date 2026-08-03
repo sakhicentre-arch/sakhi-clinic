@@ -53,6 +53,21 @@ This backlog is grounded in the project's own history — `BETA_1.0_SCOPE_LOCK.m
 - **Priority:** P3
 - **Estimated complexity:** Medium
 - **Dependencies:** Two-way WhatsApp (above) is not required first, but bulk sending raises its own rate-limit/consent questions worth scoping separately.
+- **Note (post-Doctor-Workflow-Completion):** Generic Bulk Messaging shipped in the Doctor Workflow Completion phase, reusing `FilteredPatientList`'s selectable mode + `reminderQueueService`'s pending→approved→sent queue (`type: "custom"`). This item should be re-scoped at RC2 planning time to cover what's still missing on top of that (e.g. recall-list-specific targeting straight from Follow-up Intelligence buckets) rather than assumed to still be a from-scratch feature.
+
+### Birthday Greeting Automation
+- **Problem:** `Patient` currently has no date-of-birth field, only `age` (string|number) — a birthday-based greeting/reminder is impossible without one. Deliberately **not** added during Doctor Workflow Completion: DOB touches schema evolution, a migration/backfill strategy for existing patients, new UI, validation, and its own reminder logic — a properly-scoped feature in its own right, not a quick field addition.
+- **Benefit:** Low-effort, high-goodwill patient touchpoint; a natural extension of the existing WhatsApp Productivity templates (Payment Receipt, Bulk Messaging) once the underlying data exists.
+- **Priority:** P3
+- **Estimated complexity:** Medium
+- **Dependencies / requirements to design properly at RC2 scoping time:**
+  - Optional `Patient.dateOfBirth` field (year may be unknown/unreliable for older patients — consider whether month+day alone should be a supported partial state)
+  - Manual DOB entry UI (patient registration/edit form), not bulk-imported or inferred
+  - Explicit handling for patients with unknown/unset DOB (must degrade gracefully, never block or nag)
+  - A birthday reminder queue, most likely built on the existing `reminderQueueService` pending→approved→sent state machine (same pattern as follow-up reminders) rather than a new parallel mechanism
+  - A dedicated WhatsApp birthday message template, following the `buildFollowUpMessage()`-style pure-function convention
+  - Yearly recurrence/automation logic (this is the one part of WhatsApp Productivity explicitly scoped as manual-approve-only elsewhere — birthday timing may reasonably need its own automation-vs-approval decision)
+  - Consent/privacy considerations before sending any unsolicited personal message (this is more personal than a clinical reminder and deserves its own opt-in/opt-out consideration, not an assumed extension of existing reminder consent)
 
 ## Clinical Intelligence
 

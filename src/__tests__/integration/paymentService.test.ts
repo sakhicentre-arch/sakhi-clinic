@@ -363,4 +363,31 @@ describe("paymentService", () => {
       expect(await svc.getPaymentHistoryInRange("2026-02-01", "2026-02-28")).toEqual([]);
     });
   });
+
+  describe("buildPaymentReceiptMessage (WhatsApp Productivity)", () => {
+    it("includes fee, amount received, mode, reference, and no balance-due line when fully paid", () => {
+      const message = svc.buildPaymentReceiptMessage("Asha", {
+        fee: 500, amountReceived: 500, paymentMode: "upi", paymentReferenceNumber: "UPI-999",
+        paymentDate: "2026-01-05", date: "2026-01-05",
+      } as any);
+      expect(message).toContain("Asha");
+      expect(message).toContain("₹500");
+      expect(message).toContain("UPI");
+      expect(message).toContain("UPI-999");
+      expect(message).not.toContain("Balance due");
+    });
+
+    it("includes a balance-due line for a partial payment", () => {
+      const message = svc.buildPaymentReceiptMessage("Kavya", {
+        fee: 1000, amountReceived: 400, paymentMode: "cash", date: "2026-01-05",
+      } as any);
+      expect(message).toContain("Balance due: ₹600");
+    });
+
+    it("omits reference/mode lines when not recorded", () => {
+      const message = svc.buildPaymentReceiptMessage("Meera", { fee: 300, amountReceived: 300, date: "2026-01-05" } as any);
+      expect(message).not.toContain("Reference:");
+      expect(message).toContain("Received: ₹300");
+    });
+  });
 });
