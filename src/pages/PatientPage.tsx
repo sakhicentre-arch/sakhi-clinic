@@ -22,12 +22,14 @@ import {
   RefreshCw,
   Trash2,
   X,
+  Eye,
 } from "lucide-react";
 import { usePatientStore } from "../store/usePatientStore";
 import { useConsultationStore } from "../store/useConsultationStore";
 import { useUIStore } from "../store/uiStore";
 import { usePatientSearch } from "../hooks/usePatientSearch";
 import { PullToRefreshScrollRegion, SplitPane, ScrollRegion } from "../components/layout/LayoutPrimitives";
+import PaymentScreenshotViewer from "../components/PaymentScreenshotViewer";
 import { normalizePatientPhone } from "../utils/whatsapp";
 import { openWhatsApp } from "../services/whatsappService";
 import { addPatient as saveNewPatient, updatePatient as saveUpdatedPatient, deletePatient as removePatient } from "../services/patientService";
@@ -263,6 +265,10 @@ export default function PatientPage(
   const [showProfile, setShowProfile] = useState<boolean>(false);
   const [showHistory, setShowHistory] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState(false);
+  // Payment Ledger completion: paymentReferenceNumber/paymentNotes/
+  // paymentScreenshotDataUrl already exist on Consultation (recorded via
+  // paymentService.ts) but were never rendered in the Finance tab.
+  const [viewingScreenshot, setViewingScreenshot] = useState<{ dataUrl: string; date?: string } | null>(null);
 
   const [formData, setFormData] = useState<FormData>(DEFAULT_FORM);
 
@@ -621,6 +627,7 @@ export default function PatientPage(
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
+    <>
     <SplitPane axis={isMobile ? "vertical" : "horizontal"} style={{ ...S.page, overflow: isMobile ? "visible" : S.page.overflow }}>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
@@ -1396,7 +1403,7 @@ export default function PatientPage(
                         <table style={{ width: "100%", borderCollapse: "collapse" }}>
                           <thead>
                             <tr style={{ borderBottom: "2px solid #e2e8f0" }}>
-                              {["Date", "Fee", "Status", "Mode"].map((h) => (
+                              {["Date", "Fee", "Status", "Mode", "Reference", "Notes", "Proof"].map((h) => (
                                 <th key={h} style={S.th}>{h}</th>
                               ))}
                             </tr>
@@ -1433,12 +1440,44 @@ export default function PatientPage(
                                     <td style={{ ...S.td, color: "#64748b" }}>
                                       {c.paymentMode ? c.paymentMode.replace("_", " ").toUpperCase() : "—"}
                                     </td>
+                                    <td style={{ ...S.td, color: "#64748b", fontSize: "12.5px" }}>
+                                      {c.paymentReferenceNumber || "—"}
+                                    </td>
+                                    <td style={{ ...S.td, color: "#64748b", fontSize: "12.5px", maxWidth: 160 }}>
+                                      {c.paymentNotes || "—"}
+                                    </td>
+                                    <td style={S.td}>
+                                      {c.paymentScreenshotDataUrl ? (
+                                        <button
+                                          type="button"
+                                          data-testid={`payment-proof-view-${c.id || i}`}
+                                          onClick={() => setViewingScreenshot({ dataUrl: c.paymentScreenshotDataUrl!, date: c.date })}
+                                          style={{
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            gap: 4,
+                                            padding: "4px 10px",
+                                            borderRadius: "6px",
+                                            border: "1px solid #bfdbfe",
+                                            background: "#eff6ff",
+                                            color: "#1d4ed8",
+                                            fontSize: "11.5px",
+                                            fontWeight: 700,
+                                            cursor: "pointer",
+                                          }}
+                                        >
+                                          <Eye size={12} /> View
+                                        </button>
+                                      ) : (
+                                        <span style={{ color: "#cbd5e1" }}>—</span>
+                                      )}
+                                    </td>
                                   </tr>
                                 );
                               })}
                             {sortedConsultations.filter((c) => c.fee && c.fee > 0).length === 0 && (
                               <tr>
-                                <td colSpan={4} style={{ padding: "40px", textAlign: "center", color: "#94a3b8", fontSize: "15px" }}>
+                                <td colSpan={7} style={{ padding: "40px", textAlign: "center", color: "#94a3b8", fontSize: "15px" }}>
                                   No payment records found
                                 </td>
                               </tr>
@@ -1513,6 +1552,15 @@ export default function PatientPage(
         )}
       </ScrollRegion>
     </SplitPane>
+    {viewingScreenshot && (
+      <PaymentScreenshotViewer
+        dataUrl={viewingScreenshot.dataUrl}
+        date={viewingScreenshot.date}
+        patientName={selectedPatient?.name || "Patient"}
+        onClose={() => setViewingScreenshot(null)}
+      />
+    )}
+    </>
   );
 }
 
