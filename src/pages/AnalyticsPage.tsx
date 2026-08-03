@@ -1,8 +1,8 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useConsultationStore } from "../store/useConsultationStore";
 import { useAppointmentStore } from "../store/useAppointmentStore";
 import { usePatientStore } from "../store/usePatientStore";
-import { Bar, Doughnut, Pie, Line } from "react-chartjs-2";
+import { Bar, Pie } from "react-chartjs-2";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -15,6 +15,9 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
+import { getPaymentSummary, PaymentSummary } from "../services/paymentService";
+import { getFollowUpAnalytics, FollowUpAnalytics } from "../services/followUpIntelligenceService";
+import { getReminderAnalytics, ReminderAnalytics } from "../services/reminderAnalyticsService";
 
 ChartJS.register(
   CategoryScale,
@@ -29,28 +32,70 @@ ChartJS.register(
 );
 
 /**
- * SAKHI HOMEOPATHIC CLINIC - MASTER ANALYTICS (V5.3)
- * ------------------------------------------------------------------------
- * PROTOCOL  : REVENUE & CLINICAL INTELLIGENCE | ZERO TRUNCATION
- * FIXES     : Repaired ts(2339) for outcome & Medicine access.
- * ------------------------------------------------------------------------
+ * AnalyticsPage.tsx
+ * Sakhi Clinic — Reports.
+ *
+ * Doctor Workflow Completion, item 5: previously computed revenue as
+ * `totalVisits * 500` -- a hardcoded, fake assumption, not real payment
+ * data -- and was never wired into any navigation, so no doctor could
+ * actually reach it. Both fixed: revenue now comes from paymentService.ts
+ * (the same source RevenuePage.tsx and the Patient Ledger already use, so
+ * these numbers can never drift from what a patient's own ledger shows),
+ * and this page is now reachable from the left nav ("Reports").
+ *
+ * The miasm/remedy/referral breakdowns below were already computed from
+ * real consultation/patient data -- only the revenue figure was fake.
+ * Follow-up compliance and reminder delivery stats are folded in from
+ * followUpIntelligenceService.ts / reminderAnalyticsService.ts, both
+ * already relied on by FollowUpPage.tsx / RemindersPage.tsx -- no new
+ * data-access logic introduced here.
  */
+
+type ReportPeriod = "daily" | "monthly";
 
 export default function AnalyticsPage() {
   const consultations = useConsultationStore((s) => s.consultations);
   const appointments = useAppointmentStore((s) => s.appointments);
   const patients = usePatientStore((s) => s.patients);
 
-  // --- CORE ENGINE: Aggregate Logic ---
+  const [period, setPeriod] = useState<ReportPeriod>("daily");
+  const [loading, setLoading] = useState(true);
+  const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null);
+  const [followUpAnalytics, setFollowUpAnalytics] = useState<FollowUpAnalytics | null>(null);
+  const [reminderAnalytics, setReminderAnalytics] = useState<ReminderAnalytics | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const [payments, followUps, reminders] = await Promise.all([
+          getPaymentSummary(new Date()),
+          getFollowUpAnalytics(),
+          getReminderAnalytics(),
+        ]);
+        if (cancelled) return;
+        setPaymentSummary(payments);
+        setFollowUpAnalytics(followUps);
+        setReminderAnalytics(reminders);
+      } catch (err) {
+        console.error("[AnalyticsPage] Failed to load report data:", err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // --- CORE ENGINE: Aggregate Logic (real consultation/patient data --
+  // unchanged from before, only the revenue figure below was fake) ---
   const stats = useMemo(() => {
     const totalVisits = consultations.length;
     const cityLightVisits = appointments.filter(a => a.clinic === "City Light" && a.status === "done").length;
     const dabholiVisits = appointments.filter(a => a.clinic === "Dabholi" && a.status === "done").length;
-    
-    // Financial Intelligence
-    const totalRevenue = totalVisits * 500;
 
-    // Miasmatic Intelligence (Synchronized with V8.0 Store)
     const miasmCounts: Record<string, number> = { Psora: 0, Sycosis: 0, Syphilis: 0, Tubercular: 0 };
     consultations.forEach(c => {
       if (c.miasm && miasmCounts[c.miasm] !== undefined) {
@@ -58,7 +103,6 @@ export default function AnalyticsPage() {
       }
     });
 
-    // Remedy Popularity Forensics
     const remedyCounts: Record<string, number> = {};
     consultations.forEach(c => {
       (c.medicines || []).forEach(m => {
@@ -71,15 +115,19 @@ export default function AnalyticsPage() {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
 
-    // Referral Intelligence
     const referralMap: Record<string, number> = {};
     patients.forEach(p => {
       const src = p.referredBy || "Self";
       referralMap[src] = (referralMap[src] || 0) + 1;
     });
 
-    return { totalVisits, totalRevenue, cityLightVisits, dabholiVisits, topRemedies, miasmCounts, referralMap };
+    return { totalVisits, cityLightVisits, dabholiVisits, topRemedies, miasmCounts, referralMap };
   }, [consultations, appointments, patients]);
+
+  const revenueValue = period === "daily"
+    ? paymentSummary?.collectedToday ?? 0
+    : paymentSummary?.collectedThisMonth ?? 0;
+  const revenueLabel = period === "daily" ? "Today's Collected Revenue" : "This Month's Collected Revenue";
 
   // --- UI Charts Configuration ---
   const miasmChartData = {
@@ -120,36 +168,84 @@ export default function AnalyticsPage() {
   };
 
   return (
-    <div style={{ backgroundColor: "#f8fafc", minHeight: "100vh", padding: "40px" }}>
-      
+    <div data-testid="analytics-page" style={{ backgroundColor: "#f8fafc", minHeight: "100vh", padding: "40px" }}>
+
       {/* HEADER SECTION */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "40px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "40px", flexWrap: "wrap", gap: 16 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: "36px", fontWeight: "900", color: "#1e3a8a" }}>Sakhi Clinic Analytics</h1>
-          <p style={{ margin: "5px 0", color: "#64748b", fontSize: "16px" }}>Clinical performance & pathological distribution data</p>
+          <h1 style={{ margin: 0, fontSize: "36px", fontWeight: "900", color: "#1e3a8a" }}>Reports</h1>
+          <p style={{ margin: "5px 0", color: "#64748b", fontSize: "16px" }}>Clinical performance, revenue, and operational statistics</p>
         </div>
-        <div style={{ background: "#10b981", color: "#fff", padding: "12px 25px", borderRadius: "14px", fontWeight: "800" }}>
-          SYSTEM ONLINE: {stats.totalVisits} RECORDS
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <div style={{ display: "flex", borderRadius: 12, border: "1px solid #e2e8f0", overflow: "hidden" }}>
+            <button
+              type="button"
+              data-testid="analytics-period-daily"
+              onClick={() => setPeriod("daily")}
+              style={{
+                padding: "10px 18px", border: "none", fontWeight: 800, fontSize: 13, cursor: "pointer",
+                background: period === "daily" ? "#1e3a8a" : "#fff",
+                color: period === "daily" ? "#fff" : "#64748b",
+              }}
+            >
+              Daily
+            </button>
+            <button
+              type="button"
+              data-testid="analytics-period-monthly"
+              onClick={() => setPeriod("monthly")}
+              style={{
+                padding: "10px 18px", border: "none", fontWeight: 800, fontSize: 13, cursor: "pointer",
+                background: period === "monthly" ? "#1e3a8a" : "#fff",
+                color: period === "monthly" ? "#fff" : "#64748b",
+              }}
+            >
+              Monthly
+            </button>
+          </div>
+          <div style={{ background: "#10b981", color: "#fff", padding: "12px 25px", borderRadius: "14px", fontWeight: "800" }}>
+            {stats.totalVisits} RECORDS
+          </div>
         </div>
       </div>
 
       {/* METRICS GRID */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "30px", marginBottom: "30px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "24px", marginBottom: "30px" }}>
         <div style={cardStyle}>
           <p style={{ color: "#64748b", fontWeight: "900", fontSize: "12px", textTransform: "uppercase" }}>Lifetime Consultations</p>
-          <h2 style={{ fontSize: "42px", fontWeight: "900", margin: "10px 0" }}>{stats.totalVisits}</h2>
-          <div style={{ color: "#10b981", fontWeight: "700" }}>↑ Growth Stable</div>
+          <h2 style={{ fontSize: "36px", fontWeight: "900", margin: "10px 0" }}>{stats.totalVisits}</h2>
         </div>
         <div style={cardStyle}>
-          <p style={{ color: "#64748b", fontWeight: "900", fontSize: "12px", textTransform: "uppercase" }}>Estimated Branch Revenue</p>
-          <h2 style={{ fontSize: "42px", fontWeight: "900", margin: "10px 0" }}>₹{stats.totalRevenue.toLocaleString()}</h2>
-          <p style={{ color: "#94a3b8", fontSize: "12px" }}>Assumption: ₹500/session</p>
+          <p style={{ color: "#64748b", fontWeight: "900", fontSize: "12px", textTransform: "uppercase" }}>{revenueLabel}</p>
+          <h2 style={{ fontSize: "36px", fontWeight: "900", margin: "10px 0" }}>{loading ? "…" : `₹${revenueValue.toLocaleString("en-IN")}`}</h2>
+          <p style={{ color: "#94a3b8", fontSize: "12px" }}>From actual recorded payments</p>
+        </div>
+        <div style={cardStyle}>
+          <p style={{ color: "#64748b", fontWeight: "900", fontSize: "12px", textTransform: "uppercase" }}>Outstanding Payments</p>
+          <h2 style={{ fontSize: "36px", fontWeight: "900", margin: "10px 0", color: (paymentSummary?.outstandingAmount || 0) > 0 ? "#dc2626" : "#0f172a" }}>
+            {loading ? "…" : `₹${Math.round(paymentSummary?.outstandingAmount || 0).toLocaleString("en-IN")}`}
+          </h2>
+          <p style={{ color: "#94a3b8", fontSize: "12px" }}>{paymentSummary?.pendingPaymentsCount ?? 0} patient{paymentSummary?.pendingPaymentsCount === 1 ? "" : "s"} with a balance</p>
+        </div>
+        <div style={cardStyle}>
+          <p style={{ color: "#64748b", fontWeight: "900", fontSize: "12px", textTransform: "uppercase" }}>Follow-up Compliance</p>
+          <h2 style={{ fontSize: "36px", fontWeight: "900", margin: "10px 0", color: "#10b981" }}>
+            {loading ? "…" : `${followUpAnalytics?.completionRate ?? 0}%`}
+          </h2>
+          <p style={{ color: "#94a3b8", fontSize: "12px" }}>{followUpAnalytics?.overdueCount ?? 0} currently overdue</p>
+        </div>
+        <div style={cardStyle}>
+          <p style={{ color: "#64748b", fontWeight: "900", fontSize: "12px", textTransform: "uppercase" }}>Reminder Delivery</p>
+          <h2 style={{ fontSize: "36px", fontWeight: "900", margin: "10px 0" }}>
+            {loading ? "…" : `${reminderAnalytics?.deliverySuccessRate ?? 0}%`}
+          </h2>
+          <p style={{ color: "#94a3b8", fontSize: "12px" }}>{reminderAnalytics?.sentCount ?? 0} sent, {reminderAnalytics?.failedCount ?? 0} failed</p>
         </div>
       </div>
 
       {/* CHARTS GRID */}
       <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: "30px", marginBottom: "30px" }}>
-        
+
         {/* MIASMATIC PIE */}
         <div style={cardStyle}>
           <h3 style={{ marginBottom: "30px", fontWeight: "900", color: "#0f172a" }}>Pathological Miasm Distribution</h3>
@@ -169,7 +265,7 @@ export default function AnalyticsPage() {
 
       {/* SECONDARY INSIGHTS */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "30px" }}>
-        
+
         {/* REFERRAL BAR */}
         <div style={cardStyle}>
           <h3 style={{ marginBottom: "25px", fontWeight: "900" }}>Referral Network Source Tracking</h3>
@@ -178,7 +274,7 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {/* RECENT CLINICAL LIST (REPAIRED & RESTORED) */}
+        {/* RECENT CLINICAL LIST */}
         <div style={cardStyle}>
           <h3 style={{ marginBottom: "20px", fontWeight: "900" }}>Recent Audit Logs</h3>
           <div style={{ maxHeight: "250px", overflowY: "auto" }}>
@@ -197,7 +293,6 @@ export default function AnalyticsPage() {
                     <td style={{ padding: "12px", fontWeight: "800" }}>{c.medicines[0]?.name || "N/A"}</td>
                     <td style={{ padding: "12px" }}>
                       <span style={{ padding: "4px 8px", borderRadius: "8px", background: "#f1f5f9", fontWeight: "700" }}>
-                        {/* 🔥 FIXED: Now points to outcome to align with V8.0 Schema */}
                         {c.outcome || "First Consultation"}
                       </span>
                     </td>

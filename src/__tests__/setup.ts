@@ -38,6 +38,18 @@ const localStorageMock = {
 };
 global.localStorage = localStorageMock as any;
 
+// Mock ResizeObserver -- jsdom has no real implementation. Needed by
+// Chart.js (DashboardPage.tsx / AnalyticsPage.tsx's Pie/Bar charts), which
+// binds a ResizeObserver on mount to auto-resize the canvas; without this,
+// mounting either page throws an uncaught "Cannot read properties of null
+// (reading 'ownerDocument')" during Chart.js's own resize/cleanup path.
+class MockResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+global.ResizeObserver = MockResizeObserver as any;
+
 // Mock matchMedia for responsive hooks/layouts.
 Object.defineProperty(window, "matchMedia", {
   writable: true,

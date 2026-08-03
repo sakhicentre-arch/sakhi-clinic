@@ -11,6 +11,7 @@ import {
   LayoutDashboard, // Added Dashboard icon
   CalendarClock,
   MessageCircle,
+  BarChart3,
 } from "lucide-react";
 import { ActivePage } from "../../store/uiStore";
 
@@ -30,6 +31,7 @@ const navItems = [
   { id: "followups", label: "Follow-ups", icon: CalendarClock, badge: false },
   { id: "reminders", label: "Reminders", icon: MessageCircle, badge: false },
   { id: "revenue", label: "Revenue", icon: TrendingUp, badge: false },
+  { id: "reports", label: "Reports", icon: BarChart3, badge: false },
 ];
 
 export default function LeftNav({ onNavigate, isMobile = false, isOpen = false, onClose }: LeftNavProps) {
