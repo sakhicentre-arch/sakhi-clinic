@@ -284,4 +284,39 @@ describe("paymentService", () => {
       expect(ledger).toEqual({ totalFees: 0, totalPaid: 0, outstanding: 0, consultations: [] });
     });
   });
+
+  describe("getRecentPayments", () => {
+    it("returns only consultations with a real amountReceived, most recent payment first", async () => {
+      await seedPatient("p1", "Asha");
+      await seedPatient("p2", "Bina");
+      await seedConsultation({ id: "c1", patientId: "p1", date: isoOnLocalDay(2026, 0, 1), fee: 500, paymentStatus: "paid", amountReceived: 500, paymentDate: "2026-01-01" });
+      await seedConsultation({ id: "c2", patientId: "p2", date: isoOnLocalDay(2026, 0, 2), fee: 300, paymentStatus: "partial", amountReceived: 100, paymentDate: "2026-01-03" });
+      // No payment recorded at all -- must be excluded, not shown as a ₹0 entry.
+      await seedConsultation({ id: "c3", patientId: "p1", date: isoOnLocalDay(2026, 0, 4), fee: 200 });
+
+      const recent = await svc.getRecentPayments(10);
+      expect(recent.map((p) => p.consultationId)).toEqual(["c2", "c1"]); // Jan 3 before Jan 1
+      expect(recent[0]).toMatchObject({ patientId: "p2", patientName: "Bina", amount: 100 });
+    });
+
+    it("respects the limit and resolves patient names, not just IDs", async () => {
+      await seedPatient("p1", "Asha");
+      for (let i = 0; i < 5; i++) {
+        await seedConsultation({
+          id: `c${i}`, patientId: "p1", date: isoOnLocalDay(2026, 0, i + 1),
+          fee: 100, paymentStatus: "paid", amountReceived: 100, paymentDate: `2026-01-0${i + 1}`,
+        });
+      }
+
+      const recent = await svc.getRecentPayments(3);
+      expect(recent).toHaveLength(3);
+      expect(recent.every((p) => p.patientName === "Asha")).toBe(true);
+    });
+
+    it("returns an empty array when nothing has ever been paid", async () => {
+      await seedPatient("p1", "Asha");
+      await seedConsultation({ id: "c1", patientId: "p1", date: isoOnLocalDay(2026, 0, 1), fee: 500 });
+      expect(await svc.getRecentPayments()).toEqual([]);
+    });
+  });
 });

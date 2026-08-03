@@ -121,7 +121,27 @@ export default function AnalyticsPage() {
       referralMap[src] = (referralMap[src] || 0) + 1;
     });
 
-    return { totalVisits, cityLightVisits, dabholiVisits, topRemedies, miasmCounts, referralMap };
+    // Patient Growth: new registrations per month, last 6 months --
+    // derived purely from Patient.createdAt (already on every record), no
+    // new service or data-access logic needed.
+    const monthLabels: string[] = [];
+    const monthCounts: Record<string, number> = {};
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      monthLabels.push(key);
+      monthCounts[key] = 0;
+    }
+    patients.forEach(p => {
+      if (!p.createdAt) return;
+      const d = new Date(p.createdAt);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      if (key in monthCounts) monthCounts[key]++;
+    });
+    const patientGrowth = monthLabels.map(k => ({ month: k, count: monthCounts[k] }));
+
+    return { totalVisits, cityLightVisits, dabholiVisits, topRemedies, miasmCounts, referralMap, patientGrowth };
   }, [consultations, appointments, patients]);
 
   const revenueValue = period === "daily"
@@ -157,6 +177,16 @@ export default function AnalyticsPage() {
       label: "Patients Acquired",
       data: Object.values(stats.referralMap).slice(0, 5),
       backgroundColor: "#8b5cf6",
+      borderRadius: 5
+    }]
+  };
+
+  const patientGrowthChartData = {
+    labels: stats.patientGrowth.map(g => g.month.slice(5)),
+    datasets: [{
+      label: "New Patients",
+      data: stats.patientGrowth.map(g => g.count),
+      backgroundColor: "#0d7377",
       borderRadius: 5
     }]
   };
@@ -264,7 +294,14 @@ export default function AnalyticsPage() {
       </div>
 
       {/* SECONDARY INSIGHTS */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "30px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "30px", marginBottom: "30px" }}>
+        {/* PATIENT GROWTH */}
+        <div style={cardStyle}>
+          <h3 style={{ marginBottom: "25px", fontWeight: "900" }}>Patient Growth (6mo)</h3>
+          <div style={{ height: "250px" }}>
+            <Bar data={patientGrowthChartData} options={{ maintainAspectRatio: false, scales: { x: { grid: { display: false } } } }} />
+          </div>
+        </div>
 
         {/* REFERRAL BAR */}
         <div style={cardStyle}>
@@ -273,6 +310,9 @@ export default function AnalyticsPage() {
             <Bar data={referralChartData} options={{ indexAxis: 'y', maintainAspectRatio: false }} />
           </div>
         </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "30px" }}>
 
         {/* RECENT CLINICAL LIST */}
         <div style={cardStyle}>

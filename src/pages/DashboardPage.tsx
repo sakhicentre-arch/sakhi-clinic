@@ -24,7 +24,7 @@ import { haptic } from "../utils/haptics";
 import { useQueueStore } from "../store/queueStore";
 import { PullToRefreshScrollRegion } from "../components/layout/LayoutPrimitives";
 import { patientRepository } from "../repositories/patientRepository";
-import { getPaymentSummary } from "../services/paymentService";
+import { getPaymentSummary, getRecentPayments, RecentPaymentEntry } from "../services/paymentService";
 import { getDashboardActionData, DashboardActionData, DashboardPatientRef } from "../services/dashboardActionService";
 import FilteredPatientList, { FilteredListEntry } from "../components/FilteredPatientList";
 import { enqueueReminder, hasActiveReminder } from "../services/reminderQueueService";
@@ -132,6 +132,7 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
   const [storageEstimate, setStorageEstimate] = useState<StorageEstimateSummary | null>(null);
   const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
   const [recentActivity, setRecentActivity] = useState<OperationalEvent[]>([]);
+  const [recentPayments, setRecentPayments] = useState<RecentPaymentEntry[]>([]);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
@@ -169,16 +170,18 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
     let cancelled = false;
     (async () => {
       try {
-        const [health, storage, events] = await Promise.all([
+        const [health, storage, events, payments] = await Promise.all([
           getBackupHealthSummary(),
           getStorageEstimate(),
           getRecentOperationalEvents(8),
+          getRecentPayments(6),
         ]);
         if (cancelled) return;
         setBackupHealth(health);
         setStorageEstimate(storage);
         setLastBackupAt(getLastBackupAt());
         setRecentActivity(events);
+        setRecentPayments(payments);
       } catch (err) {
         console.error("[DashboardPage] Failed to load system-health widgets:", err);
       }
@@ -695,6 +698,32 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           </div>
         </MobileCard>
 
+        {/* SECTION 7b — Recent Payments */}
+        <MobileCard data-testid="dashboard-recent-payments" elevated={false} style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
+          <div className="sakhi-micro">Recent payments</div>
+          <div style={{ marginTop: "var(--space-2)", display: "grid", gap: "var(--space-2)" }}>
+            {recentPayments.length === 0 ? (
+              <div className="sakhi-caption">No payments recorded yet.</div>
+            ) : (
+              recentPayments.map((p) => (
+                <button
+                  type="button"
+                  key={p.consultationId}
+                  onClick={() => { setActivePatientId(p.patientId); onNavigate("patients"); }}
+                  style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-2)", minWidth: 0, background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}
+                >
+                  <span className="sakhi-caption" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0, color: "#0f172a", fontWeight: 700 }}>
+                    {p.patientName}
+                  </span>
+                  <span className="sakhi-caption" style={{ color: "#16a34a", fontWeight: 800, flexShrink: 0 }}>
+                    ₹{p.amount.toLocaleString("en-IN")}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </MobileCard>
+
         {/* SECTION 8 — Recent Activity */}
         <MobileCard data-testid="dashboard-recent-activity" elevated={false} style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
           <div className="sakhi-micro">Recent activity</div>
@@ -1006,6 +1035,36 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
         <div style={{ marginTop: "var(--space-2)", fontSize: 12, color: "#64748b" }}>
           ⚠️ Restoring backup will overwrite all existing data. Use carefully.
         </div>
+      </div>
+
+      {/* Recent Payments */}
+      <div
+        data-testid="dashboard-recent-payments"
+        style={{
+          ...panelStyle,
+          marginTop: isMobile ? 16 : 24,
+          padding: isMobile ? 16 : 24,
+          borderRadius: isMobile ? 20 : 24,
+        }}
+      >
+        <h3 style={panelTitleStyle}>Recent Payments</h3>
+        {recentPayments.length === 0 ? (
+          <div style={emptyPlaceholderStyle}>No payments recorded yet.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {recentPayments.map((p) => (
+              <button
+                type="button"
+                key={p.consultationId}
+                onClick={() => { setActivePatientId(p.patientId); onNavigate("patients"); }}
+                style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13, background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", minWidth: 0 }}
+              >
+                <span style={{ color: "#334155", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{p.patientName}</span>
+                <span style={{ color: "#16a34a", fontWeight: 800, flexShrink: 0 }}>₹{p.amount.toLocaleString("en-IN")}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Recent Activity */}

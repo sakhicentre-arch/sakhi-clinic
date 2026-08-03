@@ -25,6 +25,7 @@
 
 import { db, Consultation, PaymentStatus, PaymentMode } from "./db";
 import { getAllConsultations, saveConsultation } from "./consultationService";
+import { patientRepository } from "../repositories/patientRepository";
 import { isSameLocalDay, isSameLocalMonth } from "../utils/dateOnly";
 
 const formatMoney = (amount: number): string => `₹${Math.round(amount).toLocaleString("en-IN")}`;
@@ -298,6 +299,40 @@ export async function getConsultationsByPaymentStatus(statuses: PaymentStatus[])
   const consultations = await getAllConsultations();
   const set = new Set(statuses);
   return consultations.filter((c) => set.has(c.paymentStatus || "pending"));
+}
+
+export interface RecentPaymentEntry {
+  consultationId: string;
+  patientId: string;
+  patientName: string;
+  amount: number;
+  mode?: PaymentMode;
+  paymentDate: string;
+}
+
+/** Doctor Operations Dashboard "Recent Payments" widget: the most recent
+ * actual money-received events (amountReceived > 0), most recent first --
+ * distinct from getConsultationsByPaymentStatus, which lists consultations
+ * by their CURRENT status rather than individual payment events. */
+export async function getRecentPayments(limit = 10): Promise<RecentPaymentEntry[]> {
+  const [consultations, patients] = await Promise.all([
+    getAllConsultations(),
+    patientRepository.list(),
+  ]);
+  const patientById = new Map(patients.map((p) => [p.id, p]));
+
+  return consultations
+    .filter((c) => (c.amountReceived || 0) > 0 && c.paymentDate)
+    .sort((a, b) => (b.paymentDate || "").localeCompare(a.paymentDate || ""))
+    .slice(0, limit)
+    .map((c) => ({
+      consultationId: c.id,
+      patientId: c.patientId,
+      patientName: patientById.get(c.patientId)?.name || "Unknown Patient",
+      amount: c.amountReceived || 0,
+      mode: c.paymentMode,
+      paymentDate: c.paymentDate!,
+    }));
 }
 
 export interface PatientPaymentSummary {
