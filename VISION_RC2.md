@@ -118,6 +118,7 @@ This backlog is grounded in the project's own history — `BETA_1.0_SCOPE_LOCK.m
 - **Priority:** P2
 - **Estimated complexity:** Small — likely a CSV/PDF export of existing `paymentService.ts` data, not new data modeling.
 - **Dependencies:** None blocking; builds directly on RC1's shipped payment data model.
+- **Status (post-Doctor-Workflow-Completion): Largely shipped.** `csvExportService.exportPaymentsCsv()` now exports date/patient/fee/received/outstanding/status/mode/reference/notes for every fee-bearing consultation, reachable from the Revenue page's "Export CSV" button. What remains open: a PDF format (CSV only today) and any date-range-scoped export beyond what `RevenuePage.tsx`'s Payment History section already filters to before export. Re-scope this item at RC2 planning time to just that remainder rather than a from-scratch export feature.
 
 ## Reporting
 
