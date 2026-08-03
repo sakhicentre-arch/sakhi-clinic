@@ -117,3 +117,34 @@ export async function exportPaymentsCsv(): Promise<void> {
   await logOperationalEvent({ level: "info", type: "csv.payments.export.success", message: "Payment CSV export completed", data: { count: consultations.length } }).catch(() => {});
 }
 
+/** Rubric Intelligence Engine (RC2 Phase 1) -- every non-deleted rubric
+ * across all patients, following the exact same pattern as
+ * exportPaymentsCsv above (headers/row-mapping literal, patientById join,
+ * .catch(() => {}) on logging). */
+export async function exportRubricsCsv(): Promise<void> {
+  const startedAt = new Date().toISOString();
+  await logOperationalEvent({ level: "info", type: "csv.rubrics.export.start", message: "Rubric CSV export started", timestamp: startedAt }).catch(() => {});
+  const [rubrics, patients] = await Promise.all([
+    db.rubrics.filter((r) => !r.deletedAt).toArray(),
+    patientRepository.list(),
+  ]);
+  const patientById = new Map(patients.map((p) => [p.id, p]));
+  const rows = [
+    ["createdAt", "patientName", "consultationId", "category", "text", "source", "status", "confidence", "reason", "doctorNote"],
+    ...rubrics.map((r) => [
+      r.createdAt || "",
+      patientById.get(r.patientId)?.name || "Unknown Patient",
+      r.consultationId || "",
+      r.category || "",
+      r.text || "",
+      r.source || "",
+      r.status || "",
+      typeof r.confidence === "number" ? Math.round(r.confidence * 100) : "",
+      r.reason || "",
+      r.doctorNote || "",
+    ]),
+  ];
+  downloadCsv(rowsToCsv(rows), `sakhi-rubrics-${stamp()}.csv`);
+  await logOperationalEvent({ level: "info", type: "csv.rubrics.export.success", message: "Rubric CSV export completed", data: { count: rubrics.length } }).catch(() => {});
+}
+
