@@ -75,7 +75,7 @@ describe("Module A — v49 to v50 migration (A6)", () => {
     const { db } = await import("../../services/db");
     await db.open();
 
-    expect(db.verno).toBe(54);
+    expect(db.verno).toBe(55);
 
     const patients = await db.patients.toArray();
     expect(patients).toHaveLength(2);

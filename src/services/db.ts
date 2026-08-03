@@ -158,6 +158,13 @@ export interface Consultation {
 
   // Idempotency stamp for AI Learning Engine
   learnedAt?: string;
+
+  // Idempotency stamp for the Rubric Intelligence Engine (RC2 Phase 1) --
+  // same convention as learnedAt above: prevents regenerating duplicate
+  // pending rubric rows every time an already-processed consultation is
+  // re-saved. Set once rubricParserService/rubricMatcherService have run
+  // for this consultation.
+  rubricsGeneratedAt?: string;
 }
 
 export interface Patient {
@@ -339,6 +346,74 @@ export interface ReminderHistoryEntry {
   note?: string; // e.g. failure reason -- best-effort; no real delivery receipts exist without a WhatsApp Business API
 }
 
+// RC2 Phase 1 -- Rubric Intelligence Engine. Converts free-text consultation
+// findings into structured homeopathic rubric categories for doctor review.
+// NOT the same feature as the "Rubric Suggestion Automation (Module 7)" test
+// naming elsewhere in this codebase, which is really learningEngine.ts's
+// historical remedy-pattern matching (colloquial use of the word "rubric") --
+// see RUBRIC_ENGINE_ARCHITECTURE.md's terminology section. This feature
+// identifies which homeopathic category a symptom statement belongs to
+// (Mind, Generals, Particulars, Modalities, ...); it never suggests or
+// ranks remedies, and it does not match against a licensed repertory
+// (that's a separate, later, data-licensing-gated phase).
+//
+// One normalized table with a status field, deliberately mirroring
+// ReminderQueueEntry/ReminderStatus's proven shape above rather than
+// separate approved/rejected tables -- see RUBRIC_ENGINE_ARCHITECTURE.md's
+// domain-model section for why each requested "entity" (Rubric Category,
+// Rubric Source, Rubric Match, Rubric Confidence, Approved/Rejected
+// Rubric, Rubric Group, Doctor Notes) is a field here rather than a table.
+export type RubricCategory =
+  | "mind"
+  | "generals"
+  | "particulars"
+  | "modalities"
+  | "sensations"
+  | "locations"
+  | "concomitants"
+  | "etiology"
+  | "sleep"
+  | "foodDesires"
+  | "foodAversions"
+  | "thermals"
+  | "perspiration"
+  | "menses"
+  | "pregnancy"
+  | "children"
+  | "oldAge"
+  | "familyHistory";
+
+export type RubricSource = "ai" | "manual";
+export type RubricStatus = "pending" | "approved" | "rejected";
+
+export interface RubricEntry {
+  id: string;
+  consultationId: string;
+  patientId: string; // denormalized, same convention as ReminderQueueEntry.patientId
+  category: RubricCategory;
+  text: string; // the rubric phrase itself, e.g. "Desires: sweets"
+  matchedSentence?: string; // AI only: the source text snippet that triggered this suggestion
+  reason?: string; // AI only: human-readable why this was suggested
+  confidence?: number; // AI only: 0-1
+  evidence?: string; // AI only: supporting detail beyond the reason summary
+  priority?: number; // ranking among suggestions generated for the same consultation
+  source: RubricSource;
+  status: RubricStatus;
+  pinned?: boolean;
+  doctorNote?: string;
+  // Merge/Split audit trail -- parent pointers rather than a separate join
+  // table, per RUBRIC_ENGINE_ARCHITECTURE.md's "Rubric Group" mapping.
+  mergedFromIds?: string[];
+  splitFromId?: string;
+  decidedAt?: string; // set when status transitions to approved/rejected; cleared on undo
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: number;
+  version?: number;
+  deviceId?: string;
+  syncStatus?: "local" | "pending" | "synced" | "conflict";
+}
+
 // Pre-Phase-3 (Backup Engine): every backup/restore operation produces a
 // structured, persisted job record with lifecycle states and a progress
 // event log -- not just a fire-and-forget async function call. This is
@@ -422,6 +497,7 @@ class SakhiDB extends Dexie {
   reminderQueue!: Dexie.Table<ReminderQueueEntry, string>;
   reminderHistory!: Dexie.Table<ReminderHistoryEntry, string>;
   backupJobs!: Dexie.Table<BackupJob, string>;
+  rubrics!: Dexie.Table<RubricEntry, string>;
 
   constructor() {
     super("SakhiClinicDB");
@@ -629,6 +705,29 @@ class SakhiDB extends Dexie {
       reminderQueue: "id, patientId, type, status, dueAt, channel",
       reminderHistory: "id, reminderId, patientId, attemptedAt, action",
       backupJobs: "id, kind, providerId, status, createdAt, nextRetryAt"
+    });
+
+    // V55 (RC2 Phase 1 -- Rubric Intelligence Engine): rubrics. Purely
+    // additive, same pattern as V51/V52 -- no existing table's shape
+    // changes, no .upgrade() data transform, since there is nothing in any
+    // existing table to migrate INTO this from. The new Consultation field
+    // (rubricsGeneratedAt) is a plain optional property, not an index, same
+    // "purely additive" treatment as V53/V54's new fields -- it doesn't
+    // need to appear in the .stores() string.
+    this.version(55).stores({
+      patients: "id, name, phone, nextFollowUpDate, lastVisit, deletedAt, createdAt, updatedAt",
+      consultations: "id, patientId, appointmentId, date, outcome, clinicId, paymentStatus, learnedAt, deletedAt, createdAt, updatedAt",
+      learning: "++id, [remedy+symptomKey], remedy, symptomKey",
+      caseMemory: "++id, patientId, remedy, outcome, deletedAt, createdAt, updatedAt",
+      appointments: "id, date, patientId, status, clinic, [date+time+clinic], [clinic+date], deletedAt, createdAt, updatedAt",
+      drafts: "id, patientId, savedAt",
+      syncOutbox: "id, entityType, entityId, operationType, timestamp, syncStatus, retryCount",
+      operationalEvents: "id, timestamp, level, type",
+      appMeta: "id",
+      reminderQueue: "id, patientId, type, status, dueAt, channel",
+      reminderHistory: "id, reminderId, patientId, attemptedAt, action",
+      backupJobs: "id, kind, providerId, status, createdAt, nextRetryAt",
+      rubrics: "id, consultationId, patientId, category, status, source, createdAt, deletedAt"
     });
   }
 }

@@ -8,6 +8,7 @@ import type {
   CaseMemoryEntry,
   SyncOutboxEntry,
   OperationalEvent,
+  RubricEntry,
 } from "./db";
 import { ensureMeta } from "../repositories/metadata";
 import { getDeviceId } from "../utils/deviceId";
@@ -32,6 +33,11 @@ export type ClinicExportBundleV2 = {
     caseMemory: CaseMemoryEntry[];
     syncOutbox: SyncOutboxEntry[];
     operationalEvents: OperationalEvent[];
+    // RC2 Phase 1 -- Rubric Intelligence Engine. Unlike reminderQueue/
+    // backupJobs (deliberately excluded above as operational/device
+    // state), approved rubrics are clinical output tied to a consultation
+    // -- a doctor restoring a backup would expect them to come back.
+    rubrics: RubricEntry[];
   };
 };
 
@@ -63,7 +69,7 @@ export async function exportClinicBundle(): Promise<ClinicExportBundleV2> {
   const exportedAt = nowIso();
   const deviceId = getDeviceId();
 
-  const [patients, consultations, appointments, drafts, learning, caseMemory, syncOutbox, operationalEvents] = await Promise.all([
+  const [patients, consultations, appointments, drafts, learning, caseMemory, syncOutbox, operationalEvents, rubrics] = await Promise.all([
     db.patients.toArray(),
     db.consultations.toArray(),
     db.appointments.toArray(),
@@ -72,6 +78,7 @@ export async function exportClinicBundle(): Promise<ClinicExportBundleV2> {
     db.caseMemory.toArray(),
     db.syncOutbox.toArray(),
     db.operationalEvents.toArray(),
+    db.rubrics.toArray(),
   ]);
 
   return {
@@ -122,6 +129,7 @@ export async function exportClinicBundle(): Promise<ClinicExportBundleV2> {
       caseMemory: sortById(caseMemory.map((m) => ensureMeta(m, { exportedAt }))),
       syncOutbox: sortOutbox(syncOutbox),
       operationalEvents: sortById((operationalEvents || []) as any),
+      rubrics: sortById((rubrics || []).map((r) => ensureMeta(r as any, { exportedAt }))),
     },
   };
 }
@@ -132,7 +140,7 @@ function isRecordArray(value: any): value is any[] {
 
 function assertBundleDataShape(data: any) {
   if (!data) throw new Error("Invalid backup: missing data");
-  const requiredArrays = ["patients", "consultations", "appointments", "drafts", "learning", "caseMemory", "syncOutbox", "operationalEvents"];
+  const requiredArrays = ["patients", "consultations", "appointments", "drafts", "learning", "caseMemory", "syncOutbox", "operationalEvents", "rubrics"];
   for (const key of requiredArrays) {
     if (data[key] === undefined) continue; // allow partials for legacy imports
     if (!isRecordArray(data[key])) throw new Error(`Invalid backup: data.${key} must be an array`);
@@ -147,7 +155,7 @@ export type ImportPlan = {
 };
 
 function countIncoming(data: any): Record<string, number> {
-  const keys = ["patients", "consultations", "appointments", "drafts", "learning", "caseMemory", "syncOutbox", "operationalEvents"] as const;
+  const keys = ["patients", "consultations", "appointments", "drafts", "learning", "caseMemory", "syncOutbox", "operationalEvents", "rubrics"] as const;
   const out: Record<string, number> = {};
   keys.forEach((k) => {
     out[k] = Array.isArray((data as any)[k]) ? (data as any)[k].length : 0;
@@ -240,6 +248,7 @@ export async function importClinicBundleWithOptions(bundle: any, opts: { mode: I
     const tablesToClear = [
       db.patients, db.consultations, db.appointments, db.drafts,
       db.learning, db.caseMemory, db.syncOutbox, db.operationalEvents,
+      db.rubrics,
     ];
     await db.transaction("rw", tablesToClear, async () => {
       for (const table of tablesToClear) {
@@ -254,6 +263,7 @@ export async function importClinicBundleWithOptions(bundle: any, opts: { mode: I
       if (data.caseMemory && db.caseMemory) await db.caseMemory.bulkPut((data.caseMemory as CaseMemoryEntry[]).map((m) => ensureMeta(m as any, { exportedAt })));
       if (data.syncOutbox) await db.syncOutbox.bulkPut(data.syncOutbox as SyncOutboxEntry[]);
       if (data.operationalEvents) await db.operationalEvents.bulkPut(data.operationalEvents as OperationalEvent[]);
+      if (data.rubrics) await db.rubrics.bulkPut((data.rubrics as RubricEntry[]).map((r) => ensureMeta(r as any, { exportedAt })));
     });
   }
 
@@ -267,6 +277,7 @@ export async function importClinicBundleWithOptions(bundle: any, opts: { mode: I
       const existingCaseMemory = await db.caseMemory.toArray();
       const existingOutbox = await db.syncOutbox.toArray();
       const existingEvents = await db.operationalEvents.toArray();
+      const existingRubrics = await db.rubrics.toArray();
 
       const mergedPatients = upsertByIdPreferNewer(existingPatients, (data.patients || []) as any).map((p) => ensureMeta(p as any, { exportedAt }));
       const mergedConsultations = upsertByIdPreferNewer(existingConsultations, (data.consultations || []) as any).map((c) => ensureMeta(c as any, { exportedAt }));
@@ -299,6 +310,7 @@ export async function importClinicBundleWithOptions(bundle: any, opts: { mode: I
       (existingEvents || []).forEach((e) => eventsById.set(e.id, e));
       ((data.operationalEvents || []) as OperationalEvent[]).forEach((e) => eventsById.set(e.id, e));
       const mergedEvents = Array.from(eventsById.values());
+      const mergedRubrics = upsertByIdPreferNewer(existingRubrics as any, (data.rubrics || []) as any).map((r) => ensureMeta(r as any, { exportedAt }));
 
       await db.patients.clear();
       await db.consultations.clear();
@@ -308,6 +320,7 @@ export async function importClinicBundleWithOptions(bundle: any, opts: { mode: I
       await db.caseMemory.clear();
       await db.syncOutbox.clear();
       await db.operationalEvents.clear();
+      await db.rubrics.clear();
 
       await db.patients.bulkPut(mergedPatients as any);
       await db.consultations.bulkPut(mergedConsultations as any);
@@ -317,6 +330,7 @@ export async function importClinicBundleWithOptions(bundle: any, opts: { mode: I
       await db.caseMemory.bulkPut(mergedCaseMemory as any);
       await db.syncOutbox.bulkPut(mergedOutbox as any);
       await db.operationalEvents.bulkPut(mergedEvents as any);
+      await db.rubrics.bulkPut(mergedRubrics as any);
     });
   }
 
