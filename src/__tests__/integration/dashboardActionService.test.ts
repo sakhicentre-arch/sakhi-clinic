@@ -152,6 +152,11 @@ describe("dashboardActionService", () => {
 
     const data = await svc.getDashboardActionData(realToday);
     expect(data.consultationsPendingToday).toBe(2);
+    // Doctor Workflow Completion, item 4 (dashboard "Today's Appointments"
+    // widget): unlike consultationsPendingToday, this counts every
+    // appointment booked for today regardless of status -- a1+a2+a3+a4,
+    // excluding only a5 (wrong day).
+    expect(data.todaysAppointmentsCount).toBe(4);
   });
 
   it("pendingReminders dedupes per patient across pending + approved queue entries", async () => {

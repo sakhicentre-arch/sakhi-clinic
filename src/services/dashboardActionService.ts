@@ -40,6 +40,9 @@ export interface DashboardActionData {
   pendingPayments: DashboardPatientRef[];
   consultationsCompletedToday: number;
   consultationsPendingToday: number;
+  /** Total appointments booked for referenceDate, any status -- distinct
+   * from consultationsPendingToday (a status-filtered subset of this). */
+  todaysAppointmentsCount: number;
 }
 
 function toRef(p: Pick<Patient, "id" | "name" | "phone">, detail: string): DashboardPatientRef {
@@ -150,5 +153,6 @@ export async function getDashboardActionData(referenceDate: Date = new Date()): 
     repeatPatientsToday,
     consultationsCompletedToday: todaysConsultations.length,
     consultationsPendingToday,
+    todaysAppointmentsCount: todaysAppointments.length,
   };
 }

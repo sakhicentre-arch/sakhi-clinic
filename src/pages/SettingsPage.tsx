@@ -45,7 +45,7 @@ import {
   deleteRemoteBackupFile,
   type BackupPreview,
 } from "../services/backupService";
-import { getLastBackupAt, getLastBackupSizeBytes, getLastRestoreAt, getBackupAgeDays, isBackupStale } from "../services/storageHealthService";
+import { getLastBackupAt, getLastBackupSizeBytes, getLastRestoreAt, getBackupAgeDays, isBackupStale, formatBytes } from "../services/storageHealthService";
 import { importPatientsFromCsv, PatientImportMode } from "../services/patientImportService";
 import { exportPatientsCsv } from "../services/csvExportService";
 import { runDexieHealthCheck, DexieHealthReport } from "../services/storageIntegrityService";
@@ -88,13 +88,6 @@ function formatTs(iso: string | null): string {
   } catch {
     return iso;
   }
-}
-
-function formatBytes(bytes: number | null | undefined): string {
-  if (bytes == null) return "—";
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(0)} KB`;
-  return `${(kb / 1024).toFixed(2)} MB`;
 }
 
 function voiceEngineSupported(): boolean {

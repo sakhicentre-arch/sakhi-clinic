@@ -28,6 +28,16 @@ import { getPaymentSummary } from "../services/paymentService";
 import { getDashboardActionData, DashboardActionData, DashboardPatientRef } from "../services/dashboardActionService";
 import FilteredPatientList, { FilteredListEntry } from "../components/FilteredPatientList";
 import { enqueueReminder, hasActiveReminder } from "../services/reminderQueueService";
+import {
+  getBackupHealthSummary,
+  getStorageEstimate,
+  getLastBackupAt,
+  formatBytes,
+  BackupHealthSummary,
+  StorageEstimateSummary,
+} from "../services/storageHealthService";
+import { getRecentOperationalEvents } from "../services/operationalEventLogService";
+import { OperationalEvent } from "../services/db";
 
 // Module 1 -- the 7 patient-list action cards. Each key maps straight to a
 // DashboardActionData field; "consultations" (completed/pending) are plain
@@ -115,6 +125,14 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
   const [actionData, setActionData] = useState<DashboardActionData | null>(null);
   const [activeCardKey, setActiveCardKey] = useState<ActionCardKey | null>(null);
 
+  // System-health widgets -- all reuse existing services (storageHealthService.ts,
+  // operationalEventLogService.ts) already relied on by SettingsPage.tsx /
+  // the backup subsystem itself; no new data-access logic here.
+  const [backupHealth, setBackupHealth] = useState<BackupHealthSummary | null>(null);
+  const [storageEstimate, setStorageEstimate] = useState<StorageEstimateSummary | null>(null);
+  const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
+  const [recentActivity, setRecentActivity] = useState<OperationalEvent[]>([]);
+
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
     const update = () => setIsMobile(mq.matches);
@@ -122,6 +140,53 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
     mq.addEventListener("change", update);
     return () => mq.removeEventListener("change", update);
   }, []);
+
+  // Auto-refresh: previously load-once-on-mount (plus manual pull-to-refresh
+  // bumping refreshNonce). Mirrors the visibility-aware polling convention
+  // already used by backupSchedulerService.ts/maintenanceRuntimeService.ts
+  // -- refresh periodically while the tab is open, and immediately on
+  // return from background, rather than a component-specific mechanism.
+  // Reuses the exact existing refresh trigger (refreshNonce) instead of a
+  // second fetch path.
+  useEffect(() => {
+    const REFRESH_INTERVAL_MS = 60_000;
+    const interval = window.setInterval(() => setRefreshNonce((n) => n + 1), REFRESH_INTERVAL_MS);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") setRefreshNonce((n) => n + 1);
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
+  // System-health widgets: independent of activeClinic (backup/storage/
+  // activity aren't per-clinic concepts), so kept in their own effect keyed
+  // only on refreshNonce -- switching the clinic filter shouldn't refetch
+  // these needlessly.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [health, storage, events] = await Promise.all([
+          getBackupHealthSummary(),
+          getStorageEstimate(),
+          getRecentOperationalEvents(8),
+        ]);
+        if (cancelled) return;
+        setBackupHealth(health);
+        setStorageEstimate(storage);
+        setLastBackupAt(getLastBackupAt());
+        setRecentActivity(events);
+      } catch (err) {
+        console.error("[DashboardPage] Failed to load system-health widgets:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshNonce]);
 
   useEffect(() => {
     const fetchAnalytics = async () => {
@@ -364,6 +429,7 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
     const successRate = Math.round(((stats?.outcomeStats[ConsultationOutcome.IMPROVED] || 0) / (stats?.outcomeStats.total || 1)) * 100);
     const waiting = (queue || []).filter((e) => e.status === "waiting").length;
     const inProgress = (queue || []).find((e) => e.status === "in-progress") || null;
+    const inConsultationCount = (queue || []).filter((e) => e.status === "in-progress").length;
     const todayPaid = Math.round(stats?.todayPaid || 0);
     const todayPending = Math.round(stats?.todayPending || 0);
     const monthPaid = Math.round(stats?.monthPaid || 0);
@@ -567,6 +633,88 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           </div>
           <div className="sakhi-caption" style={{ marginTop: "var(--space-2)" }}>Last 7 days consult volume</div>
         </MobileCard>
+
+        {/* SECTION 6 — Today's Operations (Appointments / In Consultation) */}
+        <MobileCard data-testid="dashboard-operations" elevated={false} style={{ marginTop: "var(--space-3)", padding: "var(--space-3)", borderRadius: "var(--radius-3)" }}>
+          <div className="sakhi-micro">Operations</div>
+          <div style={{ marginTop: "var(--space-2)", display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "var(--space-2)" }}>
+            <div style={{ minWidth: 0 }}>
+              <div className="sakhi-caption">Today's Appointments</div>
+              <div className="sakhi-title" style={{ marginTop: "var(--space-1)" }}>{actionData?.todaysAppointmentsCount ?? 0}</div>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div className="sakhi-caption">In Consultation</div>
+              <div className="sakhi-title" style={{ marginTop: "var(--space-1)", color: "var(--brand)" }}>{inConsultationCount}</div>
+            </div>
+          </div>
+        </MobileCard>
+
+        {/* SECTION 7 — System Health (Backup Health / Last Backup / Storage Used) */}
+        <MobileCard data-testid="dashboard-system-health" style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
+          <div className="sakhi-micro">System health</div>
+          {backupHealth && (
+            <div
+              className="sakhi-row"
+              style={{
+                gap: 8,
+                alignItems: "center",
+                marginTop: "var(--space-2)",
+                padding: "var(--space-2)",
+                borderRadius: 10,
+                background:
+                  backupHealth.level === "healthy" ? "rgba(21,128,61,0.08)" : backupHealth.level === "attention" ? "rgba(180,83,9,0.08)" : "rgba(185,28,28,0.08)",
+              }}
+            >
+              <span
+                className="sakhi-body"
+                style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: backupHealth.level === "healthy" ? "#15803d" : backupHealth.level === "attention" ? "#b45309" : "#b91c1c",
+                }}
+              >
+                {backupHealth.message}
+              </span>
+            </div>
+          )}
+          <div style={{ marginTop: "var(--space-2)", display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "var(--space-2)" }}>
+            <div style={{ minWidth: 0 }}>
+              <div className="sakhi-caption">Last Backup</div>
+              <div className="sakhi-body" style={{ marginTop: "var(--space-1)", fontWeight: 900 }}>
+                {lastBackupAt ? new Date(lastBackupAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "Never"}
+              </div>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div className="sakhi-caption">Storage Used</div>
+              <div className="sakhi-body" style={{ marginTop: "var(--space-1)", fontWeight: 900 }}>
+                {storageEstimate?.usageBytes != null
+                  ? `${formatBytes(storageEstimate.usageBytes)}${storageEstimate.quotaBytes ? ` / ${formatBytes(storageEstimate.quotaBytes)}` : ""}`
+                  : "Not available"}
+              </div>
+            </div>
+          </div>
+        </MobileCard>
+
+        {/* SECTION 8 — Recent Activity */}
+        <MobileCard data-testid="dashboard-recent-activity" elevated={false} style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
+          <div className="sakhi-micro">Recent activity</div>
+          <div style={{ marginTop: "var(--space-2)", display: "grid", gap: "var(--space-2)" }}>
+            {recentActivity.length === 0 ? (
+              <div className="sakhi-caption">No recent activity recorded.</div>
+            ) : (
+              recentActivity.slice(0, 5).map((event) => (
+                <div key={event.id} style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-2)", minWidth: 0 }}>
+                  <span className="sakhi-caption" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                    {event.message}
+                  </span>
+                  <span className="sakhi-caption" style={{ color: "#94a3b8", flexShrink: 0 }}>
+                    {new Date(event.timestamp).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </MobileCard>
       </ResponsiveContainer>
     );
   }
@@ -668,6 +816,8 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           val={`${Math.round(((stats?.outcomeStats[ConsultationOutcome.IMPROVED] || 0) / (stats?.outcomeStats.total || 1)) * 100)}%`}
           color="#10b981"
         />
+        <SummaryCard label="Today's Appointments" val={actionData?.todaysAppointmentsCount} color="#0d7377" />
+        <SummaryCard label="In Consultation" val={(queue || []).filter((e) => e.status === "in-progress").length} color="#7c3aed" />
       </div>
 
       <div
@@ -784,6 +934,38 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
         }}
       >
         <h3 style={panelTitleStyle}>🔐 Data Safety & Backup</h3>
+        {backupHealth && (
+          <div
+            data-testid="dashboard-backup-health"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 14px",
+              borderRadius: 10,
+              marginBottom: 16,
+              background:
+                backupHealth.level === "healthy" ? "rgba(21,128,61,0.08)" : backupHealth.level === "attention" ? "rgba(180,83,9,0.08)" : "rgba(185,28,28,0.08)",
+              color: backupHealth.level === "healthy" ? "#15803d" : backupHealth.level === "attention" ? "#b45309" : "#b91c1c",
+              fontWeight: 800,
+              fontSize: 12,
+            }}
+          >
+            {backupHealth.message}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 24, marginBottom: 16, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#475569" }}>
+            Last Backup: <strong style={{ color: "#0f172a" }}>{lastBackupAt ? new Date(lastBackupAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "Never"}</strong>
+          </div>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#475569" }}>
+            Storage Used: <strong style={{ color: "#0f172a" }}>
+              {storageEstimate?.usageBytes != null
+                ? `${formatBytes(storageEstimate.usageBytes)}${storageEstimate.quotaBytes ? ` / ${formatBytes(storageEstimate.quotaBytes)}` : ""}`
+                : "Not available"}
+            </strong>
+          </div>
+        </div>
         <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
           <button
             onClick={exportBackup}
@@ -824,6 +1006,33 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
         <div style={{ marginTop: "var(--space-2)", fontSize: 12, color: "#64748b" }}>
           ⚠️ Restoring backup will overwrite all existing data. Use carefully.
         </div>
+      </div>
+
+      {/* Recent Activity */}
+      <div
+        data-testid="dashboard-recent-activity"
+        style={{
+          ...panelStyle,
+          marginTop: isMobile ? 16 : 24,
+          padding: isMobile ? 16 : 24,
+          borderRadius: isMobile ? 20 : 24,
+        }}
+      >
+        <h3 style={panelTitleStyle}>Recent Activity</h3>
+        {recentActivity.length === 0 ? (
+          <div style={emptyPlaceholderStyle}>No recent activity recorded.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {recentActivity.slice(0, 8).map((event) => (
+              <div key={event.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13 }}>
+                <span style={{ color: "#334155", fontWeight: 700 }}>{event.message}</span>
+                <span style={{ color: "#94a3b8", fontWeight: 700, flexShrink: 0 }}>
+                  {new Date(event.timestamp).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       </div>
