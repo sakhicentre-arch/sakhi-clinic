@@ -22,12 +22,17 @@ import {
   PaymentStatus,
   PaymentMode,
   normalizeOutcome,
+  RubricEntry,
+  RubricCategory,
 } from "../services/db";
 import {
   getConsultationsByPatient,
   saveConsultation,
 } from "../services/consultationService";
 import { getPatientById } from "../services/patientService";
+import { listRubricsByConsultation, addManualRubric, approveRubric, rejectRubric } from "../services/rubricApprovalService";
+import { ALL_RUBRIC_CATEGORIES, RUBRIC_CATEGORY_LABELS } from "../data/rubricVocabulary";
+import { confidenceLabel } from "../services/rubricConfidenceService";
 import { compressPaymentScreenshot } from "../services/paymentService";
 
 import PrescriptionEditor from "../components/PrescriptionEditor";
@@ -886,6 +891,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   }, [outboxHealth]);
   const setActiveConsultation = useUIStore((s) => s.setActiveConsultation);
   const setDraftStatus = useUIStore((s) => s.setDraftStatus);
+  const setActivePage = useUIStore((s) => s.setActivePage);
   const queue = useQueueStore((s) => s.queue);
   const setQueueStatus = useQueueStore((s) => s.setStatus);
   const voiceSession = useVoiceSessionContext();
@@ -1203,6 +1209,54 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [consultations, editingId]);
+
+  // RC2 Phase 1 -- Rubric Intelligence Engine: read-only summary of
+  // rubrics already generated for the patient's most recent past visit.
+  // Generation itself happens in the background inside
+  // consultationService.saveConsultation() (fire-and-forget, same
+  // pattern as the learning engine), not here. Anchored on
+  // previousConsultation (consultations[0], already used above for
+  // pre-fill) rather than editingId/isEditing: this reducer's EDIT_START
+  // action is never actually dispatched anywhere in this file today, so
+  // gating on it would render this panel permanently unreachable. The
+  // patient's last visit is a real, populated value the moment this page
+  // has any history to show at all -- and since saveConsultation()
+  // reloads consultations right after a save (loadData()), the visit a
+  // doctor just finished becomes previousConsultation the very next time
+  // they're on this patient's page, once background generation completes.
+  const [consultationRubrics, setConsultationRubrics] = useState<RubricEntry[]>([]);
+  const [showManualRubricForm, setShowManualRubricForm] = useState(false);
+  const [manualRubricDraft, setManualRubricDraft] = useState<{ category: RubricCategory; text: string }>({ category: "mind", text: "" });
+  const rubricAnchorConsultationId = previousConsultation?.id || null;
+
+  const loadConsultationRubrics = useCallback(async () => {
+    if (!rubricAnchorConsultationId) {
+      setConsultationRubrics([]);
+      return;
+    }
+    try {
+      setConsultationRubrics(await listRubricsByConsultation(rubricAnchorConsultationId));
+    } catch (err) {
+      console.error("[ConsultationPage] Failed to load rubrics for consultation:", err);
+    }
+  }, [rubricAnchorConsultationId]);
+
+  useEffect(() => {
+    void loadConsultationRubrics();
+  }, [loadConsultationRubrics]);
+
+  const handleAddManualRubric = async () => {
+    if (!rubricAnchorConsultationId || !manualRubricDraft.text.trim()) return;
+    await addManualRubric({
+      consultationId: rubricAnchorConsultationId,
+      patientId,
+      category: manualRubricDraft.category,
+      text: manualRubricDraft.text.trim(),
+    });
+    setManualRubricDraft({ category: "mind", text: "" });
+    setShowManualRubricForm(false);
+    await loadConsultationRubrics();
+  };
 
   const remedySuggestions = useMemo(() => {
     if (!consultations || !formData.chiefComplaint) return [];
@@ -1685,6 +1739,114 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
         )}
         {remedySuggestions.length === 0 && learnedPatterns.length === 0 && <p style={emptyTextStyle}>Analyzing case tokens for patterns...</p>}
       </div>
+
+      {/* RC2 Phase 1 -- Rubric Intelligence Engine. Rubrics are generated
+          in the background by consultationService.saveConsultation() for
+          the patient's most recent visit -- nothing here writes to the
+          clinical record on its own; approve/reject below call the same
+          rubricApprovalService.ts the dedicated Rubric Review page uses.
+          Only rubrics awaiting a decision show inline; the full list
+          (including already-approved/rejected) lives on the Rubric
+          Review page, one click away. */}
+      {previousConsultation && (
+        <div data-testid="consultation-rubric-panel" className="card" style={{ background: "linear-gradient(180deg, #f0fdfa 0%, #fff 100%)", borderColor: "#99f6e4" }}>
+          <div style={{ ...cardHeaderStyle, color: "#0d7377" }}>🧩 Rubric Suggestions — Last Visit</div>
+          {consultationRubrics.filter((r) => r.status === "pending").length === 0 ? (
+            <p style={emptyTextStyle}>
+              {consultationRubrics.length > 0
+                ? `${consultationRubrics.length} rubric${consultationRubrics.length === 1 ? "" : "s"} already reviewed for this visit.`
+                : "No rubrics identified yet for this visit."}
+            </p>
+          ) : (
+            <div style={{ marginBottom: 12 }}>
+              {consultationRubrics.filter((r) => r.status === "pending").map((r) => (
+                <div key={r.id} style={patternRowStyle} data-testid={`consultation-rubric-${r.id}`}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ fontWeight: 800, color: "#0d7377" }}>{RUBRIC_CATEGORY_LABELS[r.category]}</div>
+                    <span style={{ fontSize: 11, fontWeight: 900, color: "#fff", background: "#0d7377", padding: "2px 6px", borderRadius: 6, textTransform: "uppercase" }}>
+                      {confidenceLabel(r.confidence || 0)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#134e4a", fontWeight: 700, marginTop: 4 }}>{r.text}</div>
+                  {r.reason && <div style={{ fontSize: 11, color: "#64748b" }}>{r.reason}</div>}
+                  <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                    <button
+                      type="button"
+                      data-testid={`consultation-rubric-approve-${r.id}`}
+                      onClick={async () => { await approveRubric(r.id); await loadConsultationRubrics(); }}
+                      style={{ fontSize: 11, fontWeight: 900, padding: "4px 10px", borderRadius: 6, border: "1px solid #10b981", background: "#ecfdf5", color: "#047857", cursor: "pointer" }}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      data-testid={`consultation-rubric-reject-${r.id}`}
+                      onClick={async () => { await rejectRubric(r.id); await loadConsultationRubrics(); }}
+                      style={{ fontSize: 11, fontWeight: 900, padding: "4px 10px", borderRadius: 6, border: "1px solid #fca5a5", background: "#fef2f2", color: "#b91c1c", cursor: "pointer" }}
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {showManualRubricForm ? (
+            <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+              <select
+                data-testid="consultation-manual-rubric-category"
+                value={manualRubricDraft.category}
+                onChange={(e) => setManualRubricDraft((d) => ({ ...d, category: e.target.value as RubricCategory }))}
+                style={{ padding: "6px 8px", borderRadius: 6, border: "1px solid #99f6e4", fontSize: 12 }}
+              >
+                {ALL_RUBRIC_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{RUBRIC_CATEGORY_LABELS[c]}</option>
+                ))}
+              </select>
+              <input
+                data-testid="consultation-manual-rubric-text"
+                value={manualRubricDraft.text}
+                onChange={(e) => setManualRubricDraft((d) => ({ ...d, text: e.target.value }))}
+                placeholder="Rubric text…"
+                style={{ padding: "6px 8px", borderRadius: 6, border: "1px solid #99f6e4", fontSize: 12 }}
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  data-testid="consultation-manual-rubric-save"
+                  disabled={!manualRubricDraft.text.trim()}
+                  onClick={handleAddManualRubric}
+                  style={{ fontSize: 11, fontWeight: 900, padding: "5px 12px", borderRadius: 6, border: "none", background: "#0d7377", color: "#fff", cursor: "pointer" }}
+                >
+                  Save
+                </button>
+                <button type="button" onClick={() => setShowManualRubricForm(false)} style={{ fontSize: 11, fontWeight: 800, padding: "5px 12px", borderRadius: 6, border: "none", background: "transparent", color: "#64748b", cursor: "pointer" }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              data-testid="consultation-add-manual-rubric"
+              onClick={() => setShowManualRubricForm(true)}
+              style={{ fontSize: 11, fontWeight: 900, padding: "5px 12px", borderRadius: 6, border: "1px dashed #0d7377", background: "transparent", color: "#0d7377", cursor: "pointer" }}
+            >
+              + Add Manual Rubric
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setActivePage("rubrics")}
+            style={{ display: "block", marginTop: 10, fontSize: 11, fontWeight: 800, color: "#0d7377", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+          >
+            View all rubrics in Rubric Review →
+          </button>
+        </div>
+      )}
+
       <div className="card" style={{ background: "linear-gradient(180deg, #fdf4ff 0%, #fff 100%)", borderColor: "#e9d5ff" }}>
         <div style={{ ...cardHeaderStyle, color: "#7c3aed" }}>💊 Clinical Memory</div>
         {frequentRemedies.length > 0 && (
@@ -2799,6 +2961,74 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* RC2 Phase 1 -- Rubric Intelligence Engine, Quick Mode.
+                  The desktop sidebar's fuller "Rubric Suggestions" card
+                  (with reason/evidence text and an Add Manual Rubric form)
+                  only renders in Classic Mode -- but Classic Mode is the
+                  first-visit default, while Quick Mode is what a returning
+                  patient (the exact case where previousConsultation has
+                  rubrics to show) actually gets. Same state/handlers as
+                  the sidebar version, just a more compact presentation
+                  matching this stage's existing chip-row idiom. */}
+              {previousConsultation && (
+                <div data-testid="consultation-rubric-panel" className="sakhi-surface-muted" style={{ padding: "var(--space-3)" }}>
+                  <div className="sakhi-label" style={{ color: "#0d7377" }}>Rubric Suggestions — Last Visit</div>
+                  {consultationRubrics.filter((r) => r.status === "pending").length === 0 ? (
+                    <div className="sakhi-caption" style={{ marginTop: 6 }}>
+                      {consultationRubrics.length > 0
+                        ? `${consultationRubrics.length} rubric${consultationRubrics.length === 1 ? "" : "s"} already reviewed.`
+                        : "No rubrics identified yet."}
+                    </div>
+                  ) : (
+                    <div className="mt-3" style={{ display: "grid", gap: 8 }}>
+                      {consultationRubrics.filter((r) => r.status === "pending").map((r) => (
+                        <div key={r.id} data-testid={`consultation-rubric-${r.id}`} className="sakhi-progress-card">
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ fontWeight: 800, fontSize: 12, color: "#0d7377" }}>{RUBRIC_CATEGORY_LABELS[r.category]}: {r.text}</span>
+                          </div>
+                          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                            <button type="button" data-testid={`consultation-rubric-approve-${r.id}`} onClick={async () => { await approveRubric(r.id); await loadConsultationRubrics(); }} className="sakhi-chip sakhi-tap sakhi-focus-ring" data-tone="brand" data-selected="false">Approve</button>
+                            <button type="button" data-testid={`consultation-rubric-reject-${r.id}`} onClick={async () => { await rejectRubric(r.id); await loadConsultationRubrics(); }} className="sakhi-chip sakhi-tap sakhi-focus-ring" data-tone="muted" data-selected="false">Reject</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {showManualRubricForm ? (
+                    <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+                      <select
+                        data-testid="consultation-manual-rubric-category"
+                        value={manualRubricDraft.category}
+                        onChange={(e) => setManualRubricDraft((d) => ({ ...d, category: e.target.value as RubricCategory }))}
+                        className="sakhi-input"
+                      >
+                        {ALL_RUBRIC_CATEGORIES.map((c) => (
+                          <option key={c} value={c}>{RUBRIC_CATEGORY_LABELS[c]}</option>
+                        ))}
+                      </select>
+                      <input
+                        data-testid="consultation-manual-rubric-text"
+                        value={manualRubricDraft.text}
+                        onChange={(e) => setManualRubricDraft((d) => ({ ...d, text: e.target.value }))}
+                        placeholder="Rubric text…"
+                        className="sakhi-input"
+                      />
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button type="button" data-testid="consultation-manual-rubric-save" disabled={!manualRubricDraft.text.trim()} onClick={handleAddManualRubric} className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring" style={{ minHeight: 36, width: "auto" }}>Save</button>
+                        <button type="button" onClick={() => setShowManualRubricForm(false)} className="sakhi-caption" style={{ background: "none", border: "none", cursor: "pointer" }}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button type="button" data-testid="consultation-add-manual-rubric" onClick={() => setShowManualRubricForm(true)} className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring" style={{ marginTop: 8, minHeight: 36, width: "auto" }}>
+                      + Add Manual Rubric
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setActivePage("rubrics")} className="sakhi-caption" style={{ display: "block", marginTop: 8, background: "none", border: "none", color: "#0d7377", fontWeight: 800, cursor: "pointer", textDecoration: "underline" }}>
+                    View all in Rubric Review →
+                  </button>
                 </div>
               )}
             </MobileSection>

@@ -11,6 +11,8 @@ import { getDeviceId } from "../utils/deviceId";
 import { generateId } from "../utils/generateId";
 import { enqueueOutbox } from "./outboxService";
 import { captureOperationError, logOperationAttempt, logOperationSuccess } from "./runtimeErrorCaptureService";
+import { generateRubricSuggestions } from "./rubricSuggestionEngine";
+import { insertPendingRubrics } from "./rubricApprovalService";
 
 const nowIso = () => new Date().toISOString();
 
@@ -98,6 +100,28 @@ export async function saveConsultation(c: Consultation): Promise<boolean> {
         .catch((error) => {
           console.error("[consultationService] Clinical learning failed in background:", error);
         });
+    }
+
+    // RC2 Phase 1 -- Rubric Intelligence Engine: same fire-and-forget,
+    // idempotency-stamped background pattern as the learning engine call
+    // just above. Runs once per consultation (guarded by
+    // rubricsGeneratedAt, mirroring learnedAt) regardless of which page
+    // called saveConsultation() -- the trigger lives here, not duplicated
+    // per caller. Never blocks or fails the save itself.
+    if (!(normalized as Consultation).rubricsGeneratedAt) {
+      (async () => {
+        const patient = await db.patients.get((normalized as Consultation).patientId);
+        const suggestions = generateRubricSuggestions(normalized as Consultation, patient);
+        if (suggestions.length > 0) {
+          await insertPendingRubrics((normalized as Consultation).id, (normalized as Consultation).patientId, suggestions);
+        }
+        await db.consultations.update((normalized as Consultation).id, {
+          rubricsGeneratedAt: nowIso(),
+          updatedAt: nowIso(),
+        });
+      })().catch((error) => {
+        console.error("[consultationService] Rubric generation failed in background:", error);
+      });
     }
 
     return true;
