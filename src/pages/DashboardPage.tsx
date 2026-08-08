@@ -26,6 +26,7 @@ import { PullToRefreshScrollRegion } from "../components/layout/LayoutPrimitives
 import { patientRepository } from "../repositories/patientRepository";
 import { getPaymentSummary, getRecentPayments, RecentPaymentEntry } from "../services/paymentService";
 import { getQuickAccessPatients, QuickAccessPatient } from "../services/patientService";
+import { getRubricDashboardSummary, RubricDashboardSummary } from "../services/rubricAnalyticsService";
 import { getDashboardActionData, DashboardActionData, DashboardPatientRef } from "../services/dashboardActionService";
 import FilteredPatientList, { FilteredListEntry } from "../components/FilteredPatientList";
 import { enqueueReminder, hasActiveReminder } from "../services/reminderQueueService";
@@ -135,6 +136,7 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
   const [recentActivity, setRecentActivity] = useState<OperationalEvent[]>([]);
   const [recentPayments, setRecentPayments] = useState<RecentPaymentEntry[]>([]);
   const [quickAccessPatients, setQuickAccessPatients] = useState<QuickAccessPatient[]>([]);
+  const [rubricSummary, setRubricSummary] = useState<RubricDashboardSummary | null>(null);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
@@ -172,12 +174,13 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
     let cancelled = false;
     (async () => {
       try {
-        const [health, storage, events, payments, quickAccess] = await Promise.all([
+        const [health, storage, events, payments, quickAccess, rubrics] = await Promise.all([
           getBackupHealthSummary(),
           getStorageEstimate(),
           getRecentOperationalEvents(8),
           getRecentPayments(6),
           getQuickAccessPatients(8),
+          getRubricDashboardSummary(),
         ]);
         if (cancelled) return;
         setBackupHealth(health);
@@ -186,6 +189,7 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
         setRecentActivity(events);
         setRecentPayments(payments);
         setQuickAccessPatients(quickAccess);
+        setRubricSummary(rubrics);
       } catch (err) {
         console.error("[DashboardPage] Failed to load system-health widgets:", err);
       }
@@ -757,6 +761,56 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
           </div>
         </MobileCard>
 
+        {/* SECTION 7d — Rubric Intelligence (RC2 Phase 1, Phase 9) */}
+        <MobileCard data-testid="dashboard-rubric-summary" elevated={false} style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
+          <div className="sakhi-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div className="sakhi-micro">Rubric intelligence</div>
+            <button type="button" onClick={() => onNavigate("rubrics")} className="sakhi-caption" style={{ background: "none", border: "none", color: "#0d7377", fontWeight: 800, cursor: "pointer" }}>
+              Review →
+            </button>
+          </div>
+          {rubricSummary && (
+            <>
+              <div style={{ marginTop: "var(--space-2)", display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "var(--space-2)" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="sakhi-caption">Pending review</div>
+                  <div className="sakhi-body" style={{ marginTop: 2, fontWeight: 900 }}>{rubricSummary.pendingCount}</div>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div className="sakhi-caption">Today</div>
+                  <div className="sakhi-body" style={{ marginTop: 2, fontWeight: 900 }}>{rubricSummary.todayCount}</div>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div className="sakhi-caption">Manual</div>
+                  <div className="sakhi-body" style={{ marginTop: 2, fontWeight: 900 }}>{rubricSummary.manualCount}</div>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div className="sakhi-caption">AI confidence</div>
+                  <div className="sakhi-body" style={{ marginTop: 2, fontWeight: 900 }}>{rubricSummary.aiConfidenceAvgPercent != null ? `${rubricSummary.aiConfidenceAvgPercent}%` : "—"}</div>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div className="sakhi-caption">Approved today</div>
+                  <div className="sakhi-body" style={{ marginTop: 2, fontWeight: 900 }}>{rubricSummary.approvedTodayCount}</div>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div className="sakhi-caption">Top category</div>
+                  <div className="sakhi-body" style={{ marginTop: 2, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rubricSummary.mostCommon[0]?.label || "—"}</div>
+                </div>
+              </div>
+              {rubricSummary.recentlyApproved.length > 0 && (
+                <div style={{ marginTop: "var(--space-3)" }}>
+                  <div className="sakhi-caption" style={{ fontWeight: 800 }}>Recently approved</div>
+                  <div style={{ marginTop: "var(--space-1)", display: "grid", gap: "var(--space-1)" }}>
+                    {rubricSummary.recentlyApproved.slice(0, 3).map((r) => (
+                      <div key={r.id} className="sakhi-caption" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.text}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </MobileCard>
+
         {/* SECTION 8 — Recent Activity */}
         <MobileCard data-testid="dashboard-recent-activity" elevated={false} style={{ marginTop: "var(--space-3)", borderRadius: "var(--radius-4)" }}>
           <div className="sakhi-micro">Recent activity</div>
@@ -1134,6 +1188,64 @@ const DashboardPage: React.FC<Props> = ({ onNavigate }) => {
               </button>
             ))}
           </div>
+        )}
+      </div>
+
+      {/* Rubric Intelligence (RC2 Phase 1, Phase 9) */}
+      <div
+        data-testid="dashboard-rubric-summary"
+        style={{
+          ...panelStyle,
+          marginTop: isMobile ? 16 : 24,
+          padding: isMobile ? 16 : 24,
+          borderRadius: isMobile ? 20 : 24,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={panelTitleStyle}>Rubric Intelligence</h3>
+          <button type="button" onClick={() => onNavigate("rubrics")} style={{ background: "none", border: "none", color: "#0d7377", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+            Review →
+          </button>
+        </div>
+        {rubricSummary && (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 12 }}>
+              <div>
+                <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>Pending review</div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: "#0f172a" }}>{rubricSummary.pendingCount}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>Today</div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: "#0f172a" }}>{rubricSummary.todayCount}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>Manual</div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: "#0f172a" }}>{rubricSummary.manualCount}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>AI confidence</div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: "#0f172a" }}>{rubricSummary.aiConfidenceAvgPercent != null ? `${rubricSummary.aiConfidenceAvgPercent}%` : "—"}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>Approved today</div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: "#0f172a" }}>{rubricSummary.approvedTodayCount}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>Top category</div>
+                <div style={{ fontSize: 14, fontWeight: 900, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rubricSummary.mostCommon[0]?.label || "—"}</div>
+              </div>
+            </div>
+            {rubricSummary.recentlyApproved.length > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 12, color: "#64748b", fontWeight: 800, marginBottom: 6 }}>Recently approved</div>
+                <div style={{ display: "grid", gap: 6 }}>
+                  {rubricSummary.recentlyApproved.slice(0, 5).map((r) => (
+                    <div key={r.id} style={{ fontSize: 13, color: "#334155", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.text}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 

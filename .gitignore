@@ -4,3 +4,6 @@ dist
 *.zip
 playwright-report/
 playwright-results/
+
+.vercel
+.env*

@@ -69,3 +69,87 @@ describe("PrescriptionEditor — Favorite Medicines", () => {
     expect(screen.getByText(/★ Arnica Montana/)).toBeInTheDocument();
   });
 });
+
+/**
+ * Doctor-reported UX fix (DOCTOR_UI_UX_REVIEW_V2.md Issue 3): selecting a
+ * remedy suggestion must close the dropdown in the same handler that commits
+ * the value. Root cause was the suggestion button's onClick never resetting
+ * `activeIndex`, leaving the list visibly open over the rest of the form.
+ */
+describe("PrescriptionEditor — remedy dropdown closes on selection (Issue 3 fix)", () => {
+  it("closes the suggestion dropdown immediately after a suggestion is clicked", () => {
+    const onChange = vi.fn();
+    render(
+      <PrescriptionEditor
+        value={[{ id: "m1", name: "", potency: "", dosage: "", duration: "" } as Medicine]}
+        onChange={onChange}
+        suggestions={[{ name: "Arnica Montana", score: 10, reason: "Matches: pain" }]}
+      />
+    );
+
+    fireEvent.focus(screen.getByPlaceholderText("Remedy"));
+    const suggestionBtn = screen.getByText("Arnica Montana");
+    expect(suggestionBtn).toBeInTheDocument();
+
+    fireEvent.click(suggestionBtn);
+
+    expect(onChange).toHaveBeenCalledWith([
+      expect.objectContaining({ name: "Arnica Montana" }),
+    ]);
+    expect(screen.queryByText("Arnica Montana")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Doctor-reported UX fix (DOCTOR_UI_UX_REVIEW_V2.md Issue 2): the frequency
+ * picker had no free-text path at all -- only a closed preset list plus a
+ * native <select> "More..." picker (now retired per
+ * WORLD_CLASS_CLINIC_UI_GUIDELINES.md, which bans native <select> for
+ * anything selected during a live consultation). `dosage` is already a free
+ * string on the Medicine model, so this is UI-only, no schema change.
+ */
+describe("PrescriptionEditor — custom frequency entry (Issue 2 fix)", () => {
+  it('shows an "Other…" option and stores a typed custom frequency directly as the dosage string', () => {
+    const onChange = vi.fn();
+    render(
+      <PrescriptionEditor
+        value={[{ id: "m1", name: "Arnica Montana", potency: "30C", dosage: "1-1-1", duration: "5 Days" } as Medicine]}
+        onChange={onChange}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Other…"));
+    const customInput = screen.getByPlaceholderText(/1-0-1 after food/);
+    fireEvent.change(customInput, { target: { value: "alternate days" } });
+    fireEvent.blur(customInput);
+
+    expect(onChange).toHaveBeenCalledWith([
+      expect.objectContaining({ dosage: "alternate days" }),
+    ]);
+  });
+
+  it("no longer renders a native <select> for frequency", () => {
+    const { container } = render(
+      <PrescriptionEditor
+        value={[{ id: "m1", name: "Arnica Montana", potency: "30C", dosage: "1-1-1", duration: "5 Days" } as Medicine]}
+        onChange={vi.fn()}
+      />
+    );
+    expect(container.querySelector("select")).not.toBeInTheDocument();
+  });
+
+  it("re-opening the custom input after a value was already set pre-fills it for editing", () => {
+    const onChange = vi.fn();
+    render(
+      <PrescriptionEditor
+        value={[{ id: "m1", name: "Arnica Montana", potency: "30C", dosage: "alternate days", duration: "5 Days" } as Medicine]}
+        onChange={onChange}
+      />
+    );
+    // A dosage value outside the preset list should render as its own
+    // selected-looking chip showing the actual text, not a generic "Other…".
+    const chip = screen.getByText("alternate days");
+    fireEvent.click(chip);
+    expect(screen.getByPlaceholderText(/1-0-1 after food/)).toHaveValue("alternate days");
+  });
+});

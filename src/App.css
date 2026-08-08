@@ -1,5 +1,9 @@
 :root {
-  color-scheme: normal;
+  /* Doctor-reported UX fix (Finding 0): "normal" is the CSS default and does
+     NOT opt out of the OS/browser's forced-dark auto-inversion -- explicitly
+     declaring "light" does. See index.html's color-scheme meta tag for the
+     full explanation; both must agree. */
+  color-scheme: light;
 
   /* ================= Mobile Design Tokens =================
    * Spacing scale: 4, 8, 16, 24, 32, 48 (px)

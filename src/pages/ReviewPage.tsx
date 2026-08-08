@@ -1,16 +1,25 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 
 // REPLACE WITH YOUR ACTUAL GOOGLE REVIEW LINK
 const GOOGLE_REVIEW_LINK = "https://g.page/r/XXXXX/review";
 
 export default function ReviewPage() {
-  const [params] = useSearchParams();
   const [guj, setGuj] = useState("");
   const [eng, setEng] = useState("");
   const [copied, setCopied] = useState("");
 
+  // Deployment-audit fix: this page previously read query params via
+  // react-router-dom's useSearchParams(), but the app has no <Router>
+  // anywhere (App.tsx renders pages via plain useState, not client-side
+  // routing) -- that hook throws outside a Router context, so this page
+  // would crash on load in production. Reading window.location.search
+  // directly needs no Router and matches how the rest of the app already
+  // inspects the URL (see App.tsx's window.location.pathname checks).
+  // Read once on mount: this page is only ever reached via a fresh
+  // full-page navigation with the query string already present, not via
+  // in-app client-side navigation that could change it afterward.
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
     const g = params.get("g") || "";
     const e = params.get("e") || "";
 
@@ -22,7 +31,7 @@ export default function ReviewPage() {
       setGuj(g);
       setEng(e);
     }
-  }, [params]);
+  }, []);
 
   const copyText = async (text: string, type: string) => {
     try {

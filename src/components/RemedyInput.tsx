@@ -203,7 +203,11 @@ export default function RemedyInput({
         {/* Suggestions dropdown */}
         {open && filtered.length > 0 && (
           <div
-            className="sakhi-menu-panel absolute left-0 right-0 top-full z-40 mt-2"
+            // Doctor-reported UX fix (V2 review CC2): z-40 rendered below the
+            // mobile bottom nav (zIndex: 60 in BottomNav.tsx), so the
+            // dropdown for a lower-on-screen field could appear partially
+            // hidden behind it. z-[70] guarantees it always renders above.
+            className="sakhi-menu-panel absolute left-0 right-0 top-full z-[70] mt-2"
           >
             {filtered.map((s, idx) => (
               <button

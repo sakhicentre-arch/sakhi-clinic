@@ -55,6 +55,12 @@ describe("PatientPage write-failure surfacing (A4)", () => {
     fireEvent.change(screen.getByTestId("patient-phone-input"), {
       target: { value: "9876543210" },
     });
+    // Gender has no default since the UI fix removing the silent "Male"
+    // default (WORLD_CLASS_CLINIC_UI_GUIDELINES.md Section 6) -- must be
+    // set explicitly, like name/phone, for the form to submit at all.
+    fireEvent.change(screen.getByTestId("patient-gender-select"), {
+      target: { value: "Female" },
+    });
 
     expect(usePatientStore.getState().lastError).toBeNull();
 
@@ -78,6 +84,9 @@ describe("PatientPage write-failure surfacing (A4)", () => {
     });
     fireEvent.change(screen.getByTestId("patient-phone-input"), {
       target: { value: "9876543211" },
+    });
+    fireEvent.change(screen.getByTestId("patient-gender-select"), {
+      target: { value: "Male" },
     });
 
     await act(async () => {

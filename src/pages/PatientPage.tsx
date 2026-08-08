@@ -35,6 +35,7 @@ import PaymentScreenshotViewer from "../components/PaymentScreenshotViewer";
 import { normalizePatientPhone } from "../utils/whatsapp";
 import { openWhatsApp } from "../services/whatsappService";
 import { addPatient as saveNewPatient, updatePatient as saveUpdatedPatient, deletePatient as removePatient, togglePinPatient } from "../services/patientService";
+import { detectDuplicate } from "../services/patientImportService";
 import { getQuickNote, saveQuickNote } from "../utils/quickNotes";
 import { getConsultationOutstanding, getConsultationCollected, buildPaymentReceiptMessage } from "../services/paymentService";
 import { listRemindersByPatient, enqueueReminder, hasActiveReminder } from "../services/reminderQueueService";
@@ -212,7 +213,12 @@ function EmptySelect() {
 const DEFAULT_FORM: FormData = {
   name: "",
   age: "",
-  gender: "Male",
+  // UX fix (WORLD_CLASS_CLINIC_UI_GUIDELINES.md Section 6): a required field
+  // with no natural default must not pre-select a value indistinguishable
+  // from an intentional choice -- silently defaulting to "Male" was a
+  // data-integrity bug waiting to happen. Left blank; the field now requires
+  // an explicit choice (see the <select>'s `required` + blank first option).
+  gender: "",
   phone: "",
   address: "",
   referredBy: "",
@@ -282,6 +288,14 @@ export default function PatientPage(
   const [actionNoteForReceipt, setActionNoteForReceipt] = useState<string>("");
 
   const [formData, setFormData] = useState<FormData>(DEFAULT_FORM);
+  // Doctor-reported UX fix: "same patient should not accidentally be created
+  // twice." Reuses patientImportService.ts's existing detectDuplicate (phone
+  // normalized, falling back to name+age) instead of the old raw
+  // phone-string-equality check, which missed formatting differences and had
+  // no name-based fallback at all. This is a soft warning, not a hard block --
+  // set only when a probable match is found and cleared once the doctor picks
+  // either "Open existing patient" or "Continue creating new patient".
+  const [duplicateMatch, setDuplicateMatch] = useState<typeof patients[number] | null>(null);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
@@ -476,7 +490,7 @@ export default function PatientPage(
       setFormData({
         name: selectedPatient.name || "",
         age: selectedPatient.age ? String(selectedPatient.age) : "",
-        gender: selectedPatient.gender || "Male",
+        gender: selectedPatient.gender || "",
         phone: selectedPatient.phone || "",
         address: selectedPatient.address || "",
         referredBy: (selectedPatient as any).referredBy || "",
@@ -527,34 +541,7 @@ export default function PatientPage(
     []
   );
 
-  const handleAdd = async (
-    e: React.FormEvent<HTMLFormElement>
-  ): Promise<void> => {
-    e.preventDefault();
-
-    if (!formData.name.trim()) {
-      alert("Patient name is required.");
-      return;
-    }
-    if (!formData.phone.trim()) {
-      alert("Phone number is required.");
-      return;
-    }
-
-    const normalizedPhone = formData.phone.trim();
-    const duplicateExists = patients.some(
-      (p) =>
-        String(p.phone || "").trim() === normalizedPhone &&
-        (!selectedPatient || p.id !== selectedPatient.id)
-    );
-
-    if (duplicateExists) {
-      alert(
-        "A patient with this phone number already exists. Please use the existing patient record or enter a different phone number."
-      );
-      return;
-    }
-
+  const performSavePatient = async (): Promise<void> => {
     setIsSaving(true);
     try {
       if (selectedPatient) {
@@ -575,6 +562,7 @@ export default function PatientPage(
       setPatientStoreError(null);
       setFormData(DEFAULT_FORM);
       setReports([]);
+      setDuplicateMatch(null);
       syncSelectedId(null);
     } catch (error) {
       console.error("Error saving patient:", error);
@@ -584,6 +572,59 @@ export default function PatientPage(
       setIsSaving(false);
     }
   };
+
+  const handleAdd = async (
+    e: React.FormEvent<HTMLFormElement>
+  ): Promise<void> => {
+    e.preventDefault();
+
+    if (!formData.name.trim()) {
+      alert("Patient name is required.");
+      return;
+    }
+    if (!formData.phone.trim()) {
+      alert("Phone number is required.");
+      return;
+    }
+    if (!formData.gender.trim()) {
+      alert("Please select a gender.");
+      return;
+    }
+
+    // Duplicate check only applies to genuinely new patients -- editing an
+    // existing record should never warn about colliding with itself.
+    if (!selectedPatient) {
+      const match = detectDuplicate(patients, {
+        name: formData.name,
+        phone: formData.phone,
+        age: formData.age,
+      });
+      if (match) {
+        setDuplicateMatch(match);
+        return;
+      }
+    }
+
+    await performSavePatient();
+  };
+
+  // "Open existing patient" -- switches the panel to the matched record
+  // (selectedPatient's own sync effect populates the form from it) instead
+  // of creating a second one.
+  const handleOpenDuplicateMatch = useCallback(() => {
+    if (!duplicateMatch) return;
+    syncSelectedId(String(duplicateMatch.id));
+    setDuplicateMatch(null);
+  }, [duplicateMatch, syncSelectedId]);
+
+  // "Continue creating new patient" -- the doctor has seen the possible
+  // match and confirmed this is genuinely a different person (e.g. a family
+  // member sharing a phone/name); proceed with the save as originally
+  // intended, without re-running the duplicate check.
+  const handleContinueCreatingNew = useCallback(async () => {
+    setDuplicateMatch(null);
+    await performSavePatient();
+  }, [formData, selectedPatient, reports]);
 
   const handleDeletePatient = async (
     e: React.MouseEvent,
@@ -769,7 +810,9 @@ export default function PatientPage(
                 style={{ ...S.input, flex: 1.4 }}
                 value={formData.gender}
                 onChange={(e) => handleFormChange("gender", e.target.value)}
+                required
               >
+                <option value="" disabled>Select Gender *</option>
                 <option value="Male">Male</option>
                 <option value="Female">Female</option>
                 <option value="Other">Other</option>
@@ -924,6 +967,45 @@ export default function PatientPage(
               <option value="Sycosis">Sycosis</option>
               <option value="Syphilis">Syphilis</option>
             </select>
+
+            {duplicateMatch && (
+              <div data-testid="duplicate-patient-warning" style={S.duplicateWarningCard}>
+                <div style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
+                  <AlertTriangle size={18} color="#b45309" style={{ flexShrink: 0, marginTop: 2 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 800, fontSize: "13.5px", color: "#92400e" }}>
+                      Possible existing patient found
+                    </div>
+                    <div style={{ fontSize: "12.5px", color: "#78350f", marginTop: "4px", lineHeight: 1.5 }}>
+                      <strong>{duplicateMatch.name || "Unnamed"}</strong>
+                      {duplicateMatch.age ? ` · ${duplicateMatch.age} yrs` : ""}
+                      {duplicateMatch.gender ? ` · ${duplicateMatch.gender}` : ""}
+                      {duplicateMatch.phone ? ` · ${duplicateMatch.phone}` : " · no phone on file"}
+                      {" "}already exists in your patient list. This may be the same person.
+                    </div>
+                    <div style={{ display: "flex", gap: "8px", marginTop: "10px", flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        data-testid="duplicate-open-existing-btn"
+                        onClick={handleOpenDuplicateMatch}
+                        style={S.duplicateWarningPrimaryBtn}
+                      >
+                        Open existing patient
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="duplicate-continue-new-btn"
+                        onClick={handleContinueCreatingNew}
+                        style={S.duplicateWarningSecondaryBtn}
+                      >
+                        Continue creating new patient
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <button
               data-testid="save-patient-btn"
               type="submit"
@@ -955,11 +1037,14 @@ export default function PatientPage(
           <span style={S.searchIcon}>
             <Search size={16} color="#94a3b8" />
           </span>
+          {/* UX fix (WORLD_CLASS_CLINIC_UI_GUIDELINES.md Section 6): no
+              desktop-authored keyboard hint on a touchscreen -- it wastes
+              label space describing an affordance that doesn't exist there. */}
           <input
             data-testid="patient-search-input"
             className="sakhi-input"
             style={{ ...S.input, paddingLeft: "40px", fontSize: "13.5px" }}
-            placeholder="Search patients... (↑↓ navigate, Enter to open)"
+            placeholder={isMobile ? "Search patients..." : "Search patients... (↑↓ navigate, Enter to open)"}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             onKeyDown={handleSearchKeyDown}
@@ -1073,13 +1158,20 @@ export default function PatientPage(
           <div style={{ display: "flex", flexDirection: "column", gap: "28px" }}>
 
             {/* ── 1. PATIENT HEADER ─────────────────────────────────────── */}
-            <div style={S.heroCard}>
-              <div style={{ display: "flex", alignItems: "center", gap: "24px", flex: 1 }}>
-                <div style={S.heroAvatar}>
+            {/* Doctor-reported UX fix (Issue 4): mobile variant per
+                WORLD_CLASS_CLINIC_UI_GUIDELINES.md Section 5 -- stacks
+                vertically with a full-width CTA below the identity block
+                instead of the desktop two-column row, which had no room for
+                a 76px avatar + name + up to 4 pills + a non-shrinking
+                button column on a ~375-412px phone (the button text was
+                being clipped off-screen). */}
+            <div style={{ ...S.heroCard, ...(isMobile ? S.heroCardMobile : null) }}>
+              <div style={{ display: "flex", alignItems: "center", gap: isMobile ? "14px" : "24px", flex: 1, minWidth: 0 }}>
+                <div style={{ ...S.heroAvatar, ...(isMobile ? S.heroAvatarMobile : null) }}>
                   {selectedPatient.name?.[0]?.toUpperCase() || "P"}
                 </div>
-                <div style={{ flex: 1 }}>
-                  <h1 style={S.heroName}>{selectedPatient.name}</h1>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <h1 style={{ ...S.heroName, ...(isMobile ? S.heroNameMobile : null) }}>{selectedPatient.name}</h1>
                   <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "10px" }}>
                     <span style={S.heroPill}>
                       <User size={13} />
@@ -1113,10 +1205,18 @@ export default function PatientPage(
                   )}
                 </div>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "stretch" }}>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                  alignItems: "stretch",
+                  ...(isMobile ? { width: "100%", marginTop: "18px" } : null),
+                }}
+              >
                 <button
                   className="hero-consult-btn"
-                  style={S.heroConsultBtn}
+                  style={{ ...S.heroConsultBtn, ...(isMobile ? S.heroConsultBtnMobile : null) }}
                   onClick={() => goToConsultation()}
                 >
                   <Zap size={16} />
@@ -1249,9 +1349,10 @@ export default function PatientPage(
             )}
 
             {/* ── 3. SUMMARY STRIP ──────────────────────────────────────── */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: isMobile ? "8px" : "16px" }}>
               <SummaryCard
-                icon={<CheckCircle2 size={26} color="#059669" />}
+                compact={isMobile}
+                icon={<CheckCircle2 size={isMobile ? 18 : 26} color="#059669" />}
                 iconBg="#dcfce7"
                 accent="#059669"
                 bg="#f0fdf4"
@@ -1260,7 +1361,8 @@ export default function PatientPage(
                 value={sortedConsultations[0]?.outcome || "N/A"}
               />
               <SummaryCard
-                icon={<HistoryIcon size={26} color="#4f46e5" />}
+                compact={isMobile}
+                icon={<HistoryIcon size={isMobile ? 18 : 26} color="#4f46e5" />}
                 iconBg="#c7d2fe"
                 accent="#4f46e5"
                 bg="#eef2ff"
@@ -1269,7 +1371,8 @@ export default function PatientPage(
                 value={String(patientConsultations.length)}
               />
               <SummaryCard
-                icon={<Brain size={26} color="#d97706" />}
+                compact={isMobile}
+                icon={<Brain size={isMobile ? 18 : 26} color="#d97706" />}
                 iconBg="#fde68a"
                 accent="#d97706"
                 bg="#fffbeb"
@@ -1765,16 +1868,24 @@ export default function PatientPage(
 
 // ─── Small Sub-components ─────────────────────────────────────────────────────
 
-function SummaryCard({ icon, iconBg, accent, bg, border, label, value }: {
-  icon: React.ReactNode; iconBg: string; accent: string; bg: string; border: string; label: string; value: string;
+// Doctor-reported UX fix (Issue 4): the `compact` variant (used on mobile)
+// fixes the label/value clipping bug -- the text column previously had no
+// `minWidth: 0` inside a flex row whose card had `overflow: hidden`, so at
+// mobile widths (~105px per card after gaps) the label text overflowed and
+// was hard-clipped ("LAST OUTCOME" -> "LAS OUT"). `minWidth: 0` + allowing
+// the label to wrap to 2 lines fixes this regardless of card width; `compact`
+// additionally tightens padding/gap per WORLD_CLASS_CLINIC_UI_GUIDELINES.md's
+// stat-card sizing rule (icon <=20px, 16px padding on mobile, not 22px).
+function SummaryCard({ icon, iconBg, accent, bg, border, label, value, compact }: {
+  icon: React.ReactNode; iconBg: string; accent: string; bg: string; border: string; label: string; value: string; compact?: boolean;
 }) {
   return (
-    <div className="summary-card" style={{ background: bg, border: `1.5px solid ${border}`, borderRadius: "18px", padding: "22px", display: "flex", alignItems: "center", gap: "16px", position: "relative", overflow: "hidden", boxShadow: "0 2px 12px rgba(15,23,42,0.03)" }}>
+    <div className="summary-card" style={{ background: bg, border: `1.5px solid ${border}`, borderRadius: "18px", padding: compact ? "14px" : "22px", display: "flex", alignItems: "center", gap: compact ? "10px" : "16px", position: "relative", overflow: "hidden", boxShadow: "0 2px 12px rgba(15,23,42,0.03)" }}>
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "4px", background: accent }} />
-      <div style={{ padding: "10px", backgroundColor: iconBg, borderRadius: "12px" }}>{icon}</div>
-      <div>
-        <div style={{ fontSize: "11px", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>{label}</div>
-        <div style={{ fontSize: "18px", fontWeight: 900, color: "#0f172a" }}>{value}</div>
+      <div style={{ padding: compact ? "6px" : "10px", backgroundColor: iconBg, borderRadius: "12px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>{icon}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: "11px", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px", whiteSpace: "normal", lineHeight: 1.3 }}>{label}</div>
+        <div style={{ fontSize: compact ? "15px" : "18px", fontWeight: 900, color: "#0f172a", whiteSpace: "normal", wordBreak: "break-word" }}>{value}</div>
       </div>
     </div>
   );
@@ -1843,6 +1954,39 @@ const S = {
   clearBtn: { marginLeft: "auto", background: "transparent", border: "none", cursor: "pointer", color: "#94a3b8", padding: "4px", borderRadius: "6px", display: "flex", alignItems: "center" } as React.CSSProperties,
   input: { width: "100%", minWidth: 0 } as React.CSSProperties,
   btnPrimary: { width: "100%" } as React.CSSProperties,
+  // Doctor-reported UX fix: non-blocking "possible duplicate" warning.
+  // Amber is the app's genuine-attention tone (never used for neutral chrome)
+  // -- a probable duplicate patient is exactly that kind of state.
+  duplicateWarningCard: {
+    background: "rgba(245, 158, 11, 0.08)",
+    border: "1.5px solid rgba(245, 158, 11, 0.35)",
+    borderRadius: "12px",
+    padding: "12px 14px",
+  } as React.CSSProperties,
+  duplicateWarningPrimaryBtn: {
+    flex: "1 1 160px",
+    minHeight: 44,
+    padding: "10px 14px",
+    borderRadius: "10px",
+    border: "none",
+    background: "#b45309",
+    color: "#fff",
+    fontWeight: 800,
+    fontSize: "12.5px",
+    cursor: "pointer",
+  } as React.CSSProperties,
+  duplicateWarningSecondaryBtn: {
+    flex: "1 1 160px",
+    minHeight: 44,
+    padding: "10px 14px",
+    borderRadius: "10px",
+    border: "1.5px solid rgba(180, 83, 9, 0.4)",
+    background: "#fff",
+    color: "#92400e",
+    fontWeight: 800,
+    fontSize: "12.5px",
+    cursor: "pointer",
+  } as React.CSSProperties,
   // ── LAYOUT FIX 3: searchWrap — flexShrink: 0 ensures it never collapses ──
   searchWrap: {
     padding: "var(--space-2) var(--space-3)",
@@ -1871,6 +2015,13 @@ const S = {
   heroPill: { display: "inline-flex", alignItems: "center", gap: "5px", backgroundColor: "rgba(255,255,255,0.15)", color: "#fff", padding: "6px 12px", borderRadius: "8px", backdropFilter: "blur(10px)", fontSize: "13px", fontWeight: 600, border: "1px solid rgba(255,255,255,0.2)" } as React.CSSProperties,
   pendingBanner: { marginTop: "14px", padding: "10px 14px", backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "10px", display: "flex", alignItems: "center", gap: "8px", fontSize: "13.5px", color: "#dc2626", fontWeight: 600, width: "fit-content" } as React.CSSProperties,
   heroConsultBtn: { padding: "13px 24px", fontSize: "14px", fontWeight: 700, background: "#fff", color: "#2563eb", border: "none", borderRadius: "12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", boxShadow: "0 8px 20px rgba(0,0,0,0.12)", flexShrink: 0, transition: "all 0.2s ease" } as React.CSSProperties,
+  // Doctor-reported UX fix (Issue 4) -- mobile hero-card variants. Stacks
+  // the card, shrinks the avatar/name to leave room for a full-width CTA,
+  // per WORLD_CLASS_CLINIC_UI_GUIDELINES.md Section 5's mobile patient-header spec.
+  heroCardMobile: { flexDirection: "column", alignItems: "stretch", padding: "20px" } as React.CSSProperties,
+  heroAvatarMobile: { width: "56px", height: "56px", borderRadius: "16px", fontSize: "22px" } as React.CSSProperties,
+  heroNameMobile: { fontSize: "20px" } as React.CSSProperties,
+  heroConsultBtnMobile: { width: "100%", justifyContent: "center", padding: "15px 20px", fontSize: "15px", minHeight: "52px" } as React.CSSProperties,
   lastVisitBanner: { background: "#f0f9ff", border: "1.5px solid #bfdbfe", borderRadius: "16px", padding: "18px 22px", display: "flex", alignItems: "center", gap: "16px", position: "relative" as const, overflow: "hidden" } as React.CSSProperties,
   lastVisitAccent: { position: "absolute" as const, top: 0, left: 0, bottom: 0, width: "4px", backgroundColor: "#2563eb" } as React.CSSProperties,
   card: { background: "#fff", borderRadius: "18px", border: "1px solid #e2e8f0", padding: "24px", boxShadow: "0 2px 12px rgba(15,23,42,0.03)" } as React.CSSProperties,

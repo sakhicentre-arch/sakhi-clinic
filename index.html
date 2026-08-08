@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="application-name" content="Sakhi Clinic" />
     <meta name="theme-color" content="#0f172a" />
+    <!-- Doctor-reported UX fix (Finding 0, DOCTOR_UI_UX_REVIEW_V2.md): without
+         this, Android/Chrome's "Force Dark" auto-inverts this app's actual
+         light design (vivid blue hero card, white buttons) into a muddy,
+         inconsistent near-black rendering the doctor was seeing but that was
+         never actually coded anywhere. This declares the existing light
+         theme as intentional so the OS stops recoloring it. -->
+    <meta name="color-scheme" content="light" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Sakhi Clinic" />

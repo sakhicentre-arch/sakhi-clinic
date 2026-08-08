@@ -31,7 +31,7 @@ function normHeader(s: string): string {
     .replace(/[^a-z0-9]+/g, "");
 }
 
-function normalizeName(s: string): string {
+export function normalizeName(s: string): string {
   return String(s || "")
     .trim()
     .toLowerCase()
@@ -40,7 +40,7 @@ function normalizeName(s: string): string {
     .trim();
 }
 
-function normalizePhone(s: string): string {
+export function normalizePhone(s: string): string {
   const digits = String(s || "").replace(/\D+/g, "");
   if (!digits) return "";
   // Prefer last 10 digits (India mobile), but keep full digits if shorter.
@@ -199,7 +199,7 @@ function mergePatientPreferExisting(existing: Patient, incoming: Partial<Patient
   };
 }
 
-function detectDuplicate(existingPatients: Patient[], incoming: { name: string; phone: string; age?: number | string }): Patient | null {
+export function detectDuplicate(existingPatients: Patient[], incoming: { name: string; phone: string; age?: number | string }): Patient | null {
   const inPhone = normalizePhone(incoming.phone);
   if (inPhone) {
     const byPhone = existingPatients.find((p) => normalizePhone(p.phone) && normalizePhone(p.phone) === inPhone);

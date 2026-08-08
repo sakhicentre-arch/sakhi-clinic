@@ -53,6 +53,7 @@ import { generateRemedyExplanations } from "../services/aiReasoningEngine";
 import { captureOperationError } from "../services/runtimeErrorCaptureService";
 import { usePatientStore } from "../store/usePatientStore";
 import { useConsultationStore } from "../store/useConsultationStore";
+import { generateRubricSuggestions, RubricSuggestion } from "../services/rubricSuggestionEngine";
 import { saveDraft, loadDraft, deleteDraft } from "../services/draftService";
 import useKeyboardInset from "../hooks/useKeyboardInset";
 import { haptic } from "../utils/haptics";
@@ -872,6 +873,12 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const keyboard = useKeyboardInset();
   const [mobileStage, setMobileStage] = useState<"complaint" | "exam" | "remedy" | "followup">("complaint");
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  // Doctor-reported UX fix: custom/"Other" frequency entry. Tracks which
+  // medicine row (by id) currently has its dosage chip-row swapped for a
+  // free-text input -- kept here (on the stable top-level component) rather
+  // than inside the inline `ChipSelect` helper below, since that helper is
+  // redefined on every render and would lose any state of its own.
+  const [customDosageMedId, setCustomDosageMedId] = useState<string | null>(null);
   const [showNotesSheet, setShowNotesSheet] = useState(false);
   const [showFollowUpSheet, setShowFollowUpSheet] = useState(false);
   const [showTemplatesSheet, setShowTemplatesSheet] = useState(false);
@@ -958,8 +965,19 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     setSaveToast(null);
     setDraftStatus("Saving…");
     let hadWarning = false;
+
+    // Doctor-reported UX fix: must be computed BEFORE saving. When we're
+    // about to auto-advance in place to the next queued patient, handleSave
+    // must be told to skip its own onFinish() call -- otherwise that
+    // unconditional navigation-to-Today would win the race against this
+    // function's own "load the next patient" step below, stranding the
+    // doctor on Today instead of moving them forward.
+    const nextEntry = queue.find((e) => e.status === "waiting" && e.patientId !== patientId) || null;
+    const canNext = Boolean(nextEntry);
+    const willAutoAdvance = Boolean(opts?.next && nextEntry);
+
     try {
-      const result = await handleSave();
+      const result = await handleSave({ skipFinish: willAutoAdvance });
       if (!result.saved) {
         setDraftStatus("");
         return;
@@ -987,10 +1005,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
       setQueueStatus(currentQueueEntry.queueId, "done");
     }
 
-    const nextEntry = queue.find((e) => e.status === "waiting" && e.patientId !== patientId) || null;
-    const canNext = Boolean(nextEntry);
-
-    if (opts?.next && nextEntry) {
+    if (willAutoAdvance && nextEntry) {
       haptic("success");
       voiceSession.cancelRecording();
       setActiveConsultation(nextEntry.patientId, nextEntry.appointmentId);
@@ -1229,6 +1244,26 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const [manualRubricDraft, setManualRubricDraft] = useState<{ category: RubricCategory; text: string }>({ category: "mind", text: "" });
   const rubricAnchorConsultationId = previousConsultation?.id || null;
 
+  const currentDraftRubricSuggestions = useMemo<RubricSuggestion[]>(() => {
+    const draftText = [
+      formData.chiefComplaint,
+      formData.caseText,
+      formData.mind,
+      formData.generals,
+      formData.thermal,
+      formData.desire,
+      formData.aversion,
+      formData.sleep,
+      formData.perspiration,
+      formData.familyHistory,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    if (draftText.trim().length < 15) return [];
+    return generateRubricSuggestions(formData, patient).slice(0, 5);
+  }, [formData, patient]);
+
   const loadConsultationRubrics = useCallback(async () => {
     if (!rubricAnchorConsultationId) {
       setConsultationRubrics([]);
@@ -1438,7 +1473,15 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   };
 
   // ── Save ──
-  const handleSave = async (): Promise<{ saved: boolean; warning?: string }> => {
+  // Doctor-reported UX fix: "Save & Next" must not dead-end back to Today.
+  // `skipFinish` lets a caller that's about to load the next queued patient
+  // in place (see saveAndMaybeToast below) suppress the unconditional
+  // onFinish() navigation-to-Today call further down, which would otherwise
+  // always win the race and strand the doctor on Today regardless of intent.
+  // Existing direct callers (`onClick={handleSave}`) pass a click event here,
+  // not an options object, so `opts?.skipFinish` safely evaluates to
+  // undefined for them and behavior is unchanged.
+  const handleSave = async (opts?: { skipFinish?: boolean }): Promise<{ saved: boolean; warning?: string }> => {
     if (!formData.chiefComplaint) {
       alert("Chief Complaint is required.");
       return { saved: false };
@@ -1499,7 +1542,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
         }
 
         try {
-          if (onFinish) onFinish();
+          if (onFinish && !opts?.skipFinish) onFinish();
         } catch (error) {
           warnings.push("Saved locally • Navigation incomplete");
           await captureOperationError({
@@ -2454,6 +2497,34 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               data-active={String(!isMobile || mobileStage === "complaint")}
               style={stageVisibleStyle("complaint")}
             >
+            {/* Doctor-reported UX fix (workflow sequencing): Quick Mode's
+                patient-history view (Timeline Snapshot / AI Pattern
+                Insights / Clinical Memory) only exists in the desktop
+                Classic Mode `sidebar` -- on mobile it wasn't shown at all
+                before the doctor started typing today's complaint. Per
+                CLINIC_WORKFLOW_OPTIMIZATION.md's target order (identity ->
+                history -> symptoms -> prescription), a compact summary of
+                the last visit belongs here, at the top of the first stage,
+                reusing the already-computed `timelineConsultations` (same
+                data the desktop sidebar's Timeline Snapshot uses) rather
+                than adding a new data path. */}
+            {isMobile && (
+              <div className="sakhi-surface-muted" data-testid="mobile-patient-history-snapshot" style={{ padding: "var(--space-3)", marginBottom: "var(--space-3)" }}>
+                <div className="sakhi-label" style={{ color: "#94a3b8" }}>Patient History</div>
+                {timelineConsultations.length === 0 ? (
+                  <div className="sakhi-caption" style={{ marginTop: 6 }}>First visit for this patient.</div>
+                ) : (
+                  <div className="mt-2 flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+                    {timelineConsultations.map((c) => (
+                      <div key={c.id} className="sakhi-row-card flex-none" style={{ minWidth: 150 }}>
+                        <div style={{ fontWeight: 800, fontSize: 12 }}>{new Date(c.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</div>
+                        <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>{c.outcome} · {c.medicines[0]?.name || "Observation"}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <MobileSection title="Chief Complaint" subtitle="How is the patient today?" testId="section-chief-complaint">
               <div className="space-y-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -2871,16 +2942,60 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                                   />
                                 </MobileField>
                                 <MobileField label="Dosage">
-                                  <ChipSelect
-                                    value={med.dosage || remedyDefaults.dosage}
-                                    onChange={(next) => {
-                                      updateMedRow(idx, { ...med, dosage: next });
-                                      saveRemedyDefaults({ potency: med.potency || remedyDefaults.potency, dosage: next, duration: med.duration || remedyDefaults.duration });
-                                    }}
-                                    options={DOSAGE_PRESETS.slice(0, 8).map((d) => ({ value: d, label: d }))}
-                                    allowEmpty={false}
-                                    testId={`medicine-${idx}-dosage-chips`}
-                                  />
+                                  {customDosageMedId === (med.id || String(idx)) ? (
+                                    <input
+                                      autoFocus
+                                      type="text"
+                                      defaultValue={DOSAGE_PRESETS.includes(med.dosage || "") ? "" : (med.dosage || "")}
+                                      placeholder="e.g. 1-0-1 after food, SOS, alternate days"
+                                      data-testid={`medicine-${idx}-dosage-custom-input`}
+                                      className="sakhi-input sakhi-input-muted sakhi-focus-ring sakhi-tap w-full"
+                                      style={{ minHeight: 44 }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                          e.preventDefault();
+                                          (e.target as HTMLInputElement).blur();
+                                        }
+                                      }}
+                                      onBlur={(e) => {
+                                        const next = e.target.value.trim();
+                                        if (next) {
+                                          updateMedRow(idx, { ...med, dosage: next });
+                                          saveRemedyDefaults({ potency: med.potency || remedyDefaults.potency, dosage: next, duration: med.duration || remedyDefaults.duration });
+                                        }
+                                        setCustomDosageMedId(null);
+                                      }}
+                                    />
+                                  ) : (
+                                    <div className="flex flex-wrap gap-2">
+                                      <ChipSelect
+                                        value={med.dosage || remedyDefaults.dosage}
+                                        onChange={(next) => {
+                                          updateMedRow(idx, { ...med, dosage: next });
+                                          saveRemedyDefaults({ potency: med.potency || remedyDefaults.potency, dosage: next, duration: med.duration || remedyDefaults.duration });
+                                        }}
+                                        options={DOSAGE_PRESETS.slice(0, 8).map((d) => ({ value: d, label: d }))}
+                                        allowEmpty={false}
+                                        testId={`medicine-${idx}-dosage-chips`}
+                                      />
+                                      {/* Doctor-reported UX fix: custom frequency entry ("1-0-1 after
+                                          lunch", "alternate days", "SOS after food", etc.) -- the
+                                          fixed preset list above has no way to express these. Tapping
+                                          this swaps the row for a free-text input; the typed value is
+                                          stored directly as the medicine's dosage string (no schema
+                                          change needed, `dosage` was already a free string). */}
+                                      <button
+                                        type="button"
+                                        data-testid={`medicine-${idx}-dosage-other-btn`}
+                                        onClick={() => { haptic("tap"); setCustomDosageMedId(med.id || String(idx)); }}
+                                        data-selected={String(!!med.dosage && !DOSAGE_PRESETS.includes(med.dosage))}
+                                        data-tone="brand"
+                                        className="sakhi-chip sakhi-tap sakhi-focus-ring sakhi-ripple"
+                                      >
+                                        {med.dosage && !DOSAGE_PRESETS.includes(med.dosage) ? med.dosage : "Other…"}
+                                      </button>
+                                    </div>
+                                  )}
                                 </MobileField>
                                 <MobileField label="Duration">
                                   <ChipSelect
@@ -3197,12 +3312,26 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               <button
                 type="button"
                 data-testid="consultation-save-button"
-                onClick={handleSave}
+                onClick={() => {
+                  // Doctor-reported UX fix: route through saveAndMaybeToast
+                  // (like the mobile action bar already does) instead of
+                  // calling handleSave directly, so this button also
+                  // auto-advances to the next queued patient instead of
+                  // dead-ending back on Today.
+                  const hasNext = queue.some((e) => e.status === "waiting" && e.patientId !== patientId);
+                  void saveAndMaybeToast({ next: hasNext });
+                }}
                 disabled={saving}
                 className={`flex-1 rounded-3xl px-5 py-3 text-sm font-semibold text-white shadow-sm ${saving ? "bg-slate-400 cursor-not-allowed" : "bg-slate-900 hover:bg-slate-800"}`}
                 aria-label="Save consultation"
               >
-                {saving ? "Saving..." : isEditing ? "✅ Update Record" : "✅ Save"}
+                {saving
+                  ? "Saving..."
+                  : isEditing
+                  ? "✅ Update Record"
+                  : queue.some((e) => e.status === "waiting" && e.patientId !== patientId)
+                  ? "✅ Save & Next"
+                  : "✅ Save"}
               </button>
               <button
                 type="button"
@@ -3374,6 +3503,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 </button>
                 <button
                   type="button"
+                  data-testid="consultation-save-next-dock-button"
                   onClick={() => {
                     const nextEntry = queue.find((e) => e.status === "waiting" && e.patientId !== patientId) || null;
                     const shouldNext = Boolean(nextEntry);
@@ -3967,7 +4097,18 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
               </div>
             )}
             <div style={decisionGridStyle}>
-              <button disabled={!decisionRules.canRepeat} onClick={() => handleFollowUpAction("repeat")} className={`btn-decision ${!decisionRules.canRepeat ? "disabled" : ""}`}>🔁 Repeat Last Selection</button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <button disabled={!decisionRules.canRepeat} onClick={() => handleFollowUpAction("repeat")} className={`btn-decision ${!decisionRules.canRepeat ? "disabled" : ""}`}>🔁 Repeat Last Selection</button>
+                {/* UX fix (V2 review CC7): a disabled button must say why,
+                    inline, without needing a hover/tap to discover the
+                    reason -- a doctor scanning quickly shouldn't have to
+                    guess. */}
+                {!decisionRules.canRepeat && (
+                  <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>
+                    Available when last visit improved
+                  </span>
+                )}
+              </div>
               <button onClick={() => handleFollowUpAction("change")} className="btn-decision">🔄 Change Remedy</button>
               <button onClick={() => handleFollowUpAction("wait")} className="btn-decision">⏸ Wait / Placebo</button>
             </div>
@@ -3982,8 +4123,27 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 <input type="datetime-local" style={INPUT} value={formData.formFollowUpDate} onChange={(e) => patch({ formFollowUpDate: e.target.value })} />
               </Field>
             </div>
-            <button onClick={handleSave} disabled={saving} className="btn-primary">
-              {saving ? "Finalizing Transaction..." : isEditing ? "Update Clinical Record" : "Save & Finalize Session"}
+            <button
+              data-testid="consultation-classic-save-button"
+              onClick={() => {
+                // Doctor-reported UX fix: this was the one save button that
+                // called handleSave directly, bypassing saveAndMaybeToast
+                // entirely -- meaning it never marked the queue entry done
+                // and never advanced to the next patient, forcing the
+                // doctor back to Today to manually find them again.
+                const hasNext = queue.some((e) => e.status === "waiting" && e.patientId !== patientId);
+                void saveAndMaybeToast({ next: hasNext });
+              }}
+              disabled={saving}
+              className="btn-primary"
+            >
+              {saving
+                ? "Finalizing Transaction..."
+                : isEditing
+                ? "Update Clinical Record"
+                : queue.some((e) => e.status === "waiting" && e.patientId !== patientId)
+                ? "Save & Next Patient"
+                : "Save & Finalize Session"}
             </button>
           </footer>
         </main>

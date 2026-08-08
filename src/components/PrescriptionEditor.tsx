@@ -16,8 +16,7 @@ interface Props {
   suggestions?: Suggestion[];
 }
 
-const PRIMARY_DOSAGE_PRESETS = ["1-0-1", "1-1-1", "SOS"];
-const MORE_DOSAGE_PRESETS = ["BD", "TDS", "0-0-1", "1-0-0", "0-1-0", "1-0-1 x 3 days"];
+const PRIMARY_DOSAGE_PRESETS = ["1-0-1", "1-1-1", "SOS", "BD", "TDS"];
 
 const createMedicine = (): Medicine => ({
   id: generateId(),
@@ -53,6 +52,10 @@ const MedicineRow = memo(function MedicineRow({
   onToggleFavorite,
 }: MedicineRowProps) {
   const remedyRef = useRef<HTMLInputElement>(null);
+  // Doctor-reported UX fix: custom/"Other" frequency entry. Each row is its
+  // own stable component instance (keyed by medicine id), so this can safely
+  // live here rather than needing to be lifted to the parent.
+  const [customDosageEditing, setCustomDosageEditing] = useState(false);
 
   useEffect(() => {
     if (autoFocus) {
@@ -61,6 +64,7 @@ const MedicineRow = memo(function MedicineRow({
   }, [autoFocus]);
 
   const trimmedName = (medicine.name || "").trim();
+  const isCustomDosage = !!medicine.dosage && !PRIMARY_DOSAGE_PRESETS.includes(medicine.dosage);
   const isFavorite = trimmedName
     ? favorites.some((n) => n.toLowerCase() === trimmedName.toLowerCase())
     : false;
@@ -103,7 +107,14 @@ const MedicineRow = memo(function MedicineRow({
                 type="button"
                 title={s.reason}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onChange(index, "name", s.name)}
+                onClick={() => {
+                  onChange(index, "name", s.name);
+                  // Doctor-reported UX fix (Issue 3): selecting a suggestion
+                  // must close the dropdown in the same handler that commits
+                  // the value -- this was the one autocomplete in the app
+                  // missing that, leaving the list stuck open over the form.
+                  onFocus(-1);
+                }}
               >
                 {s.reason === "Favorite" ? "★ " : ""}{s.name}
               </button>
@@ -120,29 +131,62 @@ const MedicineRow = memo(function MedicineRow({
       />
 
       <div style={dosageWrapStyle}>
-        {PRIMARY_DOSAGE_PRESETS.map((d) => (
-          <button
-            key={d}
-            type="button"
-            onClick={() => onChange(index, "dosage", d)}
-            style={{
-              ...dosageButtonStyle,
-              borderColor: medicine.dosage === d ? "#2d6a4f" : "#e2e8f0",
-              background: medicine.dosage === d ? "#2d6a4f" : "#fff",
-              color: medicine.dosage === d ? "#fff" : "#475569",
+        {customDosageEditing ? (
+          <input
+            autoFocus
+            type="text"
+            defaultValue={isCustomDosage ? medicine.dosage : ""}
+            placeholder="e.g. 1-0-1 after food, SOS, alternate days"
+            style={{ ...inputStyle, flex: "1 1 200px" }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                (e.target as HTMLInputElement).blur();
+              }
             }}
-          >
-            {d}
-          </button>
-        ))}
-        <select
-          value={MORE_DOSAGE_PRESETS.includes(medicine.dosage || "") ? medicine.dosage : ""}
-          onChange={(e) => e.target.value && onChange(index, "dosage", e.target.value)}
-          style={moreDosageStyle}
-        >
-          <option value="">More...</option>
-          {MORE_DOSAGE_PRESETS.map((d) => <option key={d} value={d}>{d}</option>)}
-        </select>
+            onBlur={(e) => {
+              const next = e.target.value.trim();
+              if (next) onChange(index, "dosage", next);
+              setCustomDosageEditing(false);
+            }}
+          />
+        ) : (
+          <>
+            {PRIMARY_DOSAGE_PRESETS.map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => onChange(index, "dosage", d)}
+                style={{
+                  ...dosageButtonStyle,
+                  borderColor: medicine.dosage === d ? "#2d6a4f" : "#e2e8f0",
+                  background: medicine.dosage === d ? "#2d6a4f" : "#fff",
+                  color: medicine.dosage === d ? "#fff" : "#475569",
+                }}
+              >
+                {d}
+              </button>
+            ))}
+            {/* Doctor-reported UX fix: custom frequency entry -- the fixed
+                preset list can't express real-world frequencies like
+                "alternate days" or "SOS after food". Replaces the old
+                native <select> "More..." picker per
+                WORLD_CLASS_CLINIC_UI_GUIDELINES.md (native pickers are
+                banned for anything selected during a live consultation). */}
+            <button
+              type="button"
+              onClick={() => setCustomDosageEditing(true)}
+              style={{
+                ...dosageButtonStyle,
+                borderColor: isCustomDosage ? "#2d6a4f" : "#e2e8f0",
+                background: isCustomDosage ? "#2d6a4f" : "#fff",
+                color: isCustomDosage ? "#fff" : "#475569",
+              }}
+            >
+              {isCustomDosage ? medicine.dosage : "Other…"}
+            </button>
+          </>
+        )}
       </div>
 
       <input
@@ -320,16 +364,6 @@ const dosageButtonStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 800,
   cursor: "pointer",
-};
-
-const moreDosageStyle: React.CSSProperties = {
-  padding: "7px 9px",
-  borderRadius: 8,
-  border: "1.5px solid #e2e8f0",
-  background: "#fff",
-  fontSize: 12,
-  fontWeight: 700,
-  color: "#475569",
 };
 
 const removeStyle: React.CSSProperties = {
