@@ -429,6 +429,56 @@ export async function getRecentPayments(limit = 10): Promise<RecentPaymentEntry[
     }));
 }
 
+export interface DuplicatePaymentCandidate {
+  consultationId: string;
+  date: string;
+  amountReceived: number;
+  paymentMode?: PaymentMode;
+  paymentReferenceNumber?: string;
+}
+
+/**
+ * Doctor Productivity — Record Later Payment: a doctor uploading a payment
+ * screenshot could accidentally post it twice (e.g. re-uploading the same
+ * WhatsApp image after forgetting it was already recorded). This checks
+ * the patient's own payment history for a probable match using only
+ * information actually available at review time -- an exact reference
+ * number match (the strongest signal a screenshot provides), or the same
+ * amount recorded against the same payment date. Never blocks on its own;
+ * callers decide whether to warn and let the doctor confirm anyway (see
+ * RecordLaterPaymentFlow.tsx).
+ */
+export async function findLikelyDuplicatePayment(params: {
+  patientId: string;
+  amount: number;
+  date: string;
+  referenceNumber?: string;
+}): Promise<DuplicatePaymentCandidate | null> {
+  const all = await getAllConsultations();
+  const candidates = all.filter((c) => c.patientId === params.patientId && (c.amountReceived || 0) > 0);
+
+  const toCandidate = (c: Consultation): DuplicatePaymentCandidate => ({
+    consultationId: c.id,
+    date: c.paymentDate || c.date,
+    amountReceived: c.amountReceived || 0,
+    paymentMode: c.paymentMode,
+    paymentReferenceNumber: c.paymentReferenceNumber,
+  });
+
+  const ref = (params.referenceNumber || "").trim().toLowerCase();
+  if (ref) {
+    const refMatch = candidates.find((c) => (c.paymentReferenceNumber || "").trim().toLowerCase() === ref);
+    if (refMatch) return toCandidate(refMatch);
+  }
+
+  const amountMatch = candidates.find(
+    (c) => Math.abs((c.amountReceived || 0) - params.amount) < 0.5 && (c.paymentDate || c.date) === params.date
+  );
+  if (amountMatch) return toCandidate(amountMatch);
+
+  return null;
+}
+
 export interface PatientPaymentSummary {
   totalFees: number;
   totalPaid: number;

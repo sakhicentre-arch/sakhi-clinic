@@ -32,6 +32,7 @@ import { useUIStore, ActivePage } from "../store/uiStore";
 import { usePatientSearch } from "../hooks/usePatientSearch";
 import { PullToRefreshScrollRegion, SplitPane, ScrollRegion } from "../components/layout/LayoutPrimitives";
 import PaymentScreenshotViewer from "../components/PaymentScreenshotViewer";
+import RecordLaterPaymentFlow from "../components/RecordLaterPaymentFlow";
 import { normalizePatientPhone } from "../utils/whatsapp";
 import { openWhatsApp } from "../services/whatsappService";
 import { addPatient as saveNewPatient, updatePatient as saveUpdatedPatient, deletePatient as removePatient, togglePinPatient } from "../services/patientService";
@@ -296,6 +297,8 @@ export default function PatientPage(
   // set only when a probable match is found and cleared once the doctor picks
   // either "Open existing patient" or "Continue creating new patient".
   const [duplicateMatch, setDuplicateMatch] = useState<typeof patients[number] | null>(null);
+  // Doctor-requested feature: "Record Later Payment" -- see RecordLaterPaymentFlow.tsx.
+  const [showRecordPaymentFlow, setShowRecordPaymentFlow] = useState(false);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
@@ -1632,6 +1635,21 @@ export default function PatientPage(
                 {/* ── TAB: FINANCE ──────────────────────────────────────── */}
                 {activeTab === "finance" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+                    {/* Doctor-requested feature: "Record Later Payment" -- a
+                        patient often pays after the visit via UPI/bank
+                        transfer and sends a screenshot on WhatsApp, which the
+                        doctor can forget to post to Sakhi. Reuses the exact
+                        same canonical payment write path (recordPayment())
+                        as every other payment edit -- see RecordLaterPaymentFlow.tsx. */}
+                    <button
+                      type="button"
+                      data-testid="patient-record-payment-btn"
+                      onClick={() => setShowRecordPaymentFlow(true)}
+                      className="sakhi-btn-primary sakhi-tap sakhi-focus-ring"
+                      style={{ minHeight: 52, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                    >
+                      <Receipt size={16} /> Record Later Payment
+                    </button>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
                       <FinanceCard label="Total Billed" amount={revenueAnalytics.totalBilled} color="#0f172a" />
                       <FinanceCard label="Total Paid" amount={revenueAnalytics.totalPaid} color="#059669" />
@@ -1860,6 +1878,13 @@ export default function PatientPage(
         date={viewingScreenshot.date}
         patientName={selectedPatient?.name || "Patient"}
         onClose={() => setViewingScreenshot(null)}
+      />
+    )}
+    {showRecordPaymentFlow && selectedPatient && (
+      <RecordLaterPaymentFlow
+        initialPatientId={String(selectedPatient.id)}
+        onClose={() => setShowRecordPaymentFlow(false)}
+        onNavigateToReminders={() => { setShowRecordPaymentFlow(false); props.onNavigate?.("reminders"); }}
       />
     )}
     </>

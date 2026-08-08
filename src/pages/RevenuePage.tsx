@@ -29,7 +29,8 @@ import {
 } from "../services/paymentService";
 import { enqueueReminder, hasActiveReminder } from "../services/reminderQueueService";
 import { exportPaymentsCsv } from "../services/csvExportService";
-import { Download, Search } from "lucide-react";
+import { Download, Receipt, Search } from "lucide-react";
+import RecordLaterPaymentFlow from "../components/RecordLaterPaymentFlow";
 
 interface Props {
   onNavigate?: (page: ActivePage) => void;
@@ -100,6 +101,8 @@ export default function RevenuePage({ onNavigate }: Props) {
   const [rangeLoading, setRangeLoading] = useState(true);
   const [historySearch, setHistorySearch] = useState("");
   const [exporting, setExporting] = useState(false);
+  // Doctor-requested feature: "Record Later Payment" -- see RecordLaterPaymentFlow.tsx.
+  const [showRecordPaymentFlow, setShowRecordPaymentFlow] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -229,7 +232,7 @@ export default function RevenuePage({ onNavigate }: Props) {
             <div className="sakhi-title">Payment Dashboard</div>
             <div className="sakhi-caption" style={{ marginTop: 4 }}>Every card opens the patients behind it</div>
           </div>
-          <div className="sakhi-row" style={{ gap: 8 }}>
+          <div className="sakhi-row" style={{ gap: 8, flexWrap: "wrap" }}>
             <select
               value={activeClinic}
               onChange={(e) => setActiveClinic(e.target.value)}
@@ -249,6 +252,15 @@ export default function RevenuePage({ onNavigate }: Props) {
               style={{ height: 44, width: "auto", padding: "0 16px", display: "inline-flex", alignItems: "center", gap: 6 }}
             >
               <Download size={15} /> {exporting ? "Exporting…" : "Export CSV"}
+            </button>
+            <button
+              type="button"
+              data-testid="revenue-record-payment-btn"
+              onClick={() => setShowRecordPaymentFlow(true)}
+              className="sakhi-btn-primary sakhi-tap sakhi-focus-ring"
+              style={{ height: 44, width: "auto", padding: "0 16px", display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              <Receipt size={15} /> Record Payment
             </button>
           </div>
         </header>
@@ -365,6 +377,12 @@ export default function RevenuePage({ onNavigate }: Props) {
           </MobileSection>
         </ResponsiveContainer>
       </div>
+      {showRecordPaymentFlow && (
+        <RecordLaterPaymentFlow
+          onClose={() => setShowRecordPaymentFlow(false)}
+          onNavigateToReminders={() => { setShowRecordPaymentFlow(false); onNavigate?.("reminders"); }}
+        />
+      )}
     </div>
   );
 }
