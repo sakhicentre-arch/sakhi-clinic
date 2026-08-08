@@ -16,6 +16,35 @@ describe("dateOnly", () => {
     expect(d.getHours()).toBe(0);
   });
 
+  describe("parseDateOnly defends against a non-bare-date (full ISO) input", () => {
+    // Doctor-reported incident (2026-08-08): a full ISO datetime string
+    // reached parseDateOnly instead of the bare "YYYY-MM-DD" it expects.
+    // Before the fix, `"2026-08-09T18:30:00.000Z".split("-").map(Number)`
+    // produced day = NaN, and `d || 1` silently substituted day 1 --
+    // "10/08/2026" was classified and displayed as "01/08/2026".
+    it("no longer collapses a full ISO datetime string to the 1st of the month", () => {
+      const d = parseDateOnly("2026-08-09T18:30:00.000Z");
+      expect(d.getDate()).not.toBe(1);
+    });
+
+    it("parses a full ISO datetime string as the explicit instant it encodes", () => {
+      // This exact string is what new Date("2026-08-10T00:00").toISOString()
+      // produces for a doctor in IST (UTC+5:30) picking 10 Aug via a
+      // datetime-local input with no explicit time -- it decodes back to
+      // 10 Aug 00:00 local for that same timezone.
+      const d = parseDateOnly("2026-08-09T18:30:00.000Z");
+      const expected = new Date("2026-08-09T18:30:00.000Z");
+      expect(d.getTime()).toBe(expected.getTime());
+    });
+
+    it("still parses a bare YYYY-MM-DD string exactly as before (no regression)", () => {
+      const d = parseDateOnly("2026-08-10");
+      expect(d.getFullYear()).toBe(2026);
+      expect(d.getMonth()).toBe(7);
+      expect(d.getDate()).toBe(10);
+    });
+  });
+
   it("dateKey round-trips through parseDateOnly", () => {
     expect(dateKey(parseDateOnly("2026-03-15"))).toBe("2026-03-15");
     expect(dateKey(parseDateOnly("2026-01-05"))).toBe("2026-01-05");

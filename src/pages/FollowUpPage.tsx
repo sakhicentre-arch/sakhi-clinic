@@ -41,6 +41,7 @@ import { cancelFollowUp, rescheduleFollowUp } from "../services/patientService";
 import { openWhatsApp } from "../services/whatsappService";
 import { enqueueReminder, hasActiveReminder } from "../services/reminderQueueService";
 import { buildFollowUpMessage } from "../services/reminderSchedulerService";
+import { parseDateOnly } from "../utils/dateOnly";
 
 interface Props {
   onNavigate?: (page: ActivePage) => void;
@@ -97,10 +98,18 @@ function severityTone(severity: number): "success" | "muted" | "brand" {
   return "muted";
 }
 
+// followUpDate/nextFollowUpDate/weekStart are bare "YYYY-MM-DD" date-only
+// values; consultationDate is a full ISO timestamp (see dateOnly.ts's own
+// header comment). A bare date parses as UTC midnight under `new
+// Date(...)`, so displaying it via the LOCAL-timezone toLocaleDateString
+// can render one calendar day off in any timezone behind UTC -- go
+// through parseDateOnly for anything <=10 chars, exactly like
+// isSameLocalDay/isSameLocalMonth already do for the same reason.
 function formatDate(iso?: string): string {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+    const d = iso.length <= 10 ? parseDateOnly(iso) : new Date(iso);
+    return d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
   } catch {
     return iso;
   }

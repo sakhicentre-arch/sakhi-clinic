@@ -34,6 +34,7 @@ import { listRubricsByConsultation, addManualRubric, approveRubric, rejectRubric
 import { ALL_RUBRIC_CATEGORIES, RUBRIC_CATEGORY_LABELS } from "../data/rubricVocabulary";
 import { confidenceLabel } from "../services/rubricConfidenceService";
 import { compressPaymentScreenshot } from "../services/paymentService";
+import { parseDateOnly, startOfDay } from "../utils/dateOnly";
 
 import PrescriptionEditor from "../components/PrescriptionEditor";
 import SmartInput from "../components/SmartInput";
@@ -172,7 +173,11 @@ function consultationToForm(c: Consultation): FormData {
   return {
     ...c,
     formDate: c.date ? c.date.slice(0, 16) : "",
-    formFollowUpDate: c.followUpDate ? c.followUpDate.slice(0, 16) : "",
+    // followUpDate is a date-only value (unlike consultation.date, which is a
+    // full timestamp) -- slice(0, 10) so a legacy full-ISO-datetime row
+    // (pre-fix) still degrades to a valid <input type="date"> value instead
+    // of being silently rejected by the browser.
+    formFollowUpDate: c.followUpDate ? c.followUpDate.slice(0, 10) : "",
     allergy: (c as any).allergy || "",
     familyHistory: (c as any).familyHistory || "",
     pastHistory: (c as any).pastHistory || "",
@@ -1502,7 +1507,13 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
         fee: formData.fee || 0, paymentStatus: formData.paymentStatus || "pending",
         id: editingId || generateId(), patientId,
         date: new Date(formData.formDate).toISOString(),
-        followUpDate: formData.formFollowUpDate ? new Date(formData.formFollowUpDate).toISOString() : undefined,
+        // followUpDate is a date-only field throughout the domain layer
+        // (dateOnly.ts, patientService.ts, followUpIntelligenceService.ts) --
+        // store the <input type="date"> value as-is, not round-tripped
+        // through new Date(...).toISOString(), which converts a
+        // datetime-local value's local wall-clock time to UTC and can
+        // shift the calendar date across timezone boundaries.
+        followUpDate: formData.formFollowUpDate || undefined,
       };
       const ok = await saveConsultation(session);
       if (ok) {
@@ -1603,7 +1614,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     const hasMeds = formData.medicines.length > 0;
     if (!hasMeds) { alert("Please add at least one medicine before printing."); return; }
     const data = formData.chiefComplaint || hasMeds
-      ? { ...formData, medicines: formData.medicines, date: formData.formDate ? new Date(formData.formDate).toISOString() : undefined, followUpDate: formData.formFollowUpDate ? new Date(formData.formFollowUpDate).toISOString() : undefined }
+      ? { ...formData, medicines: formData.medicines, date: formData.formDate ? new Date(formData.formDate).toISOString() : undefined, followUpDate: formData.formFollowUpDate || undefined }
       : consultations[0];
     if (!data) return;
     openRxPopup(data, patient?.name || patientName || "", patient?.age, patient?.gender);
@@ -1615,7 +1626,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
     const phone = normalizePatientPhone(patient);
     if (!phone) return alert("Patient phone number missing.");
     const followUpNote = formData.formFollowUpDate
-      ? `\n\nNext follow-up: ${new Date(formData.formFollowUpDate).toLocaleDateString("en-IN")}`
+      ? `\n\nNext follow-up: ${parseDateOnly(formData.formFollowUpDate).toLocaleDateString("en-IN")}`
       : formData.outcome === ConsultationOutcome.WORSE
       ? "\n\n⚠️ Urgent review recommended based on current clinical status."
       : "";
@@ -1676,7 +1687,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
   }, [isFirstVisit, modeTouched]);
 
   const printableConsultation = formData.chiefComplaint || formData.medicines.length > 0
-    ? { ...formData, medicines: formData.medicines || [], date: formData.formDate ? new Date(formData.formDate).toISOString() : undefined, followUpDate: formData.formFollowUpDate ? new Date(formData.formFollowUpDate).toISOString() : undefined }
+    ? { ...formData, medicines: formData.medicines || [], date: formData.formDate ? new Date(formData.formDate).toISOString() : undefined, followUpDate: formData.formFollowUpDate || undefined }
     : last;
 
   if (loading) {
@@ -2079,7 +2090,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
             snippet(
               [
                 formData.outcome ? String(formData.outcome) : "",
-                formData.formFollowUpDate ? `FU: ${new Date(formData.formFollowUpDate).toLocaleDateString("en-IN")}` : "",
+                formData.formFollowUpDate ? `FU: ${parseDateOnly(formData.formFollowUpDate).toLocaleDateString("en-IN")}` : "",
               ].filter(Boolean).join(" · "),
               80
             ) || "Outcome & follow-up",
@@ -2262,31 +2273,22 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     <span className="sakhi-pill" style={{ background: "rgba(2,6,23,0.02)" }}>
                       Rx: {consultations[0].medicines?.length || 0}
                     </span>
-                    {consultations[0].followUpDate && (
-                      <span
-                        className="sakhi-pill"
-                        style={{
-                          background:
-                            new Date(consultations[0].followUpDate).getTime() < Date.now()
-                              ? "rgba(244, 63, 94, 0.10)"
-                              : "rgba(56, 189, 248, 0.10)",
-                          borderColor:
-                            new Date(consultations[0].followUpDate).getTime() < Date.now()
-                              ? "rgba(244, 63, 94, 0.18)"
-                              : "rgba(56, 189, 248, 0.18)",
-                          color:
-                            new Date(consultations[0].followUpDate).getTime() < Date.now()
-                              ? "#9f1239"
-                              : "#075985",
-                        }}
-                      >
-                        FU:{" "}
-                        {new Date(consultations[0].followUpDate).toLocaleDateString(undefined, {
-                          day: "2-digit",
-                          month: "short",
-                        })}
-                      </span>
-                    )}
+                    {consultations[0].followUpDate && (() => {
+                      const fuDue = startOfDay(parseDateOnly(consultations[0].followUpDate));
+                      const isOverdue = fuDue.getTime() < startOfDay(new Date()).getTime();
+                      return (
+                        <span
+                          className="sakhi-pill"
+                          style={{
+                            background: isOverdue ? "rgba(244, 63, 94, 0.10)" : "rgba(56, 189, 248, 0.10)",
+                            borderColor: isOverdue ? "rgba(244, 63, 94, 0.18)" : "rgba(56, 189, 248, 0.18)",
+                            color: isOverdue ? "#9f1239" : "#075985",
+                          }}
+                        >
+                          FU: {fuDue.toLocaleDateString(undefined, { day: "2-digit", month: "short" })}
+                        </span>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -3216,7 +3218,8 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 <div className="grid gap-3 sm:grid-cols-2">
                   <MobileField label="Next follow-up">
                     <input
-                      type="datetime-local"
+                      type="date"
+                      data-testid="consultation-followup-date-input"
                       value={formData.formFollowUpDate}
                       onChange={(e) => patch({ formFollowUpDate: e.target.value })}
                       className="sakhi-input sakhi-input-muted sakhi-focus-ring"
@@ -4120,7 +4123,7 @@ const ConsultationPage: React.FC<ConsultationPageProps> = ({
           <footer style={formFooterStyle}>
             <div style={{ width: 250 }}>
               <Field label="Next Follow-up">
-                <input type="datetime-local" style={INPUT} value={formData.formFollowUpDate} onChange={(e) => patch({ formFollowUpDate: e.target.value })} />
+                <input type="date" data-testid="consultation-followup-date-input-classic" style={INPUT} value={formData.formFollowUpDate} onChange={(e) => patch({ formFollowUpDate: e.target.value })} />
               </Field>
             </div>
             <button

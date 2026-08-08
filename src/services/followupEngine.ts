@@ -7,6 +7,7 @@
 import { db, Patient, Consultation, ConsultationOutcome, normalizeOutcome } from "./db";
 import { getAllConsultations } from "./consultationService";
 import { isValidPhone } from "../utils/whatsapp"; // ✅ SEAL OF EXCELLENCE FIX: Validator Alignment
+import { parseDateOnly } from "../utils/dateOnly";
 
 export interface FollowUpAlert {
   patientId: string;
@@ -41,8 +42,13 @@ export async function getFollowUpAlerts(): Promise<FollowUpAlert[]> {
       const history = historyMap[patient.id] || [];
 
       // 1. DATE-BASED ALERTS
+      // patient.nextFollowUpDate is a date-only value -- must go through
+      // parseDateOnly (dateOnly.ts's canonical parser), not `new Date(...)`
+      // directly, or this engine can disagree with
+      // followUpIntelligenceService.ts's getFollowUpBuckets() about
+      // whether the SAME patient is overdue.
       if (patient.nextFollowUpDate) {
-        const followUpDate = new Date(patient.nextFollowUpDate);
+        const followUpDate = parseDateOnly(patient.nextFollowUpDate);
         followUpDate.setHours(0, 0, 0, 0);
 
         if (followUpDate < now) {

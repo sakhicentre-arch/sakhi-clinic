@@ -16,9 +16,26 @@
  * Single source of truth for this parsing rule -- do not reintroduce a
  * second copy of it elsewhere (paymentService.ts and
  * followUpIntelligenceService.ts both import from here).
+ *
+ * Doctor-reported incident (2026-08-08): a full ISO datetime string
+ * (e.g. "2026-08-09T18:30:00.000Z", produced upstream by a since-fixed
+ * <input type="datetime-local"> field feeding new Date(...).toISOString())
+ * reached parseDateOnly instead of the bare "YYYY-MM-DD" it expects.
+ * `.split("-").map(Number)` turned the trailing "09T18:30:00.000Z" into
+ * NaN, and `d || 1` silently substituted day 1 -- "10/08/2026" was
+ * displayed and classified as "01/08/2026", days in the past, so a
+ * genuinely future follow-up was flagged Overdue/Missed. parseDateOnly
+ * now defends against this class of input directly, so any future
+ * caller that accidentally passes a non-bare-date string is protected
+ * without needing to know this history.
  */
 
 export function parseDateOnly(dateOnly: string): Date {
+  // A bare "YYYY-MM-DD" is exactly 10 characters; anything longer is a
+  // full ISO/datetime string, which new Date(...) parses correctly on
+  // its own (it carries its own explicit offset/instant) -- splitting
+  // it on "-" the way a bare date is split would corrupt it instead.
+  if (dateOnly.length > 10) return new Date(dateOnly);
   const [y, m, d] = dateOnly.split("-").map(Number);
   return new Date(y, (m || 1) - 1, d || 1);
 }

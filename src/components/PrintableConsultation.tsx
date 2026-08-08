@@ -7,6 +7,7 @@
  */
 
 import React from "react";
+import { parseDateOnly } from "../utils/dateOnly";
 
 interface MedicineLite {
   name?: string;
@@ -68,7 +69,12 @@ const PrintableConsultation: React.FC<PrintableConsultationProps> = ({
 
   const formatDate = (isoString: string | undefined): string => {
     if (!isoString) return "—";
-    const date = new Date(isoString);
+    // consultation.date is a full ISO timestamp; followUpDate is a bare
+    // "YYYY-MM-DD" date-only value, which parses as UTC midnight under
+    // `new Date(...)` and can render one calendar day off in any timezone
+    // behind UTC once formatted in local time -- branch on length exactly
+    // like dateOnly.ts's isSameLocalDay/isSameLocalMonth already do.
+    const date = isoString.length <= 10 ? parseDateOnly(isoString) : new Date(isoString);
     return date.toLocaleDateString("en-IN", {
       day: "2-digit",
       month: "short",
