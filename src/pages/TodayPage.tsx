@@ -18,8 +18,11 @@ import { normalizePatientPhone } from "../utils/whatsapp";
 import { patientRepository } from "../repositories/patientRepository";
 import { appointmentRepository } from "../repositories/appointmentRepository";
 import { PullToRefreshScrollRegion, SplitPane } from "../components/layout/LayoutPrimitives";
-import { openWhatsApp } from "../services/whatsappService";
 import { MobileCard, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
+import { ActivePage } from "../store/uiStore";
+import { hasActiveReminder, enqueueReminder } from "../services/reminderQueueService";
+import { buildFollowUpMessage } from "../services/reminderSchedulerService";
+import { FollowUpBucketEntry } from "../services/followUpIntelligenceService";
 import { haptic } from "../utils/haptics";
 import {
   Users, Clock, CheckCircle2, AlertCircle, Plus, Search,
@@ -32,6 +35,7 @@ import {
 
 interface TodayPageProps {
   goToConsultation: (patientId: string, appointmentId: string) => void;
+  onNavigate?: (page: ActivePage) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────
@@ -817,8 +821,9 @@ function ActivePatientPanel({ entry, goToConsultation, isMobile = false }:
 
 // ─── RIGHT PANEL: Stats + Follow-ups + Appointments ───────────────
 
-function StatsPanel({ goToConsultation, isMobile = false }:
+function StatsPanel({ goToConsultation, onNavigate, isMobile = false }:
   { goToConsultation: (patientId: string, appointmentId: string) => void;
+    onNavigate?: (page: ActivePage) => void;
     isMobile?: boolean }) {
 
   const consultations = useConsultationStore((s) => s.consultations);
@@ -860,6 +865,43 @@ function StatsPanel({ goToConsultation, isMobile = false }:
       .slice(0, 5),
     [patients, today]
   );
+
+  // Routed into the canonical reminder queue instead of opening WhatsApp
+  // directly -- same pattern FollowUpPage.tsx's own manual "Send Reminder"
+  // button already uses (hasActiveReminder guard + buildFollowUpMessage),
+  // so this becomes reviewable/trackable in RemindersPage instead of a
+  // fire-and-forget send with no record anywhere. See
+  // REMINDER_SYSTEM_AUDIT.md Phase 1 / REMINDER_SYSTEM_IMPLEMENTATION_REPORT.md.
+  const [remindingId, setRemindingId] = useState<string | null>(null);
+  const handleRemindMissedFollowUp = async (p: { id: string; name: string; phone?: string; nextFollowUpDate?: string }) => {
+    const phone = normalizePatientPhone(p);
+    if (!phone) {
+      alert("⚠️ Patient mobile number is missing or invalid.");
+      return;
+    }
+    setRemindingId(p.id);
+    try {
+      const alreadyActive = await hasActiveReminder(p.id, "follow_up");
+      if (alreadyActive) {
+        alert(`${p.name} already has an active follow-up reminder awaiting review in the Reminders page.`);
+        onNavigate?.("reminders");
+        return;
+      }
+      const entry = { patientId: p.id, patientName: p.name, phone, nextFollowUpDate: p.nextFollowUpDate, isChronic: false, lastVisit: "" } as FollowUpBucketEntry;
+      await enqueueReminder({
+        patientId: p.id,
+        patientName: p.name,
+        phone,
+        type: "follow_up",
+        message: buildFollowUpMessage(entry, true),
+        dueAt: new Date().toISOString(),
+        sourceRef: "today:missed-followup",
+      });
+      onNavigate?.("reminders");
+    } finally {
+      setRemindingId(null);
+    }
+  };
 
   // Today's appointments for active clinic
   const todayAppts = useMemo(() =>
@@ -965,18 +1007,13 @@ function StatsPanel({ goToConsultation, isMobile = false }:
                 </div>
                 {normalizePatientPhone(p) && (
                   <button
-                    onClick={() => {
-                      const rawNumber = p.phone || (p as any).mobile || "";
-                      const msg = `Dear ${p.name}, your follow-up at Sakhi Clinic is overdue. Please visit or call us.`;
-                      if (!openWhatsApp({ phone: rawNumber, message: msg })) {
-                        alert("⚠️ Patient mobile number is missing or invalid.");
-                      }
-                    }}
+                    disabled={remindingId === p.id}
+                    onClick={() => void handleRemindMissedFollowUp(p)}
                     style={{ display: "flex", alignItems: "center", gap: "5px",
                       padding: "4px 10px", borderRadius: "7px",
                       background: "#16a34a", border: "none", color: "#fff",
                       fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>
-                    <MessageCircle size={11} /> Remind
+                    <MessageCircle size={11} /> {remindingId === p.id ? "Queuing…" : "Remind"}
                   </button>
                 )}
               </div>
@@ -1061,7 +1098,7 @@ function StatsPanel({ goToConsultation, isMobile = false }:
 
 // ─── MAIN PAGE ───────────────────────────────────────────────────
 
-export default function TodayPage({ goToConsultation }: TodayPageProps) {
+export default function TodayPage({ goToConsultation, onNavigate }: TodayPageProps) {
   const [activeQueueId, setActiveQueueId] = useState<string | null>(null);
   const queue = useQueueStore((s) => s.queue);
   const [isMobile, setIsMobile] = useState(false);
@@ -1125,7 +1162,7 @@ export default function TodayPage({ goToConsultation }: TodayPageProps) {
             goToConsultation={goToConsultation}
           />
           <ActivePatientPanel entry={activeEntry} goToConsultation={goToConsultation} />
-          <StatsPanel goToConsultation={goToConsultation} />
+          <StatsPanel goToConsultation={goToConsultation} onNavigate={onNavigate} />
         </SplitPane>
       </div>
     </div>

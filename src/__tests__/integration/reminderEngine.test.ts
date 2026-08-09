@@ -300,6 +300,208 @@ describe("Reminder Engine (Phase 2)", () => {
     });
   });
 
+  describe("Appointment reminder scheduling (reminderSchedulerService, reuses appointmentService)", () => {
+    const TODAY_REF = new Date("2026-08-08T09:00:00");
+
+    // appointmentService.getAll() internally calls markOverdueAppointmentsMissed(),
+    // which reads new Date() directly (the REAL clock, not any reference-date
+    // parameter) to decide which appointments are "missed". Faking the
+    // system clock to TODAY_REF keeps that call in agreement with this
+    // suite's own reference date regardless of when the suite actually
+    // runs -- without this, an appointment dated "today" here could be
+    // marked "missed" (and correctly excluded as reminder-ineligible) by
+    // the real wall-clock date on a different day, making these tests
+    // non-deterministic.
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(TODAY_REF);
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function seedAppointment(overrides: Record<string, any>) {
+      await db.appointments.add({
+        id: overrides.id,
+        patientId: overrides.patientId,
+        patientName: overrides.patientName ?? "Test Patient",
+        clinic: overrides.clinic ?? "Dabholi",
+        date: overrides.date,
+        time: overrides.time ?? "10:30",
+        type: "scheduled",
+        status: overrides.status ?? "booked",
+      } as any);
+    }
+
+    it("getTodayAppointmentReminderCandidates returns only today's reminderable appointments, earliest first", async () => {
+      await seedPatient({ id: "P1", name: "Asha", phone: "9876543210" });
+      await seedAppointment({ id: "A1", patientId: "P1", date: "2026-08-08", time: "11:00" });
+      await seedPatient({ id: "P2", name: "Bela", phone: "9876500000" });
+      await seedAppointment({ id: "A2", patientId: "P2", date: "2026-08-08", time: "09:30" });
+      await seedPatient({ id: "P3", name: "Cara", phone: "9876511111" });
+      await seedAppointment({ id: "A3", patientId: "P3", date: "2026-08-09", time: "10:00" }); // tomorrow -- excluded
+      await seedAppointment({ id: "A4", patientId: "P1", date: "2026-08-08", time: "12:00", status: "cancelled" }); // cancelled -- excluded
+
+      const candidates = await schedulerSvc.getTodayAppointmentReminderCandidates(TODAY_REF);
+      expect(candidates.map((c) => c.appointmentId)).toEqual(["A2", "A1"]);
+    });
+
+    it("does not surface a cancelled, done, or missed appointment as reminder-eligible", async () => {
+      await seedPatient({ id: "P1", name: "Asha", phone: "9876543210" });
+      await seedAppointment({ id: "A1", patientId: "P1", date: "2026-08-08", time: "11:00", status: "cancelled" });
+      await seedAppointment({ id: "A2", patientId: "P1", date: "2026-08-08", time: "12:00", status: "done" });
+      await seedAppointment({ id: "A3", patientId: "P1", date: "2026-08-08", time: "13:00", status: "missed" });
+
+      const candidates = await schedulerSvc.getTodayAppointmentReminderCandidates(TODAY_REF);
+      expect(candidates).toHaveLength(0);
+    });
+
+    it("queues a message per candidate containing patient name, date/time, and clinic -- the one canonical appointment template", async () => {
+      await seedPatient({ id: "P1", name: "Asha", phone: "9876543210" });
+      await seedAppointment({ id: "A1", patientId: "P1", patientName: "Asha", date: "2026-08-08", time: "11:00", clinic: "Dabholi" });
+      const candidates = await schedulerSvc.getTodayAppointmentReminderCandidates(TODAY_REF);
+
+      const result = await schedulerSvc.queueAppointmentReminders(candidates, TODAY_REF);
+      expect(result.queued).toHaveLength(1);
+      expect(result.queued[0].type).toBe("appointment");
+      expect(result.queued[0].message).toContain("Asha");
+      expect(result.queued[0].message).toContain("11:00");
+      expect(result.queued[0].message).toContain("Dabholi");
+    });
+
+    it("skips (and counts) a patient with no phone on file rather than queueing a dead-end reminder", async () => {
+      await seedPatient({ id: "P1", name: "No Phone", phone: "" });
+      await seedAppointment({ id: "A1", patientId: "P1", date: "2026-08-08", time: "11:00" });
+
+      const candidates = await schedulerSvc.getTodayAppointmentReminderCandidates(TODAY_REF);
+      const result = await schedulerSvc.queueAppointmentReminders(candidates, TODAY_REF);
+      expect(result.queued).toHaveLength(0);
+      expect(result.skippedNoPhone).toBe(1);
+    });
+
+    it("DUPLICATE TEST: generating twice queues exactly one active reminder; after it is sent, generating again is explicitly permitted by the existing policy", async () => {
+      await seedPatient({ id: "P1", name: "Asha", phone: "9876543210" });
+      await seedAppointment({ id: "A1", patientId: "P1", date: "2026-08-08", time: "11:00" });
+
+      // Generate once.
+      const first = await schedulerSvc.queueAppointmentReminders(
+        await schedulerSvc.getTodayAppointmentReminderCandidates(TODAY_REF),
+        TODAY_REF
+      );
+      expect(first.queued).toHaveLength(1);
+
+      // Generate again -- must not double-queue (same hasActiveReminder guard scheduleFollowUpReminders uses).
+      const second = await schedulerSvc.queueAppointmentReminders(
+        await schedulerSvc.getTodayAppointmentReminderCandidates(TODAY_REF),
+        TODAY_REF
+      );
+      expect(second.queued).toHaveLength(0);
+      expect(second.skippedDuplicate).toBe(1);
+
+      const active = (await queueSvc.listRemindersByStatus("pending")).filter((r) => r.type === "appointment");
+      expect(active).toHaveLength(1); // exactly one active reminder exists
+
+      // Approve and send it.
+      await queueSvc.approveReminder(first.queued[0].id);
+      const sendResult = await deliverySvc.sendReminder(first.queued[0].id);
+      expect(sendResult.ok).toBe(true);
+      expect((await queueSvc.getReminderById(first.queued[0].id))?.status).toBe("sent");
+
+      // Generate again after send: hasActiveReminder only checks
+      // pending/approved, so nothing is "active" anymore -- the existing
+      // reminder policy explicitly permits a new one here (this mirrors
+      // scheduleFollowUpReminders' own established behavior, not a new rule).
+      const third = await schedulerSvc.queueAppointmentReminders(
+        await schedulerSvc.getTodayAppointmentReminderCandidates(TODAY_REF),
+        TODAY_REF
+      );
+      expect(third.queued).toHaveLength(1);
+    });
+
+    it("a failed send is recorded and does not count as an active reminder, so generating again is allowed", async () => {
+      await seedPatient({ id: "P1", name: "No Phone At Send Time", phone: "9876543210" });
+      await seedAppointment({ id: "A1", patientId: "P1", date: "2026-08-08", time: "11:00" });
+
+      const first = await schedulerSvc.queueAppointmentReminders(
+        await schedulerSvc.getTodayAppointmentReminderCandidates(TODAY_REF),
+        TODAY_REF
+      );
+      await queueSvc.approveReminder(first.queued[0].id);
+      // Simulate the phone becoming invalid between queueing and sending.
+      await db.reminderQueue.update(first.queued[0].id, { phone: undefined });
+      const sendResult = await deliverySvc.sendReminder(first.queued[0].id);
+      expect(sendResult.ok).toBe(false);
+      expect((await queueSvc.getReminderById(first.queued[0].id))?.status).toBe("failed");
+
+      const second = await schedulerSvc.queueAppointmentReminders(
+        await schedulerSvc.getTodayAppointmentReminderCandidates(TODAY_REF),
+        TODAY_REF
+      );
+      expect(second.queued).toHaveLength(1); // failed is not "active" -- a fresh one is queueable
+    });
+
+    describe("This Week grouping (rolling 7-day window starting tomorrow)", () => {
+      it("groups appointments by calendar day, tomorrow through +7 days, excluding today and day+8", async () => {
+        await seedPatient({ id: "P1", name: "Asha", phone: "9876543210" });
+        await seedAppointment({ id: "A-TODAY", patientId: "P1", date: "2026-08-08", time: "09:00" });
+        await seedPatient({ id: "P2", name: "Bela", phone: "9876500000" });
+        await seedAppointment({ id: "A-TOM", patientId: "P2", date: "2026-08-09", time: "09:00" });
+        await seedPatient({ id: "P3", name: "Cara", phone: "9876511111" });
+        await seedAppointment({ id: "A-LASTDAY", patientId: "P3", date: "2026-08-15", time: "09:00" });
+        await seedPatient({ id: "P4", name: "Dia", phone: "9876522222" });
+        await seedAppointment({ id: "A-NEXTWEEK", patientId: "P4", date: "2026-08-16", time: "09:00" });
+
+        const groups = await schedulerSvc.getThisWeekAppointmentReminderGroups(TODAY_REF);
+        expect(groups).toHaveLength(7);
+        expect(groups[0].date).toBe("2026-08-09");
+        expect(groups[6].date).toBe("2026-08-15");
+        expect(groups.flatMap((g) => g.candidates.map((c) => c.appointmentId))).toEqual(["A-TOM", "A-LASTDAY"]);
+      });
+
+      it("queueAppointmentReminders across a whole week's groups queues one reminder per eligible patient", async () => {
+        await seedPatient({ id: "P1", name: "Asha", phone: "9876543210" });
+        await seedAppointment({ id: "A1", patientId: "P1", patientName: "Asha", date: "2026-08-10", time: "09:00" });
+        await seedPatient({ id: "P2", name: "Bela", phone: "9876500000" });
+        await seedAppointment({ id: "A2", patientId: "P2", date: "2026-08-12", time: "09:00" });
+
+        const groups = await schedulerSvc.getThisWeekAppointmentReminderGroups(TODAY_REF);
+        const result = await schedulerSvc.queueAppointmentReminders(groups.flatMap((g) => g.candidates), TODAY_REF);
+        expect(result.queued).toHaveLength(2);
+        expect(result.queued.every((r) => r.type === "appointment")).toBe(true);
+        // A reminder queued for a future day must not say "today".
+        expect(result.queued.find((r) => r.patientName === "Asha")?.message).not.toMatch(/is today/i);
+      });
+    });
+
+    describe("Date/time correctness (no UTC/IST shift)", () => {
+      it.each([
+        { label: "today", ref: "2026-08-08T09:00:00", apptDate: "2026-08-08", inToday: true },
+        { label: "tomorrow", ref: "2026-08-08T09:00:00", apptDate: "2026-08-09", inToday: false },
+        { label: "last day of the 7-day window", ref: "2026-08-08T09:00:00", apptDate: "2026-08-15", inToday: false },
+        { label: "next week (day+8, outside the window)", ref: "2026-08-08T09:00:00", apptDate: "2026-08-16", inToday: false },
+        { label: "month boundary", ref: "2026-08-28T09:00:00", apptDate: "2026-09-02", inToday: false },
+        { label: "year boundary", ref: "2026-12-28T09:00:00", apptDate: "2027-01-02", inToday: false },
+      ])("$label: classified correctly relative to reference date, date string never shifted by a day", async ({ ref, apptDate, inToday }) => {
+        const refDate = new Date(ref);
+        vi.setSystemTime(refDate); // override this describe's default TODAY_REF for this case
+
+        const patientId = `P-${apptDate}`;
+        await seedPatient({ id: patientId, name: "Test Patient", phone: "9876543210" });
+        await seedAppointment({ id: `A-${apptDate}`, patientId, date: apptDate, time: "10:00" });
+
+        const todayCandidates = await schedulerSvc.getTodayAppointmentReminderCandidates(refDate);
+        expect(todayCandidates.some((c) => c.patientId === patientId)).toBe(inToday);
+
+        // If it shows up in the week grouping, its date string must be
+        // byte-identical to what was stored -- proof no UTC/IST re-parsing
+        // shifted the calendar date.
+        const weekGroups = await schedulerSvc.getThisWeekAppointmentReminderGroups(refDate);
+        const found = weekGroups.flatMap((g) => g.candidates).find((c) => c.patientId === patientId);
+        if (found) expect(found.date).toBe(apptDate);
+      });
+    });
+  });
+
   describe("Analytics", () => {
     it("aggregates counts by status and computes send success rate", async () => {
       const a = await queueSvc.enqueueReminder({ patientId: "P1", patientName: "A", phone: "9000000000", type: "follow_up", message: "m", dueAt: REF.toISOString() });

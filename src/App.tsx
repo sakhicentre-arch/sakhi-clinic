@@ -168,7 +168,7 @@ export default function App() {
       {originBanner}
       <AppShell onNavigate={handleNavigate} onPatientSelect={handlePatientSelect}>
       {page === "today" && (
-        <TodayPage goToConsultation={goToConsultation} />
+        <TodayPage goToConsultation={goToConsultation} onNavigate={setPage} />
       )}
       {page === "patients" && (
   <PatientPage
@@ -178,7 +178,7 @@ export default function App() {
   />
 )}
       {page === "appointments" && (
-        <AppointmentPage goToConsultation={goToConsultation} />
+        <AppointmentPage goToConsultation={goToConsultation} onNavigate={setPage} />
       )}
 
       {/* ✅ Step 1: Pass onNavigate to DashboardPage */}

@@ -18,14 +18,23 @@ import {
   TrendingUp,
   Pencil,
   Megaphone,
+  CalendarClock,
+  CalendarDays,
 } from "lucide-react";
 import { MobileCard, MobileSection, ResponsiveContainer } from "../components/layout/ResponsivePrimitives";
 import FilteredPatientList, { FilteredListEntry } from "../components/FilteredPatientList";
 import { usePatientStore } from "../store/usePatientStore";
 import { ReminderQueueEntry, ReminderStatus } from "../services/db";
-import { listRemindersByStatus, approveReminder, rejectReminder, cancelReminder, updateReminderMessage, enqueueReminder } from "../services/reminderQueueService";
+import { listRemindersByStatus, listAllReminders, approveReminder, rejectReminder, cancelReminder, updateReminderMessage, enqueueReminder } from "../services/reminderQueueService";
 import { sendReminder, resendReminder } from "../services/reminderDeliveryService";
 import { getReminderAnalytics, ReminderAnalytics } from "../services/reminderAnalyticsService";
+import {
+  getTodayAppointmentReminderCandidates,
+  getThisWeekAppointmentReminderGroups,
+  queueAppointmentReminders,
+  AppointmentReminderCandidate,
+  AppointmentReminderDayGroup,
+} from "../services/reminderSchedulerService";
 
 // WhatsApp Productivity: Bulk Messaging -- the doctor writes the message
 // once; this only adds the same clinic-name branding prefix every other
@@ -88,6 +97,111 @@ export default function RemindersPage() {
   const [composeQueuing, setComposeQueuing] = useState(false);
   const [composeError, setComposeError] = useState("");
   const allPatients = usePatientStore((s) => s.patients);
+
+  // Appointment reminders (Today / This Week) -- doctor-initiated queueing,
+  // see reminderSchedulerService.ts. Read-only candidate lists plus a
+  // sourceRef -> ReminderQueueEntry lookup so each row can show its real
+  // queue status (Pending/Approved/Sent/Failed) once queued, or "No
+  // WhatsApp" if the patient has no phone on file, or nothing extra if it
+  // simply hasn't been queued yet.
+  const [todayCandidates, setTodayCandidates] = useState<AppointmentReminderCandidate[]>([]);
+  const [weekGroups, setWeekGroups] = useState<AppointmentReminderDayGroup[]>([]);
+  const [appointmentReminderBySourceRef, setAppointmentReminderBySourceRef] = useState<Map<string, ReminderQueueEntry>>(new Map());
+  const [queueingToday, setQueueingToday] = useState(false);
+  const [queueingWeek, setQueueingWeek] = useState(false);
+  const [queueingDay, setQueueingDay] = useState<string | null>(null);
+  const [appointmentNote, setAppointmentNote] = useState("");
+
+  const loadAppointmentReminders = async () => {
+    const [today, week, allReminders] = await Promise.all([
+      getTodayAppointmentReminderCandidates(),
+      getThisWeekAppointmentReminderGroups(),
+      listAllReminders(),
+    ]);
+    setTodayCandidates(today);
+    setWeekGroups(week);
+    const bySourceRef = new Map<string, ReminderQueueEntry>();
+    for (const r of allReminders) {
+      if (r.sourceRef?.startsWith("appointment:")) bySourceRef.set(r.sourceRef, r);
+    }
+    setAppointmentReminderBySourceRef(bySourceRef);
+  };
+
+  useEffect(() => {
+    void loadAppointmentReminders();
+  }, []);
+
+  const summarizeQueueResult = (result: { queued: unknown[]; skippedDuplicate: number; skippedNoPhone: number }) => {
+    const parts: string[] = [];
+    if (result.queued.length) parts.push(`${result.queued.length} queued for review`);
+    if (result.skippedDuplicate) parts.push(`${result.skippedDuplicate} already have an active reminder`);
+    if (result.skippedNoPhone) parts.push(`${result.skippedNoPhone} have no WhatsApp number on file`);
+    return parts.join(" · ") || "Nothing to queue.";
+  };
+
+  const afterQueueing = async (queuedCount: number) => {
+    await loadAppointmentReminders();
+    if (queuedCount > 0) {
+      setActiveTab("pending");
+      await load("pending");
+    }
+  };
+
+  const handleQueueToday = async () => {
+    setQueueingToday(true);
+    setAppointmentNote("");
+    try {
+      const result = await queueAppointmentReminders(todayCandidates);
+      setAppointmentNote(summarizeQueueResult(result));
+      await afterQueueing(result.queued.length);
+    } finally {
+      setQueueingToday(false);
+    }
+  };
+
+  const handleQueueWeek = async () => {
+    setQueueingWeek(true);
+    setAppointmentNote("");
+    try {
+      const all = weekGroups.flatMap((g) => g.candidates);
+      const result = await queueAppointmentReminders(all);
+      setAppointmentNote(summarizeQueueResult(result));
+      await afterQueueing(result.queued.length);
+    } finally {
+      setQueueingWeek(false);
+    }
+  };
+
+  const handleQueueDay = async (group: AppointmentReminderDayGroup) => {
+    setQueueingDay(group.date);
+    setAppointmentNote("");
+    try {
+      const result = await queueAppointmentReminders(group.candidates);
+      setAppointmentNote(summarizeQueueResult(result));
+      await afterQueueing(result.queued.length);
+    } finally {
+      setQueueingDay(null);
+    }
+  };
+
+  type StatusBadge = { label: string; tone: "success" | "muted" | "brand"; style?: React.CSSProperties };
+
+  const appointmentReminderBadge = (candidate: AppointmentReminderCandidate): StatusBadge => {
+    if (!candidate.phone) {
+      return { label: "No WhatsApp", tone: "muted", style: { background: "rgba(220,38,38,0.10)", color: "#b91c1c", borderColor: "rgba(220,38,38,0.18)" } };
+    }
+    const reminder = appointmentReminderBySourceRef.get(`appointment:${candidate.appointmentId}`);
+    if (!reminder) return { label: "Not queued", tone: "muted" };
+    switch (reminder.status) {
+      case "sent": return { label: "✓ Sent", tone: "success" };
+      case "failed": return { label: "⚠ Failed", tone: "muted", style: { background: "rgba(220,38,38,0.10)", color: "#b91c1c", borderColor: "rgba(220,38,38,0.18)" } };
+      case "approved": return { label: "Approved", tone: "brand" };
+      case "pending": return { label: "○ Pending", tone: "muted" };
+      case "rejected": return { label: "Rejected", tone: "muted" };
+      case "cancelled": return { label: "Cancelled", tone: "muted" };
+      default: return { label: reminder.status, tone: "muted" };
+    }
+  };
 
   const load = async (tab: ReminderStatus = activeTab) => {
     setLoading(true);
@@ -167,7 +281,7 @@ export default function RemindersPage() {
         );
       }
       setSelectedIds(new Set());
-      await load(activeTab);
+      await Promise.all([load(activeTab), loadAppointmentReminders()]);
     } finally {
       setBulkBusy(false);
     }
@@ -183,7 +297,11 @@ export default function RemindersPage() {
       } else if (note) {
         setActionNote(note);
       }
-      await load(activeTab);
+      // Approving/sending/rejecting/cancelling/resending a reminder can
+      // change an appointment-reminder's status -- refresh the Today/This
+      // Week sections' status badges too, not just this tab's own list,
+      // or they'd show a stale "Pending" after the doctor already sent it.
+      await Promise.all([load(activeTab), loadAppointmentReminders()]);
     } catch (err) {
       setActionNote(err instanceof Error ? err.message : String(err));
     } finally {
@@ -379,6 +497,122 @@ export default function RemindersPage() {
               </div>
             </MobileCard>
 
+            {/* ================= Today's Appointment Reminders ================= */}
+            <MobileCard>
+              <div className="sakhi-row" style={{ gap: "var(--space-2)", marginBottom: "var(--space-3)", justifyContent: "space-between" }}>
+                <div className="sakhi-row" style={{ gap: "var(--space-2)" }}>
+                  <CalendarClock size={18} />
+                  <div className="sakhi-body" style={{ fontWeight: 950 }}>Today's Appointment Reminders</div>
+                </div>
+                <span className="sakhi-pill" data-tone={todayCandidates.length > 0 ? "brand" : "muted"}>{todayCandidates.length}</span>
+              </div>
+
+              {todayCandidates.length === 0 ? (
+                <div className="sakhi-caption">No appointments today.</div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    data-testid="queue-today-reminders"
+                    disabled={queueingToday}
+                    onClick={handleQueueToday}
+                    className="sakhi-btn-primary sakhi-tap sakhi-focus-ring"
+                    style={{ minHeight: 44, width: "100%", marginBottom: "var(--space-2)" }}
+                  >
+                    {queueingToday ? "Queuing…" : `Queue Today's Reminders (${todayCandidates.length})`}
+                  </button>
+                  {appointmentNote && (
+                    <div className="sakhi-caption" style={{ marginBottom: "var(--space-2)", color: "#475569", fontWeight: 800 }}>{appointmentNote}</div>
+                  )}
+                  <div className="sakhi-progress-rail">
+                    {todayCandidates.map((c) => {
+                      const badge = appointmentReminderBadge(c);
+                      return (
+                        <div key={c.appointmentId} className="sakhi-progress-card" data-testid={`today-reminder-row-${c.appointmentId}`}>
+                          <div className="sakhi-progress-title">
+                            <div className="sakhi-progress-title-left">
+                              <span className="sakhi-body" style={{ fontSize: 13, fontWeight: 950, color: "#0f172a" }}>{c.patientName}</span>
+                              <span className="sakhi-caption">{c.time} · {c.clinic}</span>
+                            </div>
+                            <span className="sakhi-pill" data-tone={badge.tone} style={badge.style} data-testid={`today-reminder-status-${c.appointmentId}`}>
+                              {badge.label}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </MobileCard>
+
+            {/* ================= This Week's Appointment Reminders ================= */}
+            <MobileCard>
+              <div className="sakhi-row" style={{ gap: "var(--space-2)", marginBottom: "var(--space-3)", justifyContent: "space-between" }}>
+                <div className="sakhi-row" style={{ gap: "var(--space-2)" }}>
+                  <CalendarDays size={18} />
+                  <div className="sakhi-body" style={{ fontWeight: 950 }}>This Week's Appointment Reminders</div>
+                </div>
+                <span className="sakhi-pill" data-tone="muted">{weekGroups.reduce((n, g) => n + g.candidates.length, 0)}</span>
+              </div>
+
+              {weekGroups.every((g) => g.candidates.length === 0) ? (
+                <div className="sakhi-caption">No appointments in the next 7 days.</div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    data-testid="queue-week-reminders"
+                    disabled={queueingWeek}
+                    onClick={handleQueueWeek}
+                    className="sakhi-btn-secondary sakhi-tap sakhi-focus-ring"
+                    style={{ minHeight: 44, width: "100%", marginBottom: "var(--space-3)" }}
+                  >
+                    {queueingWeek ? "Queuing…" : "Queue All of This Week's Reminders"}
+                  </button>
+                  <div className="sakhi-stack-tight">
+                    {weekGroups.filter((g) => g.candidates.length > 0).map((g) => (
+                      <div key={g.date} style={{ marginBottom: "var(--space-3)" }}>
+                        <div className="sakhi-row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
+                          <span className="sakhi-caption" style={{ fontWeight: 900, color: "#0f172a" }}>
+                            {g.label} — {g.candidates.length} patient{g.candidates.length === 1 ? "" : "s"}
+                          </span>
+                          <button
+                            type="button"
+                            data-testid={`queue-day-${g.date}`}
+                            disabled={queueingDay === g.date}
+                            onClick={() => handleQueueDay(g)}
+                            className="sakhi-caption"
+                            style={{ background: "none", border: "none", padding: 0, color: "#0d7377", fontWeight: 800, cursor: "pointer" }}
+                          >
+                            {queueingDay === g.date ? "Queuing…" : "Queue this day"}
+                          </button>
+                        </div>
+                        <div className="sakhi-progress-rail">
+                          {g.candidates.map((c) => {
+                            const badge = appointmentReminderBadge(c);
+                            return (
+                              <div key={c.appointmentId} className="sakhi-progress-card" data-testid={`week-reminder-row-${c.appointmentId}`}>
+                                <div className="sakhi-progress-title">
+                                  <div className="sakhi-progress-title-left">
+                                    <span className="sakhi-body" style={{ fontSize: 13, fontWeight: 950, color: "#0f172a" }}>{c.patientName}</span>
+                                    <span className="sakhi-caption">{c.time} · {c.clinic}</span>
+                                  </div>
+                                  <span className="sakhi-pill" data-tone={badge.tone} style={badge.style} data-testid={`week-reminder-status-${c.appointmentId}`}>
+                                    {badge.label}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </MobileCard>
+
             {/* ================= Queue ================= */}
             <MobileCard>
               <div className="sakhi-row" style={{ gap: "var(--space-2)", marginBottom: "var(--space-3)", justifyContent: "space-between" }}>
@@ -458,7 +692,7 @@ export default function RemindersPage() {
                   <div className="sakhi-caption">No reminders in this queue.</div>
                 ) : (
                   reminders.map((r) => (
-                    <div key={r.id} className="sakhi-progress-card">
+                    <div key={r.id} className="sakhi-progress-card" data-testid={`reminder-queue-row-${r.id}`}>
                       <div className="sakhi-progress-title">
                         <div className="sakhi-progress-title-left">
                           {(r.status === "pending" || r.status === "approved") && (

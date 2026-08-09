@@ -14,6 +14,9 @@ import {
   ResponsiveContainer,
   ResponsiveGrid,
 } from "../components/layout/ResponsivePrimitives";
+import { queueAppointmentReminders, AppointmentReminderCandidate } from "../services/reminderSchedulerService";
+import { ActivePage } from "../store/uiStore";
+import { dateKey } from "../utils/dateOnly";
 
 import {
   AlertCircle,
@@ -29,6 +32,7 @@ import {
 
 type Props = {
   goToConsultation: (patientId: string, appointmentId: string) => void;
+  onNavigate?: (page: ActivePage) => void;
 };
 
 const timeToMinutes = (time: string): number => {
@@ -113,13 +117,12 @@ function generateSlotsFor(clinicType: "Dabholi" | "City Light"): string[] {
   return slots;
 }
 
-export default function AppointmentPage({ goToConsultation }: Props) {
+export default function AppointmentPage({ goToConsultation, onNavigate }: Props) {
   const patients = usePatientStore((s) => s.patients);
   const addAppointment = useAppointmentStore((s) => s.addAppointment);
   const appointments = useAppointmentStore((s) => s.appointments);
   const startConsultation = useAppointmentStore((s) => s.startConsultation);
   const markArrived = useAppointmentStore((s) => s.markArrived);
-  const markReminderSent = useAppointmentStore((s) => s.markReminderSent);
   const loadAppointments = useAppointmentStore((s) => s.loadAppointments);
   const lastError = useAppointmentStore((s) => s.lastError);
   const clearError = useAppointmentStore((s) => s.clearError);
@@ -207,42 +210,64 @@ export default function AppointmentPage({ goToConsultation }: Props) {
 
   const showMobileActionBar = isMobile && Boolean(selectedPatientId);
 
-  const openReminder = (appt: any) => {
+  // Reminders are queued, never sent directly -- see
+  // REMINDER_SYSTEM_AUDIT.md Phase 1/9. Every appointment reminder now
+  // goes through the same approve-before-send queue as follow-up
+  // reminders (reminderQueueService.ts), with the exact same
+  // hasActiveReminder duplicate guard, instead of opening WhatsApp
+  // immediately with no review step.
+  const buildReminderCandidate = (appt: any): AppointmentReminderCandidate | null => {
     const patient = patients.find((p) => p.id === appt.patientId);
-    if (!patient) return;
-    const phone = normalizePatientPhone(patient);
-    if (!phone) return;
-    const msg =
-      `Reminder – Sakhi Clinic\n\n` +
-      `Dear ${patient.name},\n\n` +
-      `This is a reminder for your appointment today.\n\n` +
-      `⏰ ${appt.time}\n🏥 ${appt.clinic}\n\n` +
-      `Please arrive on time 🙏`;
-    openWhatsApp({ phone, message: msg });
-    markReminderSent(appt.id);
+    if (!patient) return null;
+    return {
+      appointmentId: appt.id,
+      patientId: appt.patientId,
+      patientName: appt.patientName || patient.name,
+      phone: normalizePatientPhone(patient) || undefined,
+      date: appt.date,
+      time: appt.time,
+      clinic: appt.clinic,
+    };
   };
 
-  const sendAllReminders = () => {
-    const today = formatLocalDate(new Date());
-    const list = appointments.filter((a) => a.date === today && !a.reminderSent);
-    if (list.length === 0) return alert("Notice: No clinical reminders pending for today.");
+  const openReminder = async (appt: any) => {
+    const candidate = buildReminderCandidate(appt);
+    if (!candidate) return;
+    if (!candidate.phone) {
+      alert("⚠️ Patient mobile number is missing or invalid.");
+      return;
+    }
+    const result = await queueAppointmentReminders([candidate]);
+    if (result.queued.length > 0) {
+      alert(`Reminder queued for ${candidate.patientName}. Review and send it from the Reminders page.`);
+      onNavigate?.("reminders");
+    } else if (result.skippedDuplicate > 0) {
+      alert(`${candidate.patientName} already has an active reminder awaiting review in the Reminders page.`);
+    }
+  };
 
-    list.forEach((appt, index) => {
-      setTimeout(() => {
-        const patient = patients.find((p) => p.id === appt.patientId);
-        if (!patient) return;
-        const phone = normalizePatientPhone(patient);
-        if (!phone) return;
-        const msg =
-          `Reminder – Sakhi Clinic\n\n` +
-          `Dear ${patient.name},\n\n` +
-          `Your appointment is today at ${appt.time}.\n` +
-          `🏥 ${appt.clinic}\n\n` +
-          `Please arrive on time 🙏`;
-        openWhatsApp({ phone, message: msg });
-        markReminderSent(appt.id);
-      }, index * 2500);
-    });
+  const sendAllReminders = async () => {
+    // dateKey (dateOnly.ts's canonical local-date helper), not this file's
+    // own UTC-based formatLocalDate -- must agree with
+    // reminderSchedulerService.ts's getTodayAppointmentReminderCandidates()
+    // on what "today" means, or this button and RemindersPage's "Today"
+    // section could disagree near midnight IST.
+    const today = dateKey(new Date());
+    const list = appointments.filter((a) => a.date === today && a.status !== "cancelled" && a.status !== "done" && a.status !== "missed");
+    if (list.length === 0) return alert("Notice: No appointments today to remind.");
+
+    const candidates = list
+      .map(buildReminderCandidate)
+      .filter((c): c is AppointmentReminderCandidate => c !== null);
+    const result = await queueAppointmentReminders(candidates);
+
+    const parts: string[] = [];
+    if (result.queued.length) parts.push(`${result.queued.length} queued for review`);
+    if (result.skippedDuplicate) parts.push(`${result.skippedDuplicate} already have an active reminder`);
+    if (result.skippedNoPhone) parts.push(`${result.skippedNoPhone} have no WhatsApp number on file`);
+    alert(parts.join("\n") || "Nothing to queue.");
+
+    if (result.queued.length > 0) onNavigate?.("reminders");
   };
 
   const handleAdd = async () => {
@@ -538,7 +563,7 @@ export default function AppointmentPage({ goToConsultation }: Props) {
             }}
           >
             <span className="inline-flex items-center justify-center gap-2">
-              <Send size={18} /> Blast Sequential Reminders
+              <Send size={18} /> Queue Today's Reminders
             </span>
           </button>
 
