@@ -260,17 +260,29 @@ export default function RecordLaterPaymentFlow({ initialPatientId, onClose, onNa
     }
   };
 
+  // Release-integration smoke-test finding: this message is only ever shown
+  // from the "success" step (the View/Share Receipt buttons render exclusively
+  // when step === "success", after handleConfirmPayment has already called
+  // recordPayment() and reloaded the consultation store -- see the effect at
+  // handleConfirmPayment's end). By that point alreadyReceivedForSelected
+  // (derived from the just-reloaded store) already IS the new total received,
+  // so it must be used as-is. Adding parsedAmount (the just-typed amount) on
+  // top double-counted the just-recorded payment on every single later-payment
+  // save -- e.g. fee 300, already-received 100, amount-now 200: the correct
+  // total is 300, but the old code showed 300 (post-save total) + 200
+  // (still-populated input) = 500, a real amount the patient never actually
+  // paid, on the exact message shared with them over WhatsApp.
   const receiptMessage = useMemo(() => {
     if (!selectedPatient || !selectedConsultation) return "";
     return buildPaymentReceiptMessage(selectedPatient.name || "Patient", {
       fee: selectedConsultation.fee,
-      amountReceived: alreadyReceivedForSelected + (amountValid ? parsedAmount : 0),
+      amountReceived: alreadyReceivedForSelected,
       paymentMode: mode,
       paymentReferenceNumber: reference.trim() || undefined,
       paymentDate: date,
       date: selectedConsultation.date,
     } as any);
-  }, [selectedPatient, selectedConsultation, alreadyReceivedForSelected, parsedAmount, amountValid, mode, reference, date]);
+  }, [selectedPatient, selectedConsultation, alreadyReceivedForSelected, mode, reference, date]);
 
   const handleShareReceipt = async () => {
     if (!selectedPatient) return;

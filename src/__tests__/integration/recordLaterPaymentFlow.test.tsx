@@ -149,6 +149,36 @@ describe("RecordLaterPaymentFlow", () => {
     expect(updated?.paymentStatus).toBe("paid");
   });
 
+  it("release-integration smoke-test finding: the success-screen receipt shows the true total received, not the post-save total plus the just-typed amount again", async () => {
+    // Fee 300, already received 100 (partial) -- doctor now records the
+    // remaining 200. True total received is 300. Before the fix, the
+    // receipt's amountReceived was computed as alreadyReceivedForSelected
+    // (which, after handleConfirmPayment's post-save store reload, already
+    // equals 300) + the still-populated amount field (200) = 500, a figure
+    // that was shared with the patient over WhatsApp and never actually paid.
+    await seedPatientAndVisit({ fee: 300, amountReceived: 100, paymentStatus: "partial" });
+    await renderFlowForPatient();
+
+    fireEvent.click(await screen.findByTestId(`record-payment-visit-option-${CONSULTATION_ID}`));
+    fireEvent.click(await screen.findByTestId("record-payment-skip-screenshot"));
+
+    fireEvent.change(screen.getByTestId("record-payment-amount"), { target: { value: "200" } });
+    fireEvent.click(screen.getByTestId("record-payment-mode-upi"));
+
+    fireEvent.click(screen.getByTestId("record-payment-confirm"));
+    await waitFor(() => expect(screen.getByTestId("record-payment-confirm")).toHaveTextContent("Confirm & Record Payment"));
+    fireEvent.click(screen.getByTestId("record-payment-confirm"));
+
+    await screen.findByText(/Payment recorded successfully/i);
+
+    fireEvent.click(screen.getByTestId("record-payment-view-receipt"));
+
+    const receiptFee = await screen.findByText(/Fee: ₹300/);
+    expect(receiptFee).toBeInTheDocument();
+    expect(screen.getByText(/Received: ₹300/)).toBeInTheDocument();
+    expect(screen.queryByText(/Received: ₹500/)).not.toBeInTheDocument();
+  });
+
   it("warns about a possible duplicate payment and requires explicit override before posting", async () => {
     await seedPatientAndVisit({ fee: 500, amountReceived: 500, paymentStatus: "paid" });
     // Prior payment already recorded for this exact amount+date.

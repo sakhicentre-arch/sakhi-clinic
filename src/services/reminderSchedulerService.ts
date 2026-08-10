@@ -24,9 +24,13 @@
  *   doctor-initiated from RemindersPage.tsx's Today/This Week sections.
  *
  * Both producers are idempotent via the exact same guard,
- * reminderQueueService's hasActiveReminder(patientId, type) -- scoped by
- * `type` so an active "appointment" reminder for a patient never blocks
- * (or is blocked by) an active "follow_up" one for the same patient.
+ * reminderQueueService's hasActiveReminder(patientId, type, sourceRef?) --
+ * scoped by `type` so an active "appointment" reminder for a patient never
+ * blocks (or is blocked by) an active "follow_up" one for the same patient.
+ * Appointment reminders additionally scope by `sourceRef` (the specific
+ * appointment) so a patient with multiple live appointments gets an
+ * independent reminder per appointment instead of the first one queued
+ * silently blocking the rest.
  */
 
 import { getFollowUpBuckets, FollowUpBucketEntry } from "./followUpIntelligenceService";
@@ -189,10 +193,12 @@ export interface QueueAppointmentRemindersResult {
 }
 
 /**
- * Queues (never sends) a reminder for each candidate, using the exact
- * same idempotency guard scheduleFollowUpReminders() uses --
- * hasActiveReminder(patientId, "appointment") -- so calling this twice in
- * a row for the same appointments queues nothing new the second time.
+ * Queues (never sends) a reminder for each candidate, using
+ * hasActiveReminder(patientId, "appointment", sourceRef) scoped to this
+ * specific appointment -- so calling this twice in a row for the same
+ * appointments queues nothing new the second time, but a patient with a
+ * second, different appointment still gets its own independent reminder
+ * rather than being silently blocked by the first one queued.
  * Candidates with no phone on file are counted, not queued (nothing to
  * send to); the caller surfaces both counts to the doctor.
  */
@@ -210,7 +216,8 @@ export async function queueAppointmentReminders(
       skippedNoPhone++;
       continue;
     }
-    const alreadyActive = await hasActiveReminder(candidate.patientId, "appointment");
+    const sourceRef = `appointment:${candidate.appointmentId}`;
+    const alreadyActive = await hasActiveReminder(candidate.patientId, "appointment", sourceRef);
     if (alreadyActive) {
       skippedDuplicate++;
       continue;
@@ -223,7 +230,7 @@ export async function queueAppointmentReminders(
       type: "appointment",
       message: buildAppointmentReminderMessage(candidate, candidate.date === todayKey),
       dueAt: new Date().toISOString(),
-      sourceRef: `appointment:${candidate.appointmentId}`,
+      sourceRef,
     });
     queued.push(reminder);
   }

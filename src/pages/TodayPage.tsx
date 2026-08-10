@@ -22,6 +22,7 @@ import { MobileCard, ResponsiveContainer } from "../components/layout/Responsive
 import { ActivePage } from "../store/uiStore";
 import { hasActiveReminder, enqueueReminder } from "../services/reminderQueueService";
 import { buildFollowUpMessage } from "../services/reminderSchedulerService";
+import { getConsultationOutstanding } from "../services/paymentService";
 import { FollowUpBucketEntry } from "../services/followUpIntelligenceService";
 import { haptic } from "../utils/haptics";
 import {
@@ -327,8 +328,7 @@ function QueuePanel({ activeQueueId, onSelect, goToConsultation, isMobile = fals
 
       // Compute alerts
       const patientConsults = consultations.filter(c => c.patientId === patientId);
-      const pendingConsults = patientConsults.filter(c => c.paymentStatus === "pending" && (c.fee || 0) > 0);
-      const pendingAmount = pendingConsults.reduce((s, c) => s + (c.fee || 0), 0);
+      const pendingAmount = patientConsults.reduce((s, c) => s + getConsultationOutstanding(c), 0);
       const today = todayStr();
       const missedFollowUp = !!(patientObj.nextFollowUpDate && patientObj.nextFollowUpDate < today);
 
@@ -558,7 +558,7 @@ function ActivePatientPanel({ entry, goToConsultation, isMobile = false }:
 
   const revenue = useMemo(() => {
     const paid = patientConsults.filter(c => c.paymentStatus === "paid").reduce((s, c) => s + (c.fee || 0), 0);
-    const pending = patientConsults.filter(c => c.paymentStatus === "pending" && (c.fee || 0) > 0).reduce((s, c) => s + (c.fee || 0), 0);
+    const pending = patientConsults.reduce((s, c) => s + getConsultationOutstanding(c), 0);
     return { paid, pending };
   }, [patientConsults]);
 
@@ -916,9 +916,7 @@ function StatsPanel({ goToConsultation, onNavigate, isMobile = false }:
     if (!p) return;
 
     const patientConsults = consultations.filter(c => c.patientId === p.id);
-    const pendingAmount = patientConsults
-      .filter(c => c.paymentStatus === "pending" && (c.fee || 0) > 0)
-      .reduce((s, c) => s + (c.fee || 0), 0);
+    const pendingAmount = patientConsults.reduce((s, c) => s + getConsultationOutstanding(c), 0);
 
     addToQueue({
       patientId: p.id,
@@ -1370,9 +1368,7 @@ export default function TodayPage({ goToConsultation, onNavigate }: TodayPagePro
                   }
                   if (!p) return;
                   const patientConsults = consultationsStore.consultations.filter((c: any) => c.patientId === patientId);
-                  const pendingAmount = patientConsults
-                    .filter((c: any) => c.paymentStatus === "pending" && (c.fee || 0) > 0)
-                    .reduce((s: number, c: any) => s + (c.fee || 0), 0);
+                  const pendingAmount = patientConsults.reduce((s: number, c: any) => s + getConsultationOutstanding(c), 0);
                   const today = todayStr();
                   const missedFollowUp = !!((p as any).nextFollowUpDate && (p as any).nextFollowUpDate < today);
                   qp.addToQueue({

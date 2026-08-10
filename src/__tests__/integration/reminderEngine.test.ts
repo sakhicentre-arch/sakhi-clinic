@@ -418,6 +418,32 @@ describe("Reminder Engine (Phase 2)", () => {
       expect(third.queued).toHaveLength(1);
     });
 
+    it("a patient with two live appointments gets an independent reminder for each -- one being queued does not block the other", async () => {
+      await seedPatient({ id: "P1", name: "Asha", phone: "9876543210" });
+      await seedAppointment({ id: "A1", patientId: "P1", date: "2026-08-08", time: "09:00" });
+      await seedAppointment({ id: "A2", patientId: "P1", date: "2026-08-08", time: "15:00" });
+
+      const result = await schedulerSvc.queueAppointmentReminders(
+        await schedulerSvc.getTodayAppointmentReminderCandidates(TODAY_REF),
+        TODAY_REF
+      );
+
+      // Both appointments must be queued -- previously the second was
+      // silently swallowed as a false "duplicate" because the guard only
+      // checked (patientId, type), not the specific appointment.
+      expect(result.queued).toHaveLength(2);
+      expect(result.skippedDuplicate).toBe(0);
+      expect(result.queued.map((r) => r.sourceRef).sort()).toEqual(["appointment:A1", "appointment:A2"]);
+
+      // Re-queueing must still be idempotent per-appointment, not globally.
+      const again = await schedulerSvc.queueAppointmentReminders(
+        await schedulerSvc.getTodayAppointmentReminderCandidates(TODAY_REF),
+        TODAY_REF
+      );
+      expect(again.queued).toHaveLength(0);
+      expect(again.skippedDuplicate).toBe(2);
+    });
+
     it("a failed send is recorded and does not count as an active reminder, so generating again is allowed", async () => {
       await seedPatient({ id: "P1", name: "No Phone At Send Time", phone: "9876543210" });
       await seedAppointment({ id: "A1", patientId: "P1", date: "2026-08-08", time: "11:00" });

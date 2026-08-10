@@ -203,6 +203,24 @@ export default function RemindersPage() {
     }
   };
 
+  // Doctor-reported gap: the main Queue list showed only "last updated"
+  // (formatDateTime(r.updatedAt)), so the doctor couldn't see WHEN an
+  // appointment reminder is actually due without reading the full message
+  // body. ReminderQueueEntry's own `dueAt` field isn't useful for this --
+  // both producers set it to "now" (it means "when to review/send", not
+  // the appointment's date/time, per db.ts's own field comment). The real
+  // date/time already lives in todayCandidates/weekGroups (loaded for the
+  // sections above), so it's cross-referenced here by sourceRef instead of
+  // adding a new field. Follow-up reminders aren't covered by this lookup
+  // (their buckets aren't loaded on this page) -- their due date remains
+  // visible only in the message body, same as before.
+  const appointmentDueBySourceRef = useMemo(() => {
+    const map = new Map<string, string>();
+    todayCandidates.forEach((c) => map.set(`appointment:${c.appointmentId}`, `Today ${c.time}`));
+    weekGroups.forEach((g) => g.candidates.forEach((c) => map.set(`appointment:${c.appointmentId}`, `${g.label} ${c.time}`)));
+    return map;
+  }, [todayCandidates, weekGroups]);
+
   const load = async (tab: ReminderStatus = activeTab) => {
     setLoading(true);
     try {
@@ -538,6 +556,11 @@ export default function RemindersPage() {
                               {badge.label}
                             </span>
                           </div>
+                          {!c.phone && (
+                            <div className="sakhi-caption" style={{ color: "#b91c1c", marginTop: 4 }} data-testid={`today-reminder-no-phone-${c.appointmentId}`}>
+                              No phone number on file for {c.patientName} — add one in Patients to enable this reminder.
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -602,6 +625,11 @@ export default function RemindersPage() {
                                     {badge.label}
                                   </span>
                                 </div>
+                                {!c.phone && (
+                                  <div className="sakhi-caption" style={{ color: "#b91c1c", marginTop: 4 }} data-testid={`week-reminder-no-phone-${c.appointmentId}`}>
+                                    No phone number on file for {c.patientName} — add one in Patients to enable this reminder.
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
@@ -708,7 +736,11 @@ export default function RemindersPage() {
                           <span className="sakhi-body" style={{ fontSize: 13, fontWeight: 950, color: "#0f172a" }}>{r.patientName}</span>
                           <span className="sakhi-pill" data-tone="muted">{r.type.replace("_", " ")}</span>
                         </div>
-                        <span className="sakhi-caption">{formatDateTime(r.updatedAt)}</span>
+                        <span className="sakhi-caption" data-testid={`reminder-queue-when-${r.id}`}>
+                          {r.sourceRef && appointmentDueBySourceRef.get(r.sourceRef)
+                            ? `Due ${appointmentDueBySourceRef.get(r.sourceRef)} · updated ${formatDateTime(r.updatedAt)}`
+                            : formatDateTime(r.updatedAt)}
+                        </span>
                       </div>
 
                       {editingId === r.id ? (
@@ -753,7 +785,7 @@ export default function RemindersPage() {
                               disabled={busyId === r.id}
                               onClick={() => startEdit(r)}
                               className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring"
-                              style={{ minHeight: 40, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
+                              style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
                             >
                               <Pencil size={14} /> Edit
                             </button>
@@ -762,7 +794,7 @@ export default function RemindersPage() {
                               disabled={busyId === r.id}
                               onClick={() => runAction(r.id, () => approveReminder(r.id))}
                               className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring"
-                              style={{ minHeight: 40, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
+                              style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
                             >
                               <Check size={14} /> Approve
                             </button>
@@ -771,7 +803,7 @@ export default function RemindersPage() {
                               disabled={busyId === r.id}
                               onClick={() => runAction(r.id, () => rejectReminder(r.id))}
                               className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring"
-                              style={{ minHeight: 40, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
+                              style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
                             >
                               <X size={14} /> Reject
                             </button>
@@ -784,7 +816,7 @@ export default function RemindersPage() {
                               disabled={busyId === r.id}
                               onClick={() => runAction(r.id, () => sendReminder(r.id))}
                               className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring"
-                              style={{ minHeight: 40, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
+                              style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
                             >
                               <Send size={14} /> Send via WhatsApp
                             </button>
@@ -793,7 +825,7 @@ export default function RemindersPage() {
                               disabled={busyId === r.id}
                               onClick={() => runAction(r.id, () => cancelReminder(r.id))}
                               className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring"
-                              style={{ minHeight: 40, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
+                              style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
                             >
                               <Ban size={14} /> Cancel
                             </button>
@@ -805,7 +837,7 @@ export default function RemindersPage() {
                             disabled={busyId === r.id}
                             onClick={() => runAction(r.id, () => resendReminder(r.id))}
                             className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring"
-                            style={{ minHeight: 40, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
+                            style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
                           >
                             <RotateCcw size={14} /> Resend
                           </button>
@@ -816,7 +848,7 @@ export default function RemindersPage() {
                             disabled={busyId === r.id}
                             onClick={() => runAction(r.id, () => resendReminder(r.id))}
                             className="sakhi-btn-secondary sakhi-btn-compact sakhi-tap sakhi-focus-ring"
-                            style={{ minHeight: 40, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
+                            style={{ minHeight: 44, width: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}
                           >
                             <RotateCcw size={14} /> Resend
                           </button>

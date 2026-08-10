@@ -1,6 +1,54 @@
 # Doctor UAT Readiness Report
 
-Scope of this pass: fix the doctor's confirmed UX defects, the Save & Next dead-end, and the mobile history-sequencing gap, using existing infrastructure wherever it already existed — without touching the rubric engine, sync architecture, or the six clinically-gated AI capabilities. Implemented in six small batches, each verified independently (`tsc`, targeted tests, fix, continue) before moving to the next.
+Scope of the original pass (below, unchanged): fix the doctor's confirmed UX defects, the Save & Next dead-end, and the mobile history-sequencing gap, using existing infrastructure wherever it already existed — without touching the rubric engine, sync architecture, or the six clinically-gated AI capabilities. Implemented in six small batches, each verified independently (`tsc`, targeted tests, fix, continue) before moving to the next.
+
+**A second pass (this update) covers the three features that shipped after the original pass and were not yet audited: payment-later/screenshot, follow-up dates, and the reminder queue.** See `DOCTOR_UAT_WORLD_CLASS_UX_AUDIT.md` for the full writeup; §0 below summarizes it and gives the combined final status. Sections 1–9 below are the original report, preserved as-is.
+
+---
+
+## 0. Second Pass — Payment/Follow-up/Reminders UX (this update)
+
+**Four P0 bugs found and fixed**, all in the un-audited post-report surface:
+1. Reminders silently dropped a patient's 2nd appointment reminder forever (dedup keyed per-patient, not per-appointment) — `reminderQueueService.ts`/`reminderSchedulerService.ts`
+2. Today's pending-payment flag ignored partial payments, using an ad-hoc filter instead of the canonical `getConsultationOutstanding()` — `TodayPage.tsx` (4 call sites)
+3. The printed prescription's follow-up date used the old raw-date-parse pattern the `bda8be4` fix was meant to eliminate everywhere — `ConsultationPage.tsx:847`
+4. `/review`'s `useSearchParams()`-without-Router crash, flagged as unfixed in `VERCEL_UAT_DEPLOYMENT_CHECKLIST.md` — found **already fixed and tested** on inspection; the checklist doc was stale, no change needed
+
+**Four P1 UX gaps found and fixed**:
+5. Reminder queue rows now show the real due date/time (`Due Today 15:00 · updated ...`) instead of only "last updated" — `RemindersPage.tsx`
+6. "No WhatsApp number" patients now get a reason attributed to their specific row, not just an aggregate count — `RemindersPage.tsx`
+7. Payment History (Patient Ledger Finance tab) now has a mobile card layout with 44px touch targets, replacing a desktop-only table with ~22-26px buttons — `PatientPage.tsx`
+8. Reminder action buttons bumped from 40px to the app's established 44px touch-target minimum — `RemindersPage.tsx`
+
+**New finding, disclosed and explicitly not fixed** (outside this pass's approved scope): reloading the browser while on `/review` re-lands on the Review page instead of the main app, because `page` state restored from `sessionStorage` doesn't check the current path on mount. Narrow edge case (doctor reaches `/review` only via a one-off shared link), flagged for a future session.
+
+**Verification for this pass**: `npx tsc --noEmit` clean; full Vitest suite 740/740 passing (99 files, up from the 678-test baseline — includes this pass's new targeted tests plus the pre-existing sync suite); `npm run build` clean; full Playwright suite 116 passed, 1 flaky-then-passed-on-retry (unrelated spec), 24 pre-existing skips, 0 real failures. Live-verified against the real running app (not just tests) at 375×812, 390×844, 412×915, and desktop — zero horizontal overflow at any breakpoint, all changed touch targets measured exactly 44px, mobile card layout and desktop table both confirmed correct. Full detail in `DOCTOR_UAT_WORLD_CLASS_UX_AUDIT.md`.
+
+**Safety**: zero file overlap between this pass's six changed files and the pre-existing uncommitted Sync Phase 2/3 work already sitting in the working tree (`src/services/sync/`, `src/components/sync/`, and six files with pre-existing uncommitted diffs) — confirmed via `git status` before and after. No clinical logic, rubric engine, or sync architecture touched.
+
+**Combined verdict**: **READY WITH MINOR KNOWN LIMITATIONS** — see `DOCTOR_UAT_WORLD_CLASS_UX_AUDIT.md` §15 for the full reasoning. This supersedes the original pass's "READY FOR DOCTOR UAT" verdict below only in that it adds newly-found and now-fixed defects in the payment/reminder/follow-up surface; it does not identify any regression in what the original pass verified.
+
+---
+
+## 0.5 Release Integration — `feature/doctor-uat-ux-hardening`
+
+A dedicated release procedure isolated the exact 15-file approved change set from this second pass onto `feature/doctor-uat-ux-hardening`, branched from `doctor-uat` HEAD (`65d1a3e`), keeping the pre-existing uncommitted Sync Phase 2/3 working-tree changes completely excluded and untouched throughout.
+
+**File classification** (full table in `DOCTOR_UAT_WORLD_CLASS_UX_AUDIT.md`'s companion release notes / this session's record): 13 files from the second pass + 2 more from the fix below, all diff-inspected (not filename-matched) against the pre-existing Sync diffs, ~20 unrelated pre-existing planning docs, and 18 generated Playwright report artifacts — all correctly excluded.
+
+**Security/scope scan**: no secrets, no patient-identifiable data (all test fixtures use synthetic names/numbers), no new `console.log`/`debugger`, no `.only`/`.skip`, no `package.json`/`package-lock.json` changes, no database schema changes, zero Sync contamination.
+
+**True isolated verification**: a separate `git worktree` containing exactly `doctor-uat` HEAD + the staged diff (via `git apply` of the staged patch), `node_modules` shared via a directory junction — Sync files structurally cannot appear here since they were never committed to `doctor-uat`. Result: `tsc` clean, Vitest 652/652 (85 files — the Sync suite is genuinely absent, not skipped), production build clean **with no dynamic-import chunking warnings at all** (independent confirmation of Sync-free isolation — the working-tree build's warnings were specifically about Sync files), full Playwright 117 passed / 0 flaky / 0 failures / 24 pre-existing skips.
+
+**One additional P0 found during the live smoke test** (synthetic data, real UI interactions — not automated tests): the payment receipt shown after a later-payment save double-counted the just-recorded amount (e.g. fee ₹300, actually paid ₹300, receipt showed "Received: ₹500"). Root cause: `RecordLaterPaymentFlow.tsx`'s receipt memo added the just-typed amount on top of a total that had already been updated by a post-save store reload. Pre-existing on `doctor-uat` HEAD, zero overlap with the original 13 files. Classified as release-blocking given it's the exact message shared with patients over WhatsApp; fixed in the same branch (`src/components/RecordLaterPaymentFlow.tsx`, `alreadyReceivedForSelected` used directly instead of double-added), covered by a new regression test, and the full isolated-worktree verification (tsc/Vitest/build/Playwright) was re-run afterward — all green again, confirming no regression from the fix itself. Live re-verified with a second synthetic patient (fee ₹400): receipt now correctly reads `Received: ₹400`.
+
+**`/review` sessionStorage dead-end classification**: confirmed non-release-blocking per direct source inspection — the link is built only into a WhatsApp message sent to the *patient's* phone (`ConsultationPage.tsx:1664-1668`), never navigated to by the doctor's own device during normal clinical use. Recorded as a known limitation, not fixed, per explicit instruction.
+
+**Final release verdict**: **READY WITH MINOR KNOWN LIMITATIONS** — see `DOCTOR_UAT_WORLD_CLASS_UX_AUDIT.md` §15.
+
+---
+
+## Original Pass (below, unchanged)
 
 ---
 

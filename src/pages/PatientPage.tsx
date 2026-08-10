@@ -121,6 +121,23 @@ const getPaymentStatusStyle = (status?: string): { bg: string; color: string; bo
   }
 };
 
+// Mobile payment-history card action buttons -- the desktop table's
+// "View"/"Send" buttons were ~22-26px tall, well under the 44px touch
+// target minimum this file already uses elsewhere (e.g. heroConsultBtn).
+const mobilePaymentBtnStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 6,
+  padding: "10px 14px",
+  minHeight: "44px",
+  borderRadius: "8px",
+  fontSize: "13px",
+  fontWeight: 700,
+  cursor: "pointer",
+  flex: 1,
+};
+
 // ─── Sub-components ───────────────────────────────────────────────────────
 
 function LoadingScreen() {
@@ -1692,6 +1709,74 @@ export default function PatientPage(
                           {actionNoteForReceipt}
                         </div>
                       )}
+                      {isMobile ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "16px" }}>
+                          {sortedConsultations.filter((c) => c.fee && c.fee > 0).length === 0 ? (
+                            <div style={{ padding: "24px", textAlign: "center", color: "#94a3b8", fontSize: "14px" }}>
+                              No payment records found
+                            </div>
+                          ) : (
+                            sortedConsultations
+                              .filter((c) => c.fee && c.fee > 0)
+                              .map((c, i) => {
+                                const statusStyle = getPaymentStatusStyle(c.paymentStatus);
+                                return (
+                                  <div key={c.id || i} className="sakhi-surface-flat" style={{ padding: "12px", borderRadius: "var(--radius-2)" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "6px" }}>
+                                      <div>
+                                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#64748b" }}>
+                                          {c.date ? new Date(c.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                                        </div>
+                                        <div style={{ fontSize: "16px", fontWeight: 800, color: "#0f172a", marginTop: "2px" }}>
+                                          {c.paymentStatus === "partial"
+                                            ? `${formatCurrency(c.amountReceived)} / ${formatCurrency(c.fee)}`
+                                            : formatCurrency(c.fee)}
+                                        </div>
+                                      </div>
+                                      <span style={{ padding: "4px 10px", borderRadius: "6px", fontSize: "11.5px", fontWeight: 700, backgroundColor: statusStyle.bg, color: statusStyle.color, flexShrink: 0 }}>
+                                        {(c.paymentStatus || "pending").toUpperCase()}
+                                      </span>
+                                    </div>
+                                    {(c.paymentMode || c.paymentReferenceNumber) && (
+                                      <div style={{ fontSize: "12.5px", color: "#64748b", marginBottom: "4px" }}>
+                                        {c.paymentMode ? c.paymentMode.replace("_", " ").toUpperCase() : ""}
+                                        {c.paymentReferenceNumber ? ` · Ref: ${c.paymentReferenceNumber}` : ""}
+                                      </div>
+                                    )}
+                                    {c.paymentNotes && (
+                                      <div style={{ fontSize: "12.5px", color: "#64748b", marginBottom: "8px" }}>{c.paymentNotes}</div>
+                                    )}
+                                    {(c.paymentScreenshotDataUrl || (c.amountReceived || 0) > 0) && (
+                                      <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+                                        {c.paymentScreenshotDataUrl && (
+                                          <button
+                                            type="button"
+                                            data-testid={`payment-proof-view-${c.id || i}`}
+                                            onClick={() => setViewingScreenshot({ dataUrl: c.paymentScreenshotDataUrl!, date: c.date })}
+                                            style={{ ...mobilePaymentBtnStyle, border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8" }}
+                                          >
+                                            <Eye size={14} /> View Proof
+                                          </button>
+                                        )}
+                                        {(c.amountReceived || 0) > 0 && (
+                                          <button
+                                            type="button"
+                                            data-testid={`payment-send-receipt-${c.id || i}`}
+                                            disabled={sendingReceiptId === c.id}
+                                            onClick={() => handleSendReceipt(c)}
+                                            style={{ ...mobilePaymentBtnStyle, border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#15803d", cursor: sendingReceiptId === c.id ? "default" : "pointer" }}
+                                          >
+                                            <MessageCircle size={14} /> {sendingReceiptId === c.id ? "…" : "Send Receipt"}
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })
+                          )}
+                        </div>
+                      ) : (
                       <div style={{ overflowX: "auto", marginTop: "16px" }}>
                         <table style={{ width: "100%", borderCollapse: "collapse" }}>
                           <thead>
@@ -1750,6 +1835,7 @@ export default function PatientPage(
                                             alignItems: "center",
                                             gap: 4,
                                             padding: "4px 10px",
+                                            minHeight: "44px",
                                             borderRadius: "6px",
                                             border: "1px solid #bfdbfe",
                                             background: "#eff6ff",
@@ -1777,6 +1863,7 @@ export default function PatientPage(
                                             alignItems: "center",
                                             gap: 4,
                                             padding: "4px 10px",
+                                            minHeight: "44px",
                                             borderRadius: "6px",
                                             border: "1px solid #bbf7d0",
                                             background: "#f0fdf4",
@@ -1805,6 +1892,7 @@ export default function PatientPage(
                           </tbody>
                         </table>
                       </div>
+                      )}
                     </div>
                   </div>
                 )}

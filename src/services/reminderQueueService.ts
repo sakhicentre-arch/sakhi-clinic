@@ -87,12 +87,24 @@ export async function listRemindersByPatient(patientId: string): Promise<Reminde
  * Has a patient already got a live (pending/approved) reminder of this type
  * queued? Used by the scheduler to stay idempotent -- it can run on every
  * maintenance tick without ever double-queuing the same follow-up.
+ *
+ * `sourceRef`, when passed, narrows the check to that specific source (e.g.
+ * one appointment) instead of the whole (patientId, type) pair -- required
+ * for appointment reminders, since a patient can have several appointments
+ * live at once and the first one's queued reminder must not permanently
+ * block reminders for the others. Follow-up reminders omit it deliberately
+ * (by design there is only ever one live follow-up per patient).
  */
-export async function hasActiveReminder(patientId: string, type: ReminderType): Promise<boolean> {
+export async function hasActiveReminder(patientId: string, type: ReminderType, sourceRef?: string): Promise<boolean> {
   const rows = await db.reminderQueue
     .where("patientId")
     .equals(patientId)
-    .filter((r) => r.type === type && (r.status === "pending" || r.status === "approved"))
+    .filter(
+      (r) =>
+        r.type === type &&
+        (r.status === "pending" || r.status === "approved") &&
+        (sourceRef === undefined || r.sourceRef === sourceRef)
+    )
     .toArray();
   return rows.length > 0;
 }
