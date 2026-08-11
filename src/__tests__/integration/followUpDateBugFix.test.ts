@@ -107,17 +107,37 @@ describe("STEP 3 -- deterministic reproduction of the doctor's exact scenario", 
       updatedAt: "2026-08-08T00:00:00.000Z",
     } as any);
 
-    const ok = await consultationService.saveConsultation({
-      id: "C-DOCTOR-REPRO",
-      patientId: "P-DOCTOR-REPRO",
-      clinicId: "Dabholi",
-      chiefComplaint: "Test complaint",
-      caseText: "",
-      medicines: [],
-      date: "2026-08-08",
-      followUpDate: "2026-08-10", // exactly what the fixed <input type="date"> now produces
-      outcome: "FIRST_VISIT" as any,
-    } as any);
+    // patientService.ts's syncPatientFollowUp() -- invoked automatically
+    // inside saveConsultation() -- intentionally evaluates "is this
+    // follow-up still current/future" against the real system clock
+    // (`new Date()`), not an injected reference. That's correct for real
+    // doctor usage (save time and "now" are always the same instant), but
+    // this test's scenario is pinned to a fixed historical date
+    // (2026-08-08) that real wall-clock time will eventually overtake --
+    // without pinning the clock here, "2026-08-10" stops looking like a
+    // future follow-up the moment the real date passes it, and
+    // syncPatientFollowUp silently clears nextFollowUpDate to "". Pin the
+    // clock to the test's own reference date for exactly the save call
+    // that exercises this, then always restore real time even if an
+    // assertion throws, so no later test in this file is affected.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(TODAY);
+    let ok: boolean;
+    try {
+      ok = await consultationService.saveConsultation({
+        id: "C-DOCTOR-REPRO",
+        patientId: "P-DOCTOR-REPRO",
+        clinicId: "Dabholi",
+        chiefComplaint: "Test complaint",
+        caseText: "",
+        medicines: [],
+        date: "2026-08-08",
+        followUpDate: "2026-08-10", // exactly what the fixed <input type="date"> now produces
+        outcome: "FIRST_VISIT" as any,
+      } as any);
+    } finally {
+      vi.useRealTimers();
+    }
     expect(ok).toBe(true);
 
     // 1. Persisted verbatim on the consultation record.
@@ -125,7 +145,10 @@ describe("STEP 3 -- deterministic reproduction of the doctor's exact scenario", 
     expect(consultation?.followUpDate).toBe("2026-08-10");
 
     // 2. syncPatientFollowUp (run automatically inside saveConsultation)
-    // propagated the SAME bare value onto Patient.nextFollowUpDate.
+    // propagated the SAME bare value onto Patient.nextFollowUpDate -- this
+    // is the exact assertion that requires the clock above to be pinned to
+    // 2026-08-08, since 2026-08-10 must still read as a future date at the
+    // moment syncPatientFollowUp evaluates it.
     const patient = await db.patients.get("P-DOCTOR-REPRO");
     expect(patient?.nextFollowUpDate).toBe("2026-08-10");
 
